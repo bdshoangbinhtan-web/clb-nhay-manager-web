@@ -1,0 +1,278 @@
+ "use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+
+type Branch = {
+  id: string;
+  name: string;
+  address: string | null;
+};
+
+type DanceClass = {
+  id: string;
+  name: string;
+  branch_id: string;
+  monthly_fee: number;
+  status: string;
+};
+
+export default function NewStudentPage() {
+  const router = useRouter();
+  const supabase = createClient();
+
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [classes, setClasses] = useState<DanceClass[]>([]);
+  const [name, setName] = useState("");
+  const [parentPhone, setParentPhone] = useState("");
+  const [joinDate, setJoinDate] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
+  const [status, setStatus] = useState("active");
+  const [saving, setSaving] = useState(false);
+
+  const loadData = useCallback(async () => {
+    const [branchesRes, classesRes] = await Promise.all([
+      supabase.from("branches").select("id,name,address").order("name"),
+      supabase
+        .from("classes")
+        .select("id,name,branch_id,monthly_fee,status")
+        .eq("status", "active")
+        .order("name"),
+    ]);
+
+    setBranches(branchesRes.data ?? []);
+    setClasses(classesRes.data ?? []);
+  }, [supabase]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const branchClasses = classes.filter(
+    (item) => !branchId || item.branch_id === branchId
+  );
+
+  function toggleClass(id: string) {
+    setSelectedClasses((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id]
+    );
+  }
+
+  async function createStudent() {
+    if (!name.trim()) {
+      alert("Vui lòng nhập tên học viên.");
+      return;
+    }
+
+    setSaving(true);
+
+    const { data, error } = await supabase
+      .from("students")
+      .insert({
+        full_name: name.trim(),
+        parent_phone: parentPhone.trim() || null,
+        join_date: joinDate || null,
+        branch_id: branchId || null,
+        status,
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      setSaving(false);
+      alert(error.message);
+      return;
+    }
+
+    if (selectedClasses.length) {
+      const { error: classError } = await supabase
+        .from("class_students")
+        .insert(
+          selectedClasses.map((classId) => ({
+            student_id: data.id,
+            class_id: classId,
+          }))
+        );
+
+      if (classError) {
+        setSaving(false);
+        alert(
+          "Đã tạo học viên nhưng chưa gán được lớp: " +
+            classError.message
+        );
+        router.push(`/students/${data.id}`);
+        return;
+      }
+    }
+
+    setSaving(false);
+    router.push(`/students/${data.id}`);
+  }
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <button
+          onClick={() => router.back()}
+          className="text-sm font-bold text-blue-600 hover:underline"
+        >
+          ← Học viên
+        </button>
+
+        <div className="mt-4">
+          <div className="text-xs font-bold uppercase tracking-wider text-blue-600">
+            TẠO MỚI
+          </div>
+          <h1 className="mt-1 text-3xl font-black tracking-tight">
+            Thêm học viên
+          </h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Tạo hồ sơ và gán một hoặc nhiều lớp ngay từ đầu.
+          </p>
+        </div>
+      </section>
+
+      <section className="ui-card p-6 sm:p-8">
+        <div className="grid gap-5 md:grid-cols-2">
+          <label className="block md:col-span-2">
+            <div className="mb-2 text-sm font-bold text-slate-700">
+              Họ và tên *
+            </div>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="ui-input"
+              placeholder="Nhập họ tên học viên"
+              autoFocus
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-bold text-slate-700">
+              Cơ sở
+            </div>
+            <select
+              value={branchId}
+              onChange={(e) => {
+                setBranchId(e.target.value);
+                setSelectedClasses([]);
+              }}
+              className="ui-input"
+            >
+              <option value="">Chưa gán cơ sở</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-bold text-slate-700">
+              Trạng thái
+            </div>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="ui-input"
+            >
+              <option value="active">🟢 Đang học</option>
+              <option value="inactive">⚪ Tạm ngưng</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-7 border-t border-slate-100 pt-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-black">📚 Gán lớp</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Có thể chọn nhiều lớp
+              </p>
+            </div>
+
+            <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700">
+              {selectedClasses.length} lớp
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {branchClasses.length === 0 ? (
+              <div className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-400 sm:col-span-2 lg:col-span-3">
+                Chưa có lớp hoạt động tại cơ sở này.
+              </div>
+            ) : (
+              branchClasses.map((item) => {
+                const selected = selectedClasses.includes(item.id);
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => toggleClass(item.id)}
+                    className={`rounded-[20px] border p-4 text-left transition-all active:translate-y-1 ${
+                      selected
+                        ? "border-blue-400 bg-blue-50 shadow-[0_6px_0_rgba(37,99,235,.12)]"
+                        : "border-white bg-white shadow-[0_7px_18px_rgba(35,50,75,.07)] hover:-translate-y-1"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-100 to-white text-xl">
+                        💃
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-black">
+                          {item.name}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          💰{" "}
+                          {new Intl.NumberFormat("vi-VN").format(
+                            Number(item.monthly_fee)
+                          )}{" "}
+                          đ/tháng
+                        </div>
+                      </div>
+
+                      <div
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                          selected
+                            ? "bg-blue-600 text-white"
+                            : "bg-slate-100 text-slate-300"
+                        }`}
+                      >
+                        ✓
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="mt-7 flex justify-end gap-3 border-t border-slate-100 pt-5">
+          <button
+            onClick={() => router.back()}
+            className="ui-btn ui-btn-light"
+          >
+            Hủy
+          </button>
+
+          <button
+            onClick={createStudent}
+            disabled={saving}
+            className="ui-btn ui-btn-primary min-w-[150px]"
+          >
+            {saving ? "Đang tạo..." : "Tạo học viên"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
