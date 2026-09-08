@@ -39,6 +39,14 @@ type Expense = {
   description: string | null;
 };
 
+type TuitionAdjustment = {
+  id: string;
+  student_id: string;
+  action: string;
+  amount: number;
+  created_at: string;
+};
+
 const money = (value: number) =>
   new Intl.NumberFormat("vi-VN").format(value) + " đ";
 
@@ -66,12 +74,13 @@ export default function DashboardPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [adjustments, setAdjustments] = useState<TuitionAdjustment[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
 
-    const [studentsRes, classesRes, branchesRes, paymentsRes, expensesRes] =
+    const [studentsRes, classesRes, branchesRes, paymentsRes, expensesRes, adjustmentsRes] =
       await Promise.all([
         supabase
           .from("students")
@@ -94,6 +103,11 @@ export default function DashboardPage() {
           .select("id,amount,expense_date,category,description")
           .order("expense_date", { ascending: false })
           .limit(100),
+        supabase
+          .from("tuition_adjustments")
+          .select("id,student_id,action,amount,created_at")
+          .eq("action", "refund")
+          .order("created_at", { ascending: false }),
       ]);
 
     if (studentsRes.error) console.error(studentsRes.error);
@@ -101,12 +115,14 @@ export default function DashboardPage() {
     if (branchesRes.error) console.error(branchesRes.error);
     if (paymentsRes.error) console.error(paymentsRes.error);
     if (expensesRes.error) console.error(expensesRes.error);
+    if (adjustmentsRes.error) console.error(adjustmentsRes.error);
 
     setStudents(studentsRes.data ?? []);
     setClasses(classesRes.data ?? []);
     setBranches(branchesRes.data ?? []);
     setPayments(paymentsRes.data ?? []);
     setExpenses(expensesRes.data ?? []);
+    setAdjustments((adjustmentsRes.data ?? []) as TuitionAdjustment[]);
     setLoading(false);
   }, [supabase]);
 
@@ -137,11 +153,17 @@ export default function DashboardPage() {
   );
 
   const revenue = monthPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const refundTotal = adjustments.reduce((sum, item) => {
+    const d = new Date(item.created_at);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear
+      ? sum + Number(item.amount || 0)
+      : sum;
+  }, 0);
   const expenseTotal = monthExpenses.reduce(
     (sum, item) => sum + Number(item.amount || 0),
     0
   );
-  const balance = revenue - expenseTotal;
+  const balance = revenue - refundTotal - expenseTotal;
 
   const activeStudents = students.filter(
     (student) => student.status === "active"

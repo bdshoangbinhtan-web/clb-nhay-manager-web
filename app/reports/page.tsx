@@ -23,6 +23,16 @@ type Expense = {
   amount: number;
 };
 
+type Adjustment = {
+  id: string;
+  amount: number;
+  action: "reserve" | "refund" | "carry_forward" | "cancel" | "none";
+  created_at: string;
+  tuition: {
+    branch_id: string | null;
+  } | null;
+};
+
 const CATEGORY_LABELS: Record<string, string> = {
   rent: "🏠 Thuê mặt bằng",
   salary: "👤 Lương",
@@ -54,31 +64,49 @@ export default function ReportsPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function loadData() {
     setLoading(true);
 
-    const [{ data: branchData, error: branchError }, { data: paymentData, error: paymentError }, { data: expenseData, error: expenseError }] =
-      await Promise.all([
-        supabase.from("branches").select("id,name").order("name"),
+    const [
+      { data: branchData, error: branchError },
+      { data: paymentData, error: paymentError },
+      { data: expenseData, error: expenseError },
+      { data: adjustmentData, error: adjustmentError },
+    ] = await Promise.all([
+      supabase.from("branches").select("id,name").order("name"),
 
-        supabase
-          .from("tuition_payments")
-          .select(`
-            id,
-            amount,
-            payment_method,
-            payment_date,
-            tuition:tuition_id (
-              branch_id
-            )
-          `),
+      supabase
+        .from("tuition_payments")
+        .select(`
+          id,
+          amount,
+          payment_method,
+          payment_date,
+          tuition:tuition_id (
+            branch_id
+          )
+        `),
 
-        supabase
-          .from("expenses")
-          .select("id,branch_id,expense_date,category,amount"),
-      ]);
+      supabase
+        .from("expenses")
+        .select("id,branch_id,expense_date,category,amount"),
+
+      supabase
+        .from("tuition_adjustments")
+        .select(`
+          id,
+          amount,
+          action,
+          created_at,
+          tuition:tuition_id (
+            branch_id
+          )
+        `)
+        .eq("action", "refund"),
+    ]);
 
     if (branchError) {
       alert(branchError.message);
@@ -98,9 +126,16 @@ export default function ReportsPage() {
       return;
     }
 
+    if (adjustmentError) {
+      alert(adjustmentError.message);
+      setLoading(false);
+      return;
+    }
+
     setBranches(branchData ?? []);
     setPayments((paymentData ?? []) as unknown as Payment[]);
     setExpenses(expenseData ?? []);
+    setAdjustments((adjustmentData ?? []) as unknown as Adjustment[]);
     setLoading(false);
   }
 
@@ -126,6 +161,16 @@ export default function ReportsPage() {
     }
 
     return item.expense_date.startsWith(period.slice(0, 4));
+  }
+
+  function adjustmentInPeriod(item: Adjustment) {
+    const date = item.created_at.slice(0, 10);
+
+    if (mode === "month") {
+      return date.startsWith(period);
+    }
+
+    return date.startsWith(period.slice(0, 4));
   }
 
   const filteredPayments = useMemo(() => {
@@ -155,7 +200,24 @@ export default function ReportsPage() {
     });
   }, [expenses, period, mode, branchFilter]);
 
+  const filteredRefunds = useMemo(() => {
+    return adjustments.filter((item) => {
+      if (!adjustmentInPeriod(item)) return false;
+
+      if (branchFilter && item.tuition?.branch_id !== branchFilter) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [adjustments, period, mode, branchFilter]);
+
   const totalThu = filteredPayments.reduce(
+    (sum, item) => sum + Number(item.amount),
+    0
+  );
+
+  const totalRefund = filteredRefunds.reduce(
     (sum, item) => sum + Number(item.amount),
     0
   );
@@ -165,7 +227,8 @@ export default function ReportsPage() {
     0
   );
 
-  const remaining = totalThu - totalChi;
+  const netRevenue = totalThu - totalRefund;
+  const remaining = netRevenue - totalChi;
 
   const cash = filteredPayments
     .filter((item) => item.payment_method === "cash")
@@ -205,6 +268,14 @@ export default function ReportsPage() {
           )
           .reduce((sum, item) => sum + Number(item.amount), 0);
 
+        const refund = adjustments
+          .filter(
+            (item) =>
+              adjustmentInPeriod(item) &&
+              item.tuition?.branch_id === branch.id
+          )
+          .reduce((sum, item) => sum + Number(item.amount), 0);
+
         const chi = expenses
           .filter(
             (item) =>
@@ -216,12 +287,15 @@ export default function ReportsPage() {
         return {
           ...branch,
           thu,
+          refund,
           chi,
-          remaining: thu - chi,
+          remaining: thu - refund - chi,
         };
       })
-      .filter((item) => item.thu !== 0 || item.chi !== 0);
-  }, [branches, payments, expenses, period, mode]);
+      .filter(
+        (item) => item.thu !== 0 || item.refund !== 0 || item.chi !== 0
+      );
+  }, [branches, payments, adjustments, expenses, period, mode]);
 
   const unassignedThu = payments
     .filter(
@@ -233,6 +307,12 @@ export default function ReportsPage() {
   const unassignedChi = expenses
     .filter(
       (item) => expenseInPeriod(item) && !item.branch_id
+    )
+    .reduce((sum, item) => sum + Number(item.amount), 0);
+
+  const unassignedRefund = adjustments
+    .filter(
+      (item) => adjustmentInPeriod(item) && !item.tuition?.branch_id
     )
     .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -363,7 +443,7 @@ export default function ReportsPage() {
         </div>
       ) : (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <div className="ui-card p-6">
               <div className="text-sm font-bold text-slate-400">
                 💰 TỔNG THU
@@ -373,6 +453,30 @@ export default function ReportsPage() {
               </div>
               <div className="mt-2 text-sm text-slate-400">
                 {filteredPayments.length} giao dịch
+              </div>
+            </div>
+
+            <div className="ui-card p-6">
+              <div className="text-sm font-bold text-slate-400">
+                💸 HOÀN TIỀN
+              </div>
+              <div className="mt-2 text-3xl font-black text-amber-600">
+                {money(totalRefund)}
+              </div>
+              <div className="mt-2 text-sm text-slate-400">
+                {filteredRefunds.length} khoản hoàn
+              </div>
+            </div>
+
+            <div className="ui-card p-6">
+              <div className="text-sm font-bold text-slate-400">
+                💼 DOANH THU RÒNG
+              </div>
+              <div className="mt-2 text-3xl font-black text-blue-600">
+                {money(netRevenue)}
+              </div>
+              <div className="mt-2 text-sm text-slate-400">
+                Tổng thu − Hoàn tiền
               </div>
             </div>
 
@@ -402,19 +506,7 @@ export default function ReportsPage() {
                 {money(remaining)}
               </div>
               <div className="mt-2 text-sm text-slate-400">
-                Thu − Chi
-              </div>
-            </div>
-
-            <div className="ui-card p-6">
-              <div className="text-sm font-bold text-slate-400">
-                🧾 GIAO DỊCH THU
-              </div>
-              <div className="mt-2 text-3xl font-black">
-                {filteredPayments.length}
-              </div>
-              <div className="mt-2 text-sm text-slate-400">
-                Học phí đã thu
+                Doanh thu ròng − Chi
               </div>
             </div>
           </section>
@@ -477,7 +569,7 @@ export default function ReportsPage() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-400">
-                Thu − Chi = Còn lại
+                Thu − Hoàn − Chi = Còn lại
               </p>
             </div>
 
@@ -494,6 +586,7 @@ export default function ReportsPage() {
                     <tr className="border-b border-slate-100 text-left text-sm text-slate-400">
                       <th className="p-4">Cơ sở</th>
                       <th className="p-4 text-right">Thu</th>
+                      <th className="p-4 text-right">Hoàn</th>
                       <th className="p-4 text-right">Chi</th>
                       <th className="p-4 text-right">
                         Còn lại
@@ -515,6 +608,10 @@ export default function ReportsPage() {
                           {money(branch.thu)}
                         </td>
 
+                        <td className="p-4 text-right font-bold text-amber-600">
+                          {money(branch.refund)}
+                        </td>
+
                         <td className="p-4 text-right font-bold text-rose-500">
                           {money(branch.chi)}
                         </td>
@@ -532,6 +629,7 @@ export default function ReportsPage() {
                     ))}
 
                     {(unassignedThu > 0 ||
+                      unassignedRefund > 0 ||
                       unassignedChi > 0) && (
                       <tr className="border-b border-slate-50 bg-slate-50">
                         <td className="p-4 font-bold">
@@ -542,12 +640,16 @@ export default function ReportsPage() {
                           {money(unassignedThu)}
                         </td>
 
+                        <td className="p-4 text-right font-bold text-amber-600">
+                          {money(unassignedRefund)}
+                        </td>
+
                         <td className="p-4 text-right font-bold text-rose-500">
                           {money(unassignedChi)}
                         </td>
 
                         <td className="p-4 text-right font-black">
-                          {money(unassignedThu - unassignedChi)}
+                          {money(unassignedThu - unassignedRefund - unassignedChi)}
                         </td>
                       </tr>
                     )}
@@ -561,6 +663,10 @@ export default function ReportsPage() {
 
                       <td className="p-4 text-right font-black text-emerald-600">
                         {money(totalThu)}
+                      </td>
+
+                      <td className="p-4 text-right font-black text-amber-600">
+                        {money(totalRefund)}
                       </td>
 
                       <td className="p-4 text-right font-black text-rose-500">
