@@ -88,8 +88,7 @@ export default function DashboardPage() {
         supabase
           .from("tuition_payments")
           .select("id,amount,payment_date,payment_method")
-          .order("payment_date", { ascending: false })
-          .limit(100),
+          .order("payment_date", { ascending: false }),
         supabase
           .from("expenses")
           .select("id,amount,expense_date,category,description")

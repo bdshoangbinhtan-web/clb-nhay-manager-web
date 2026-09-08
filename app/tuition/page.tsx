@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -699,26 +700,12 @@ export default function TuitionPage() {
 
         const monthlyFee = Number(classItem.monthly_fee || 0);
 
-        let durationMinutes = 60;
-
-        if (classItem.schedule_start && classItem.schedule_end) {
-          const [sh, sm] = classItem.schedule_start.split(":").map(Number);
-          const [eh, em] = classItem.schedule_end.split(":").map(Number);
-
-          const startMinutes = sh * 60 + sm;
-          const endMinutes = eh * 60 + em;
-
-          if (endMinutes > startMinutes) {
-            durationMinutes = endMinutes - startMinutes;
-          }
-        }
-
-        // 50.000đ / giờ
-        const feePerLesson = (durationMinutes / 60) * 50000;
-
+        // QUY TẮC HỌC PHÍ:
+        // 600.000đ: tính 50.000đ/giờ theo số buổi thực tế, tối đa 600.000đ.
+        // 750.000đ / 1.500.000đ / mức khác: lấy đúng monthly_fee.
         let amount = monthlyFee;
 
-        if (student.join_date) {
+        if (monthlyFee === 600000 && student.join_date) {
           const [year, month] = billingMonth.split("-").map(Number);
           const joined = new Date(student.join_date + "T00:00:00");
           const monthStart = new Date(year, month - 1, 1);
@@ -730,6 +717,21 @@ export default function TuitionPage() {
             joined.getFullYear() === year &&
             joined.getMonth() === month - 1
           ) {
+            let durationMinutes = 60;
+
+            if (classItem.schedule_start && classItem.schedule_end) {
+              const [sh, sm] = classItem.schedule_start.split(":").map(Number);
+              const [eh, em] = classItem.schedule_end.split(":").map(Number);
+              const startMinutes = sh * 60 + sm;
+              const endMinutes = eh * 60 + em;
+
+              if (endMinutes > startMinutes) {
+                durationMinutes = endMinutes - startMinutes;
+              }
+            }
+
+            const feePerLesson = (durationMinutes / 60) * 50000;
+
             const lessons = lessonsInMonth(
               student.join_date,
               billingMonth,

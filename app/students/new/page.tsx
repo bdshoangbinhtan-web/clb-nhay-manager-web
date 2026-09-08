@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
  "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -126,8 +127,12 @@ export default function NewStudentPage() {
   ) {
     const monthlyFee = Number(classItem.monthly_fee || 0);
 
-    // Đơn giá chuẩn: 50.000đ / giờ.
-    // Tiền mỗi buổi được tính theo thời lượng thực tế của lớp.
+    // 750k, 1.5tr và các mức khác: lấy đúng giá tháng.
+    // Chỉ lớp 600k mới tính theo số buổi thực tế.
+    if (monthlyFee !== 600000) {
+      return monthlyFee;
+    }
+
     const startMinutes = classItem.schedule_start
       ? Number(classItem.schedule_start.slice(0, 2)) * 60 +
         Number(classItem.schedule_start.slice(3, 5))
@@ -143,22 +148,15 @@ export default function NewStudentPage() {
 
     const feePerLesson = (durationMinutes / 60) * 50000;
 
-    if (!joinDateValue) {
-      return monthlyFee;
-    }
+    if (!joinDateValue) return monthlyFee;
 
     const [year, month] = billingMonth.split("-").map(Number);
     const joined = new Date(joinDateValue + "T00:00:00");
     const firstDay = new Date(year, month - 1, 1);
     const lastDay = new Date(year, month, 0);
 
-    if (joined > lastDay) {
-      return 0;
-    }
-
-    if (joined < firstDay) {
-      return monthlyFee;
-    }
+    if (joined > lastDay) return 0;
+    if (joined < firstDay) return monthlyFee;
 
     const dayMap: Record<string, number> = {
       "2": 1,
@@ -174,10 +172,6 @@ export default function NewStudentPage() {
       ? classItem.schedule_days
       : [];
 
-    if (!scheduleDays.length) {
-      return 0;
-    }
-
     const jsDays = scheduleDays
       .map((day) => dayMap[String(day)])
       .filter((day): day is number => day !== undefined);
@@ -186,9 +180,7 @@ export default function NewStudentPage() {
     const cursor = new Date(joined);
 
     while (cursor <= lastDay) {
-      if (jsDays.includes(cursor.getDay())) {
-        lessons++;
-      }
+      if (jsDays.includes(cursor.getDay())) lessons++;
       cursor.setDate(cursor.getDate() + 1);
     }
 
