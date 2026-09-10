@@ -1,5 +1,6 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
+import PublicHome from "@/components/public/public-home";
 
-export default function Home() {
-  redirect("/dashboard");
-}
+export const metadata: Metadata = { alternates: { canonical: "/" } };
+
+export default function Home() { return <PublicHome />; }

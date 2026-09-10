@@ -13,7 +13,7 @@ export default function AppShell({
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  if (pathname === "/login") {
+  if (pathname === "/login" || pathname === "/") {
     return children;
   }
 
