@@ -9,6 +9,7 @@ const menus = [
   ["🏠", "Dashboard", "/dashboard"],
   ["🏢", "Cơ sở & Lớp", "/branches"],
   ["🏆", "Học viên", "/students"],
+  ["✨", "Đăng ký học thử", "/dashboard/trial-leads"],
   ["👨‍🏫", "Giáo viên", "/teachers"],
   ["📋", "Điểm danh", "/attendance"],
   ["📋", "Điểm danh GV", "/teacher-attendance"],
@@ -30,6 +31,7 @@ export default function Sidebar({
   const supabase = createClient();
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [newLeadCount, setNewLeadCount] = useState(0);
 
   useEffect(() => {
     async function loadRole() {
@@ -44,6 +46,12 @@ export default function Sidebar({
         .single();
 
       setIsAdmin(profile?.role === "admin");
+
+      const { count } = await supabase
+        .from("trial_class_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "new");
+      setNewLeadCount(count ?? 0);
     }
 
     loadRole();
@@ -101,6 +109,9 @@ export default function Sidebar({
               >
                 <span className="text-lg">{icon}</span>
                 <span>{label}</span>
+                {href === "/dashboard/trial-leads" && newLeadCount > 0 && (
+                  <span className={`ml-auto min-w-5 rounded-full px-1.5 py-0.5 text-center text-[11px] font-black ${active ? "bg-white/20 text-white" : "bg-violet-100 text-violet-700"}`}>{newLeadCount}</span>
+                )}
               </Link>
             );
           })}
