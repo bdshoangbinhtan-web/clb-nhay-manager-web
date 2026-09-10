@@ -84,13 +84,27 @@ export default function ClassDetailPage() {
     setLoading(true);
     setError("");
 
-    const { data: classData, error: classError } = await supabase
-      .from("classes")
-      .select(
-        "id,name,branch_id,monthly_fee,status,schedule_days,schedule_start,schedule_end"
-      )
-      .eq("id", classId)
-      .single();
+    let classData = null;
+    let classError = null;
+
+    // Khi chuyển thẳng từ Dashboard, Supabase session đôi lúc chưa
+    // sẵn sàng ở lần query đầu tiên. Thử lại vài lần trước khi báo lỗi.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const result = await supabase
+        .from("classes")
+        .select(
+          "id,name,branch_id,monthly_fee,status,schedule_days,schedule_start,schedule_end"
+        )
+        .eq("id", classId)
+        .maybeSingle();
+
+      classData = result.data;
+      classError = result.error;
+
+      if (classData || classError) break;
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
 
     if (classError || !classData) {
       console.error(classError);
@@ -146,8 +160,28 @@ export default function ClassDetailPage() {
   }
 
   useEffect(() => {
-    loadClass();
-  }, [classId]);
+    let cancelled = false;
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (cancelled) return;
+
+      if (!session) {
+        setError("Phiên đăng nhập chưa sẵn sàng. Vui lòng thử lại.");
+        setLoading(false);
+        return;
+      }
+
+      await loadClass();
+    }
+
+    init();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [classId, supabase]);
 
   async function addTeacher() {
     if (!selectedTeacherId) {

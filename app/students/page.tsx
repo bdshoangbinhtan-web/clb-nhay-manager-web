@@ -1,7 +1,7 @@
  "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 type Student = {
@@ -47,6 +47,88 @@ export default function StudentsPage() {
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("active");
+  const [voiceSearching, setVoiceSearching] = useState(false);
+  type SpeechRecognitionResultLike = {
+    [index: number]: {
+      transcript: string;
+    };
+  };
+
+  type SpeechRecognitionEventLike = Event & {
+    results: {
+      [index: number]: SpeechRecognitionResultLike;
+    };
+  };
+
+  type SpeechRecognitionInstance = {
+    lang: string;
+    continuous: boolean;
+    interimResults: boolean;
+    maxAlternatives: number;
+    start: () => void;
+    stop: () => void;
+    onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+    onerror: (() => void) | null;
+    onend: (() => void) | null;
+  };
+
+  type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
+
+  type SpeechRecognitionWindow = Window & {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  };
+
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+
+  function startVoiceSearch() {
+    if (voiceSearching) {
+      recognitionRef.current?.stop?.();
+      return;
+    }
+
+    if (typeof window === "undefined") return;
+
+    const speechWindow = window as SpeechRecognitionWindow;
+    const SpeechRecognition =
+      speechWindow.SpeechRecognition ||
+      speechWindow.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert("Trình duyệt này chưa hỗ trợ tìm kiếm bằng giọng nói. Bạn có thể dùng micro của bàn phím điện thoại.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "vi-VN";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognitionRef.current = recognition;
+    setVoiceSearching(true);
+
+    recognition.onresult = (event: SpeechRecognitionEventLike) => {
+      const transcript = event?.results?.[0]?.[0]?.transcript?.trim();
+      if (transcript) setSearch(transcript);
+    };
+
+    recognition.onerror = () => {
+      setVoiceSearching(false);
+    };
+
+    recognition.onend = () => {
+      setVoiceSearching(false);
+      recognitionRef.current = null;
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      setVoiceSearching(false);
+      recognitionRef.current = null;
+    }
+  }
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -215,16 +297,26 @@ export default function StudentsPage() {
       <section className="ui-card p-4 sm:p-5">
         <div className="grid gap-3 lg:grid-cols-[1fr_220px_180px]">
           <div className="relative">
-            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
-              🔎
-            </span>
-
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Tìm theo tên, số điện thoại, email..."
-              className="ui-input pl-11"
+              className="ui-input pr-14"
             />
+
+            <button
+              type="button"
+              onClick={startVoiceSearch}
+              title={voiceSearching ? "Đang nghe..." : "Tìm bằng giọng nói"}
+              aria-label={voiceSearching ? "Đang nghe..." : "Tìm bằng giọng nói"}
+              className={`absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl transition ${
+                voiceSearching
+                  ? "bg-red-100 text-red-600 animate-pulse"
+                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              {voiceSearching ? "🔴" : "🎙️"}
+            </button>
           </div>
 
           <select

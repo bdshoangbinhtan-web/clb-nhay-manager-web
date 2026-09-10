@@ -42,6 +42,15 @@ type Tuition = {
   status: string;
 };
 
+type TuitionPayment = {
+  id: string;
+  tuition_id: string;
+  amount: number;
+  payment_method: "cash" | "transfer" | string | null;
+  payment_date: string | null;
+  receipt_no: string | null;
+};
+
 
 type VoicePayment = {
   item: Tuition;
@@ -117,6 +126,7 @@ export default function TuitionPage() {
   const supabase = createClient();
 
   const [tuition, setTuition] = useState<Tuition[]>([]);
+  const [payments, setPayments] = useState<TuitionPayment[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
@@ -153,6 +163,7 @@ export default function TuitionPage() {
 
     const [
       { data: tuitionData, error: tuitionError },
+      { data: paymentData, error: paymentError },
       { data: studentData, error: studentError },
       { data: branchData, error: branchError },
       { data: classData, error: classError },
@@ -162,6 +173,11 @@ export default function TuitionPage() {
         .from("tuition")
         .select("*")
         .order("billing_month", { ascending: false }),
+
+      supabase
+        .from("tuition_payments")
+        .select("id,tuition_id,amount,payment_method,payment_date,receipt_no")
+        .order("payment_date", { ascending: false }),
 
       supabase
         .from("students")
@@ -187,6 +203,11 @@ export default function TuitionPage() {
       return;
     }
 
+    if (paymentError) {
+      alert(paymentError.message);
+      return;
+    }
+
     if (studentError) {
       alert(studentError.message);
       return;
@@ -208,6 +229,7 @@ export default function TuitionPage() {
     }
 
     setTuition(tuitionData ?? []);
+    setPayments(paymentData ?? []);
     setStudents(studentData ?? []);
     setBranches(branchData ?? []);
     setClasses(classData ?? []);
@@ -1033,6 +1055,10 @@ export default function TuitionPage() {
     return branches.find((b) => b.id === id)?.name ?? "Chưa gán cơ sở";
   }
 
+  function paymentsForTuition(tuitionId: string) {
+    return payments.filter((payment) => payment.tuition_id === tuitionId);
+  }
+
   const filteredTuition = tuition.filter((item) => {
     const q = search.trim().toLowerCase();
 
@@ -1369,11 +1395,21 @@ export default function TuitionPage() {
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() =>
-                          setSelectedTuitionClassId(
-                            selected ? "" : item.id
-                          )
-                        }
+                        onClick={() => {
+                          const nextId = selected ? "" : item.id;
+                          setSelectedTuitionClassId(nextId);
+
+                          if (nextId) {
+                            setTimeout(() => {
+                              document
+                                .getElementById("tuition-student-list")
+                                ?.scrollIntoView({
+                                  behavior: "smooth",
+                                  block: "start",
+                                });
+                            }, 150);
+                          }
+                        }}
                         className={`rounded-3xl border p-5 text-left transition ${
                           selected
                             ? "border-blue-500 bg-blue-50 shadow-lg"
@@ -1501,7 +1537,10 @@ export default function TuitionPage() {
       )}
 
       {selectedTuitionClass && (
-        <section className="ui-card overflow-hidden">
+        <section
+          id="tuition-student-list"
+          className="ui-card scroll-mt-24 overflow-hidden"
+        >
           <div className="border-b border-slate-100 p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -1578,7 +1617,7 @@ export default function TuitionPage() {
                 return (
                   <div
                     key={student.id}
-                    className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between"
+                    className="grid gap-4 p-5 lg:grid-cols-[minmax(280px,1fr)_430px_170px] lg:items-center"
                   >
                     <div className="min-w-0">
                       <div className="font-black text-slate-800">
@@ -1591,7 +1630,7 @@ export default function TuitionPage() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-5 text-sm">
+                    <div className="grid grid-cols-3 gap-6 text-sm">
                       <div>
                         <div className="text-xs text-slate-400">Phải thu</div>
                         <div className="mt-1 font-black">
@@ -1614,7 +1653,7 @@ export default function TuitionPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       {fullyPaid ? (
                         <span className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-black text-emerald-700">
                           🟢 Đã đóng
@@ -1632,6 +1671,24 @@ export default function TuitionPage() {
                           🟡 Chưa tạo
                         </span>
                       )}
+
+                      {item &&
+                        paymentsForTuition(item.id).map((payment) => (
+                          <button
+                            key={payment.id}
+                            type="button"
+                            className="ui-btn whitespace-nowrap"
+                            onClick={() =>
+                              window.open(
+                                `/tuition/receipt/${payment.id}`,
+                                "_blank"
+                              )
+                            }
+                            title={`Mở phiếu thu ${payment.receipt_no || payment.id}`}
+                          >
+                            🧾 In phiếu thu
+                          </button>
+                        ))}
                     </div>
                   </div>
                 );
@@ -1742,15 +1799,37 @@ export default function TuitionPage() {
                         )}
                       </td>
 
-                      <td className="p-4 text-right">
-                        {remain > 0 && (
-                          <button
-                            className="ui-btn ui-btn-blue whitespace-nowrap"
-                            onClick={() => markPaid(item)}
-                          >
-                            💰 Thu tiền
-                          </button>
-                        )}
+                      <td className="p-4">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {remain > 0 && (
+                            <button
+                              className="ui-btn ui-btn-blue whitespace-nowrap"
+                              onClick={() => markPaid(item)}
+                            >
+                              💰 Thu tiền
+                            </button>
+                          )}
+
+                          {paymentsForTuition(item.id).map((payment) => (
+                            <button
+                              key={payment.id}
+                              type="button"
+                              className="ui-btn whitespace-nowrap"
+                              onClick={() => {
+                                window.open(
+                                  `/tuition/receipt/${payment.id}`,
+                                  "_blank"
+                                );
+                              }}
+                              title={`Mở phiếu thu ${payment.receipt_no || payment.id}`}
+                            >
+                              🧾 Phiếu thu
+                              {paymentsForTuition(item.id).length > 1
+                                ? ` #${payment.receipt_no || payment.id.slice(0, 6)}`
+                                : ""}
+                            </button>
+                          ))}
+                        </div>
                       </td>
                     </tr>
                   );

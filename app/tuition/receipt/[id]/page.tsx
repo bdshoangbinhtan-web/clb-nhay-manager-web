@@ -47,7 +47,7 @@ export default function ReceiptPage() {
           supabase.from("students").select("full_name").eq("id", tuition.student_id).single(),
           supabase.from("classes").select("name").eq("id", tuition.class_id).single(),
           tuition.branch_id
-            ? supabase.from("branches").select("name").eq("id", tuition.branch_id).single()
+            ? supabase.from("branches").select("name,address").eq("id", tuition.branch_id).single()
             : Promise.resolve({ data: null }),
         ]);
 
@@ -66,6 +66,7 @@ export default function ReceiptPage() {
         student: student?.full_name || "—",
         className: cls?.name || "—",
         branch: branch?.name || "Chưa gán cơ sở",
+        address: branch?.address || "—",
         month: tuition.billing_month
           ? tuition.billing_month.slice(5, 7) + "/" + tuition.billing_month.slice(0, 4)
           : "—",
@@ -101,7 +102,7 @@ export default function ReceiptPage() {
       <style>{`
         @media print {
           @page {
-            size: A5 portrait;
+            size: 80mm 175mm;
             margin: 0;
           }
 
@@ -109,8 +110,8 @@ export default function ReceiptPage() {
           body {
             margin: 0 !important;
             padding: 0 !important;
-            width: 148mm !important;
-            height: 210mm !important;
+            width: 80mm !important;
+            height: auto !important;
             background: white !important;
           }
 
@@ -126,11 +127,11 @@ export default function ReceiptPage() {
           .receipt-page {
             position: absolute !important;
             inset: 0 !important;
-            width: 148mm !important;
-            height: 210mm !important;
-            max-height: 210mm !important;
+            width: 80mm !important;
+            height: auto !important;
+            max-height: auto !important;
             overflow: hidden !important;
-            padding: 7mm 9mm !important;
+            padding: 4mm !important;
             margin: 0 !important;
             box-sizing: border-box !important;
             background: white !important;
@@ -161,69 +162,79 @@ export default function ReceiptPage() {
 
           .receipt-header img {
             flex: 0 0 auto !important;
-            width: 25mm !important;
-            height: 25mm !important;
+            width: 17mm !important;
+            height: 17mm !important;
             margin: 0 !important;
           }
 
           .receipt-header h1 {
-            font-size: 20pt !important;
+            font-size: 17pt !important;
             line-height: 1.05 !important;
             margin: 0 0 1mm 0 !important;
           }
 
           .receipt-header .receipt-title {
-            font-size: 12pt !important;
+            font-size: 11pt !important;
             line-height: 1.1 !important;
           }
 
           .receipt-header .receipt-number {
             margin-top: 2mm !important;
-            font-size: 9pt !important;
+            font-size: 8pt !important;
           }
 
           .receipt-info {
-            margin-top: 4mm !important;
-            gap: 3mm 7mm !important;
+            margin-top: 3mm !important;
+            gap: 2mm 5mm !important;
+          }
+
+          .receipt-info .address-row {
+            grid-column: auto !important;
+          }
+
+          .receipt-info .address-row > div:last-child {
+            margin-top: 0.5mm !important;
+            font-size: 7.8pt !important;
+            line-height: 1.1 !important;
           }
 
           .receipt-info > div > div:last-child {
             margin-top: 0.5mm !important;
-            font-size: 10pt !important;
+            font-size: 8.5pt !important;
             line-height: 1.15 !important;
           }
 
           .receipt-money {
-            margin-top: 4mm !important;
+            margin-top: 3mm !important;
             border-radius: 3mm !important;
           }
 
           .receipt-money > div {
-            padding: 2.5mm 3.5mm !important;
-            font-size: 10pt !important;
+            padding: 2mm 2.5mm !important;
+            font-size: 8.5pt !important;
           }
 
           .receipt-money > div b.text-lg {
-            font-size: 12pt !important;
+            font-size: 11pt !important;
           }
 
           .receipt-method {
-            margin-top: 3mm !important;
-            gap: 7mm !important;
+            margin-top: 2mm !important;
+            gap: 5mm !important;
           }
 
           .receipt-method > div > div:last-child {
             margin-top: 0.5mm !important;
-            font-size: 10pt !important;
+            font-size: 8.5pt !important;
           }
 
           .receipt-footer {
-            margin-top: 7mm !important;
-            gap: 8mm !important;
+            margin-top: 4mm !important;
+            gap: 5mm !important;
           }
 
           .receipt-footer > div > div {
-            margin-top: 10mm !important;
+            margin-top: 9mm !important;
             font-size: 8pt !important;
           }
 
@@ -234,7 +245,7 @@ export default function ReceiptPage() {
         }
       `}</style>
 
-      <div className="min-h-screen bg-slate-100 p-6">
+      <div className="receipt-page min-h-screen bg-slate-100 p-6">
         <div className="no-print mx-auto mb-5 flex max-w-[700px] justify-between">
           <button
             onClick={() => window.close()}
@@ -261,6 +272,7 @@ export default function ReceiptPage() {
             <div>
               <h1 className="text-3xl font-black">ANGEL BK</h1>
               <div className="receipt-title mt-1 font-bold">PHIẾU THU HỌC PHÍ</div>
+              <div className="mt-1 text-xs font-semibold">ĐT: 0933309336</div>
               <div className="receipt-number mt-3 text-sm">
                 Số phiếu: <b>{data.receiptNo}</b>
               </div>
@@ -281,6 +293,11 @@ export default function ReceiptPage() {
             <div>
               <div className="text-xs font-bold text-slate-400">CƠ SỞ</div>
               <div className="mt-1 font-bold">{data.branch}</div>
+            </div>
+
+            <div className="address-row col-span-2">
+              <div className="text-xs font-bold text-slate-400">ĐỊA CHỈ</div>
+              <div className="mt-1 font-semibold">{data.address}</div>
             </div>
 
             <div>

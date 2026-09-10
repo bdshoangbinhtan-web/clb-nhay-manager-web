@@ -60,7 +60,7 @@ export default function Sidebar({
       )}
 
       <aside
-        className={`app-sidebar fixed left-0 top-0 z-50 flex h-screen w-[264px] flex-col border-r border-white/80 bg-white/75 p-4 shadow-[8px_0_35px_rgba(35,50,75,.06)] backdrop-blur-xl transition-transform duration-200 lg:translate-x-0 ${
+        className={`app-sidebar fixed left-0 top-0 z-50 flex h-screen w-[264px] flex-col overflow-hidden border-r border-white/80 bg-white/75 p-4 shadow-[8px_0_35px_rgba(35,50,75,.06)] backdrop-blur-xl transition-transform duration-200 lg:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -82,7 +82,7 @@ export default function Sidebar({
           </div>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-2">
+        <nav className="min-h-0 flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
           {menus.map(([icon, label, href]) => {
             const active =
               pathname === href ||

@@ -17,6 +17,15 @@ type DanceClass = {
   branch_id: string;
   status: string;
   monthly_fee: number;
+  schedule_days: string[] | null;
+  schedule_start: string | null;
+  schedule_end: string | null;
+};
+
+type ClassStudent = {
+  class_id: string;
+  student_id: string;
+  status: string | null;
 };
 
 type Branch = {
@@ -47,6 +56,34 @@ type TuitionAdjustment = {
   created_at: string;
 };
 
+
+type SpeechRecognitionResult = {
+  0: {
+    transcript: string;
+  };
+};
+
+type SpeechRecognitionEvent = {
+  results: SpeechRecognitionResult[];
+};
+
+type SpeechRecognitionInstance = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type WindowWithSpeechRecognition = Window & {
+  SpeechRecognition?: new () => SpeechRecognitionInstance;
+  webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+};
+
+
 const money = (value: number) =>
   new Intl.NumberFormat("vi-VN").format(value) + " đ";
 
@@ -66,29 +103,71 @@ const categoryLabel: Record<string, string> = {
   other: "Khác",
 };
 
+type TuitionForAlert = {
+  id: string;
+  student_id: string;
+  class_id: string | null;
+  billing_month: string;
+  amount_due: number;
+  amount_paid: number;
+};
+
+type TeacherForAlert = {
+  id: string;
+  full_name: string;
+  status: string | null;
+};
+
+type PayrollForAlert = {
+  id: string;
+  teacher_id: string;
+  payroll_month: string;
+  status: string | null;
+};
+
 export default function DashboardPage() {
   const supabase = createClient();
 
   const [students, setStudents] = useState<Student[]>([]);
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [isVoiceSearching, setIsVoiceSearching] = useState(false);
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [adjustments, setAdjustments] = useState<TuitionAdjustment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tuitionAlerts, setTuitionAlerts] = useState<TuitionForAlert[]>([]);
+  const [teachersAlerts, setTeachersAlerts] = useState<TeacherForAlert[]>([]);
+  const [payrollAlerts, setPayrollAlerts] = useState<PayrollForAlert[]>([]);
+
+  const [classStudents, setClassStudents] = useState<ClassStudent[]>([]);
+
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
 
-    const [studentsRes, classesRes, branchesRes, paymentsRes, expensesRes, adjustmentsRes] =
-      await Promise.all([
+    const [
+      studentsRes,
+      classesRes,
+      branchesRes,
+      paymentsRes,
+      expensesRes,
+      adjustmentsRes,
+      classStudentsRes,
+      tuitionAlertsRes,
+      teachersAlertsRes,
+      payrollAlertsRes,
+    ] = await Promise.all([
         supabase
           .from("students")
           .select("id,full_name,status,created_at")
           .order("created_at", { ascending: false }),
         supabase
           .from("classes")
-          .select("id,name,branch_id,status,monthly_fee")
+          .select(
+            "id,name,branch_id,status,monthly_fee,schedule_days,schedule_start,schedule_end"
+          )
           .order("name"),
         supabase
           .from("branches")
@@ -108,6 +187,24 @@ export default function DashboardPage() {
           .select("id,student_id,action,amount,created_at")
           .eq("action", "refund")
           .order("created_at", { ascending: false }),
+
+        supabase
+          .from("class_students")
+          .select("class_id,student_id,status")
+          .eq("status", "active"),
+
+        supabase
+          .from("tuition")
+          .select("id,student_id,class_id,billing_month,amount_due,amount_paid"),
+
+        supabase
+          .from("teachers")
+          .select("id,full_name,status")
+          .eq("status", "active"),
+
+        supabase
+          .from("teacher_payrolls")
+          .select("id,teacher_id,payroll_month,status"),
       ]);
 
     if (studentsRes.error) console.error(studentsRes.error);
@@ -116,10 +213,19 @@ export default function DashboardPage() {
     if (paymentsRes.error) console.error(paymentsRes.error);
     if (expensesRes.error) console.error(expensesRes.error);
     if (adjustmentsRes.error) console.error(adjustmentsRes.error);
+    if (classStudentsRes.error) console.error(classStudentsRes.error);
+    if (tuitionAlertsRes.error) console.error(tuitionAlertsRes.error);
+    if (teachersAlertsRes.error) console.error(teachersAlertsRes.error);
+    if (payrollAlertsRes.error) console.error(payrollAlertsRes.error);
 
     setStudents(studentsRes.data ?? []);
     setClasses(classesRes.data ?? []);
     setBranches(branchesRes.data ?? []);
+    setClassStudents(classStudentsRes.data ?? []);
+    setTuitionAlerts((tuitionAlertsRes.data ?? []) as TuitionForAlert[]);
+    setTeachersAlerts((teachersAlertsRes.data ?? []) as TeacherForAlert[]);
+    setPayrollAlerts((payrollAlertsRes.data ?? []) as PayrollForAlert[]);
+    
     setPayments(paymentsRes.data ?? []);
     setExpenses(expensesRes.data ?? []);
     setAdjustments((adjustmentsRes.data ?? []) as TuitionAdjustment[]);
@@ -129,6 +235,103 @@ export default function DashboardPage() {
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+
+  function getGlobalSearchResults() {
+    const q = globalSearch.trim().toLowerCase();
+    if (!q) return [];
+
+    const results: Array<{
+      id: string;
+      title: string;
+      subtitle: string;
+      href: string;
+    }> = [];
+
+    students.forEach((student) => {
+      if (student.full_name.toLowerCase().includes(q)) {
+        results.push({
+          id: `student-${student.id}`,
+          title: student.full_name,
+          subtitle: "🧑‍🎓 Học viên",
+          href: `/students/${student.id}`,
+        });
+      }
+    });
+
+    classes.forEach((cls) => {
+      if (cls.name.toLowerCase().includes(q)) {
+        const branch = branches.find((b) => b.id === cls.branch_id);
+        results.push({
+          id: `class-${cls.id}`,
+          title: cls.name,
+          subtitle: branch ? `💃 Lớp học • ${branch.name}` : "💃 Lớp học",
+          href: `/branches/${cls.id}`,
+        });
+      }
+    });
+
+    branches.forEach((branch) => {
+      if (branch.name.toLowerCase().includes(q)) {
+        results.push({
+          id: `branch-${branch.id}`,
+          title: branch.name,
+          subtitle: "🏢 Cơ sở",
+          href: "/branches",
+        });
+      }
+    });
+
+    return results.slice(0, 10);
+  }
+
+  const startGlobalVoiceSearch = () => {
+    if (typeof window === "undefined") return;
+
+    const speechWindow = window as WindowWithSpeechRecognition;
+    const SpeechRecognitionCtor =
+      speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+
+    if (!SpeechRecognitionCtor) {
+      alert("Trình duyệt này chưa hỗ trợ tìm kiếm bằng giọng nói.");
+      return;
+    }
+
+    // Hiện trạng thái ngay trước khi khởi động microphone.
+    setIsVoiceSearching(true);
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = "vi-VN";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const firstResult = event.results[0];
+      const transcript =
+        firstResult && firstResult[0]
+          ? firstResult[0].transcript
+          : "";
+
+      setGlobalSearch(transcript);
+    };
+
+    recognition.onend = () => {
+      setIsVoiceSearching(false);
+    };
+
+    recognition.onerror = () => {
+      setIsVoiceSearching(false);
+    };
+
+    // Cho Android kịp render trạng thái 🔴 trước khi gọi mic.
+    window.setTimeout(() => {
+      try {
+        recognition.start();
+      } catch {
+        setIsVoiceSearching(false);
+      }
+    }, 0);
+  };
 
   const now = new Date();
   const currentMonth = now.getMonth();
@@ -183,6 +386,232 @@ export default function DashboardPage() {
     ).length,
   }));
 
+  const todayDay = now.getDay();
+
+  const todayClasses = useMemo(() => {
+    const dayNames: Record<string, number> = {
+      sun: 0,
+      sunday: 0,
+      cn: 0,
+      "chủ nhật": 0,
+      mon: 1,
+      monday: 1,
+      t2: 1,
+      "thứ 2": 1,
+      tue: 2,
+      tuesday: 2,
+      t3: 2,
+      "thứ 3": 2,
+      wed: 3,
+      wednesday: 3,
+      t4: 3,
+      "thứ 4": 3,
+      thu: 4,
+      thursday: 4,
+      t5: 4,
+      "thứ 5": 4,
+      fri: 5,
+      friday: 5,
+      t6: 5,
+      "thứ 6": 5,
+      sat: 6,
+      saturday: 6,
+      t7: 6,
+      "thứ 7": 6,
+    };
+
+    const normalizeDay = (value: string) => {
+      const text = value.trim().toLowerCase();
+
+      if (/^\d+$/.test(text)) {
+        const n = Number(text);
+        return n >= 0 && n <= 6 ? n : null;
+      }
+
+      return dayNames[text] ?? null;
+    };
+
+    return classes
+      .filter((item) => {
+        if (item.status !== "active") return false;
+        if (!Array.isArray(item.schedule_days)) return false;
+
+        return item.schedule_days.some(
+          (day) => normalizeDay(String(day)) === todayDay
+        );
+      })
+      .map((item) => {
+        const branch = branches.find((b) => b.id === item.branch_id);
+
+        const studentCount = classStudents.filter(
+          (membership) =>
+            membership.class_id === item.id &&
+            membership.status === "active"
+        ).length;
+
+        return {
+          ...item,
+          branchName: branch?.name ?? "Chưa gán cơ sở",
+          studentCount,
+        };
+      })
+      .sort((a, b) => {
+        const aTime = a.schedule_start ?? "99:99";
+        const bTime = b.schedule_start ?? "99:99";
+        return aTime.localeCompare(bTime);
+      });
+  }, [classes, branches, classStudents, todayDay]);
+
+  const today = new Date();
+
+  const currentMonthKey =
+    `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`;
+
+  const activeStudentIds = new Set(
+    students
+      .filter((student) => student.status === "active")
+      .map((student) => student.id)
+  );
+
+  const unpaidTuitionThisMonth = tuitionAlerts.filter((item) => {
+    if (!activeStudentIds.has(item.student_id)) return false;
+
+    const billing = String(item.billing_month ?? "").trim();
+
+    // Hỗ trợ cả YYYY-MM và YYYY-MM-DD.
+    const sameMonth =
+      billing === currentMonthKey ||
+      billing.startsWith(currentMonthKey + "-");
+
+    return (
+      sameMonth &&
+      Number(item.amount_due || 0) > Number(item.amount_paid || 0)
+    );
+  });
+
+  const unpaidStudentIds = new Set(
+    unpaidTuitionThisMonth.map((item) => item.student_id)
+  );
+
+  const unpaidClassCounts = new Map<string, Set<string>>();
+
+  unpaidTuitionThisMonth.forEach((item) => {
+    if (!item.class_id) return;
+
+    if (!unpaidClassCounts.has(item.class_id)) {
+      unpaidClassCounts.set(item.class_id, new Set<string>());
+    }
+
+    unpaidClassCounts.get(item.class_id)!.add(item.student_id);
+  });
+
+  const unpaidClasses = Array.from(unpaidClassCounts.entries())
+    .map(([classId, studentIds]) => {
+      const cls = classes.find((item) => item.id === classId);
+
+      return {
+        classId,
+        name: cls?.name ?? "Lớp không xác định",
+        count: studentIds.size,
+      };
+    })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  const payrollCompletedTeacherIds = new Set(
+    payrollAlerts
+      .filter(
+        (item) =>
+          item.payroll_month === currentMonthKey &&
+          (item.status === "locked" || item.status === "paid")
+      )
+      .map((item) => item.teacher_id)
+  );
+
+  const payrollCompletedCount = teachersAlerts.filter((teacher) =>
+    payrollCompletedTeacherIds.has(teacher.id)
+  ).length;
+
+  const payrollPendingCount = Math.max(
+    0,
+    teachersAlerts.length - payrollCompletedCount
+  );
+
+  const smartAlerts = {
+    unpaidStudents: unpaidStudentIds.size,
+    unpaidClasses,
+    payrollCompletedCount,
+    activeTeachersCount: teachersAlerts.length,
+    payrollPendingCount,
+  };
+
+  const previousMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+  const previousMonthYear =
+    currentMonth === 0 ? currentYear - 1 : currentYear;
+
+  const previousMonthRevenue = payments
+    .filter((payment) => {
+      const d = new Date(payment.payment_date);
+      return (
+        d.getMonth() === previousMonth &&
+        d.getFullYear() === previousMonthYear
+      );
+    })
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
+  const revenueChange =
+    previousMonthRevenue > 0
+      ? ((revenue - previousMonthRevenue) / previousMonthRevenue) * 100
+      : null;
+
+  const previousMonthActiveStudents = students.filter((student) => {
+    if (student.status !== "active") return false;
+    const d = new Date(student.created_at);
+    return d <= new Date(previousMonthYear, previousMonth + 1, 0, 23, 59, 59);
+  }).length;
+
+  const studentChange = activeStudents - previousMonthActiveStudents;
+
+  const todayRevenue = payments
+    .filter((payment) => {
+      const d = new Date(payment.payment_date);
+      return (
+        d.getDate() === now.getDate() &&
+        d.getMonth() === now.getMonth() &&
+        d.getFullYear() === now.getFullYear()
+      );
+    })
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
+  const todayExpenseTotal = expenses
+    .filter((item) => {
+      const d = new Date(item.expense_date);
+      return (
+        d.getFullYear() === today.getFullYear() &&
+        d.getMonth() === today.getMonth() &&
+        d.getDate() === today.getDate()
+      );
+    })
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+  const todayNewStudents = students.filter((item) => {
+    const d = new Date(item.created_at);
+    return (
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate()
+    );
+  }).length;
+
+  const todayPaymentCount = payments.filter((item) => {
+    const d = new Date(item.payment_date);
+    return (
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate()
+    );
+  }).length;
+
   return (
     <div className="space-y-7">
       {/* HERO */}
@@ -213,7 +642,373 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* KPI */}
+      {/* GLOBAL SEARCH */}
+      <section
+        id="global-dashboard-search"
+        className="ui-card overflow-hidden p-4 sm:p-5"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="min-w-0 flex-1">
+            <div className="relative">
+              <input
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                placeholder="🔎 Tìm học viên, lớp học, cơ sở..."
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12 text-sm font-semibold outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              />
+              {globalSearch && (
+                <button
+                  type="button"
+                  onClick={() => setGlobalSearch("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full px-2 py-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  aria-label="Xóa tìm kiếm"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={startGlobalVoiceSearch}
+            disabled={isVoiceSearching}
+            className={`flex shrink-0 items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black text-white shadow-sm transition ${
+              isVoiceSearching
+                ? "bg-red-600 animate-pulse cursor-wait"
+                : "bg-slate-900 hover:-translate-y-0.5 hover:bg-slate-800 active:translate-y-0"
+            }`}
+            title="Tìm kiếm bằng giọng nói"
+          >
+            {isVoiceSearching ? (
+              <>
+                🔴 <span>Đang nghe...</span>
+              </>
+            ) : (
+              <>
+                🎙️ <span>Giọng nói</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {globalSearch.trim() && (
+          <div className="mt-3 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+            {getGlobalSearchResults().length > 0 ? (
+              getGlobalSearchResults().map((item) => (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  onClick={() => setGlobalSearch("")}
+                  className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 hover:bg-blue-50"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-black text-slate-900">
+                      {item.title}
+                    </div>
+                    <div className="mt-0.5 text-xs font-medium text-slate-400">
+                      {item.subtitle}
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-slate-300">→</span>
+                </Link>
+              ))
+            ) : (
+              <div className="px-4 py-5 text-center text-sm font-semibold text-slate-400">
+                Không tìm thấy kết quả phù hợp.
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* HÔM NAY */}
+      <section className="ui-card overflow-hidden p-5 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-black">🗓️ Hôm nay CLB có gì?</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Lịch lớp và hoạt động trong ngày
+            </p>
+          </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rounded-2xl bg-emerald-50 px-3 py-3">
+                <div className="text-xs font-bold text-emerald-600">💰 Thu hôm nay</div>
+                <div className="mt-1 text-sm font-black text-emerald-800">
+                  {money(todayRevenue)}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-rose-50 px-3 py-3">
+                <div className="text-xs font-bold text-rose-600">💸 Chi hôm nay</div>
+                <div className="mt-1 text-sm font-black text-rose-800">
+                  {money(
+  expenses
+    .filter((item) => {
+      const d = new Date(item.expense_date);
+      return (
+        d.getFullYear() === new Date().getFullYear() &&
+        d.getMonth() === new Date().getMonth() &&
+        d.getDate() === new Date().getDate()
+      );
+    })
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0)
+)}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-blue-50 px-3 py-3">
+                <div className="text-xs font-bold text-blue-600">🧑‍🎓 HV mới</div>
+                <div className="mt-1 text-sm font-black text-blue-800">
+                  {students.filter((item) => {
+  const d = new Date(item.created_at);
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}).length} học viên
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-amber-50 px-3 py-3">
+                <div className="text-xs font-bold text-amber-600">🧾 Giao dịch</div>
+                <div className="mt-1 text-sm font-black text-amber-800">
+                  {payments.filter((item) => {
+  const d = new Date(item.payment_date);
+  const now = new Date();
+
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}).length} lượt thu
+                </div>
+              </div>
+            </div>
+
+
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700">
+              📚 {todayClasses.length} lớp
+            </span>
+            <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700">
+              💰 {money(todayRevenue)}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {loading ? (
+            <div className="rounded-2xl bg-slate-50 px-4 py-5 text-center text-sm text-slate-400">
+              Đang tải lịch hôm nay...
+            </div>
+          ) : todayClasses.length === 0 ? (
+            <div className="rounded-2xl bg-slate-50 px-4 py-7 text-center">
+              <div className="text-3xl">😴</div>
+              <div className="mt-2 font-bold text-slate-600">
+                Hôm nay không có lớp
+              </div>
+              <div className="mt-1 text-xs text-slate-400">
+                Một ngày khá nhẹ nhàng cho CLB 😎
+              </div>
+            </div>
+          ) : (
+            todayClasses.map((item) => (
+              <Link
+                key={item.id}
+                href={`/branches/${item.id}`}
+                className="group flex flex-col gap-3 rounded-2xl bg-slate-50 p-4 transition hover:-translate-y-0.5 hover:bg-blue-50 hover:shadow-[0_8px_20px_rgba(35,50,75,.08)] sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-xl shadow-sm">
+                    💃
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="truncate font-black text-slate-900">
+                      {item.name}
+                    </div>
+
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-slate-500">
+                      <span>
+                        ⏰{" "}
+                        {item.schedule_start && item.schedule_end
+                          ? `${item.schedule_start.slice(0, 5)} – ${item.schedule_end.slice(0, 5)}`
+                          : "Chưa có giờ"}
+                      </span>
+                      <span>🏢 {item.branchName}</span>
+                      <span>👥 {item.studentCount} học viên</span>
+                    </div>
+                  </div>
+                </div>
+
+                <span className="shrink-0 text-lg text-slate-300 transition group-hover:translate-x-1 group-hover:text-blue-500">
+                  →
+                </span>
+              </Link>
+            ))
+          )}
+        </div>
+      </section>
+
+      {/* PHÂN TÍCH */}
+      <section className="ui-card overflow-hidden p-5 sm:p-6">
+        <div>
+          <h2 className="text-xl font-black">📊 Phân tích hoạt động</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            So sánh nhanh với tháng trước
+          </p>
+        </div>
+
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-2xl bg-slate-50 p-5">
+            <div className="text-sm font-bold text-slate-500">
+              💰 Thu tháng này / tháng trước
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              <div className="rounded-xl bg-white p-3 shadow-sm">
+                <div className="text-xs text-slate-400">Tháng này</div>
+                <div className="mt-1 text-lg font-black text-emerald-700">
+                  {money(revenue)}
+                </div>
+              </div>
+              <div className="rounded-xl bg-white p-3 shadow-sm">
+                <div className="text-xs text-slate-400">Tháng trước</div>
+                <div className="mt-1 text-lg font-black text-slate-800">
+                  {money(previousMonthRevenue)}
+                </div>
+              </div>
+            </div>
+            <div
+              className={`mt-3 text-sm font-black ${
+                revenueChange === null
+                  ? "text-slate-500"
+                  : revenueChange >= 0
+                    ? "text-emerald-600"
+                    : "text-rose-600"
+              }`}
+            >
+              {revenueChange === null
+                ? "Chưa đủ dữ liệu để tính % thay đổi"
+                : `${revenueChange >= 0 ? "↑" : "↓"} ${Math.abs(revenueChange).toFixed(1)}% so với tháng trước`}
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 p-5">
+            <div className="text-sm font-bold text-slate-500">
+              🧑‍🎓 Học viên tăng / giảm
+            </div>
+            <div className="mt-2 flex items-end gap-3">
+              <div className="text-3xl font-black text-slate-900">
+                {activeStudents}
+              </div>
+              <div
+                className={`mb-1 text-sm font-black ${
+                  studentChange > 0
+                    ? "text-emerald-600"
+                    : studentChange < 0
+                      ? "text-rose-600"
+                      : "text-slate-500"
+                }`}
+              >
+                {studentChange > 0
+                  ? `↑ ${studentChange} học viên`
+                  : studentChange < 0
+                    ? `↓ ${Math.abs(studentChange)} học viên`
+                    : "→ Không thay đổi"}
+              </div>
+            </div>
+            <div className="mt-1 text-xs font-medium text-slate-400">
+              Hiện tại: {activeStudents} • Mốc tháng trước:{" "}
+              {previousMonthActiveStudents}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* SMART ALERTS */}
+        <section className="mb-6 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm">
+          <div className="mb-3">
+            <h2 className="text-base font-black text-gray-900">
+              ⚠️ Cảnh báo thông minh
+            </h2>
+            <p className="text-xs text-gray-500">
+              Các điểm cần chú ý trong tháng này
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            {smartAlerts.unpaidStudents > 0 && (
+              <a
+                href="/tuition"
+                className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2.5 shadow-sm hover:shadow-md"
+              >
+                <span className="text-sm text-gray-700">
+                  ⚠️ Có{" "}
+                  <b className="text-gray-900">
+                    {smartAlerts.unpaidStudents}
+                  </b>{" "}
+                  học viên chưa hoàn tất học phí tháng này
+                </span>
+                <span className="shrink-0 text-xs font-semibold text-blue-600">
+                  Xem →
+                </span>
+              </a>
+            )}
+
+            {smartAlerts.unpaidClasses.map((item) => (
+              <a
+                key={item.classId}
+                href={`/branches/${item.classId}`}
+                className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2.5 shadow-sm hover:shadow-md"
+              >
+                <span className="text-sm text-gray-700">
+                  💰 <b className="text-gray-900">{item.name}</b> còn{" "}
+                  <b className="text-gray-900">{item.count}</b> học viên chưa
+                  đóng đủ
+                </span>
+                <span className="shrink-0 text-xs font-semibold text-blue-600">
+                  Xem →
+                </span>
+              </a>
+            ))}
+
+            {smartAlerts.activeTeachersCount > 0 && (
+              <a
+                href="/teacher-payroll"
+                className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2.5 shadow-sm hover:shadow-md"
+              >
+                <span className="text-sm text-gray-700">
+                  👨‍🏫 Đã chốt lương{" "}
+                  <b className="text-gray-900">
+                    {smartAlerts.payrollCompletedCount}/
+                    {smartAlerts.activeTeachersCount}
+                  </b>{" "}
+                  giáo viên
+                </span>
+
+                <span className="shrink-0 text-xs font-semibold text-blue-600">
+                  {smartAlerts.payrollPendingCount > 0
+                    ? "Còn chưa chốt →"
+                    : "Đã đủ ✓"}
+                </span>
+              </a>
+            )}
+
+            {smartAlerts.unpaidStudents === 0 &&
+            smartAlerts.unpaidClasses.length === 0 &&
+            smartAlerts.payrollPendingCount === 0 ? (
+              <div className="rounded-xl bg-white px-3 py-3 text-center text-sm font-semibold text-emerald-600">
+                ✅ Mọi thứ đang ổn
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {/* KPI */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {

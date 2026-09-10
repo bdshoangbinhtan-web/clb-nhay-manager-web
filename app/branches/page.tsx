@@ -380,7 +380,7 @@ export default function BranchesPage() {
                       </div>
                       <div className="mt-5 grid grid-cols-2 gap-3">
                     <Link
-                      href={`/branches/${item.id}`}
+                      href={`/branches/${item.id}`} onClick={() => console.log("🔎 CLICK CLASS ID:", item.id, item.name)}
                       className="ui-btn ui-btn-light flex items-center justify-center gap-2 text-sm"
                     >
                       👁 <span>Xem chi tiết</span>

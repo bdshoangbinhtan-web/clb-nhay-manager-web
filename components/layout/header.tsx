@@ -17,7 +17,7 @@ export default function Header({ onMenu }: { onMenu: () => void }) {
       <div className="flex items-center gap-3">
         <button
           onClick={onMenu}
-          className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-xl shadow-[0_6px_18px_rgba(35,50,75,.08)] lg:hidden"
+          className="relative top-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-xl shadow-[0_6px_18px_rgba(35,50,75,.08)] lg:hidden"
           aria-label="Mở menu"
         >
           ☰

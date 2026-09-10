@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CLB NHẢY ANGEL BK</string>
+    <string name="title_activity_main">CLB NHẢY ANGEL BK</string>
+    <string name="package_name">vn.angelbk.clbnhay</string>
+    <string name="custom_url_scheme">vn.angelbk.clbnhay</string>
+</resources>
