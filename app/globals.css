@@ -337,3 +337,14 @@ main {
     border-radius: 20px !important;
   }
 }
+
+/* ===== MANAGER FONT FIX - WINDOWS / CHROME ===== */
+
+.app-shell,
+.app-shell *,
+main,
+main *,
+.app-sidebar,
+.app-sidebar * {
+  font-family: Arial, Helvetica, "Segoe UI", sans-serif !important;
+}
