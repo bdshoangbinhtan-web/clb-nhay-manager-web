@@ -9,6 +9,23 @@ function money(value: number) {
   return new Intl.NumberFormat("vi-VN").format(value) + " đ";
 }
 
+const PRINT_BRIDGE_URL =
+  process.env.NEXT_PUBLIC_PRINT_BRIDGE_URL || "http://127.0.0.1:8765";
+
+async function printViaBridge(data: any) {
+  const response = await fetch(`${PRINT_BRIDGE_URL}/print`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "Không gửi được phiếu tới Print Bridge.");
+  }
+}
+
 export default function ReceiptPage() {
   const { id } = useParams();
   const supabase = createClient();
@@ -102,7 +119,7 @@ export default function ReceiptPage() {
       <style>{`
         @media print {
           @page {
-            size: 80mm 175mm;
+            size: 80mm auto;
             margin: 0;
           }
 
@@ -126,12 +143,13 @@ export default function ReceiptPage() {
 
           .receipt-page {
             position: absolute !important;
-            inset: 0 !important;
+            left: 0 !important;
+            top: 0 !important;
             width: 80mm !important;
             height: auto !important;
             max-height: auto !important;
-            overflow: hidden !important;
-            padding: 4mm !important;
+            overflow: visible !important;
+            padding: 0 !important;
             margin: 0 !important;
             box-sizing: border-box !important;
             background: white !important;
@@ -161,10 +179,41 @@ export default function ReceiptPage() {
           }
 
           .receipt-header img {
-            flex: 0 0 auto !important;
-            width: 17mm !important;
-            height: 17mm !important;
-            margin: 0 !important;
+            display: none !important;
+          }
+
+          .receipt-header {
+            justify-content: center !important;
+            text-align: center !important;
+            gap: 0 !important;
+          }
+
+          .receipt-page {
+            font-family: Arial, Helvetica, sans-serif !important;
+            color: #000 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          .receipt-page * {
+            color: #000 !important;
+            border-color: #000 !important;
+            text-shadow: none !important;
+            box-shadow: none !important;
+          }
+
+          .receipt-page {
+            font-size: 9pt !important;
+          }
+
+          .receipt-page b,
+          .receipt-page strong {
+            font-weight: 700 !important;
+          }
+
+          .receipt-header h1 {
+            font-family: Arial, Helvetica, sans-serif !important;
+            font-weight: 700 !important;
           }
 
           .receipt-header h1 {
@@ -245,7 +294,7 @@ export default function ReceiptPage() {
         }
       `}</style>
 
-      <div className="receipt-page min-h-screen bg-slate-100 p-6">
+      <div className="receipt-page bg-slate-100 p-6">
         <div className="no-print mx-auto mb-5 flex max-w-[700px] justify-between">
           <button
             onClick={() => window.close()}
@@ -255,10 +304,20 @@ export default function ReceiptPage() {
           </button>
 
           <button
-            onClick={() => window.print()}
+            onClick={async () => {
+              try {
+                await printViaBridge(data);
+                alert("Đã gửi phiếu tới máy in.");
+              } catch (error: any) {
+                alert(
+                  error?.message ||
+                    "Không kết nối được Print Bridge. Hãy kiểm tra Print Bridge và Wi-Fi máy in."
+                );
+              }
+            }}
             className="rounded-xl bg-slate-900 px-6 py-3 font-bold text-white shadow"
           >
-            🖨️ In phiếu thu
+            🖨️ In trực tiếp XP-80
           </button>
         </div>
 
@@ -270,7 +329,7 @@ export default function ReceiptPage() {
               className="mx-auto mb-4 h-24 w-24 rounded-full object-cover"
             />
             <div>
-              <h1 className="text-3xl font-black">ANGEL BK</h1>
+              <h1 className="text-3xl font-black">CLB ANGEL BK</h1>
               <div className="receipt-title mt-1 font-bold">PHIẾU THU HỌC PHÍ</div>
               <div className="mt-1 text-xs font-semibold">ĐT: 0933309336</div>
               <div className="receipt-number mt-3 text-sm">
