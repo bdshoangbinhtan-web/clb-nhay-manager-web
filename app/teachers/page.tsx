@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 
 type Teacher = {
   id: string;
+  profile_id: string | null;
   full_name: string;
   phone: string | null;
   birth_date: string | null;
@@ -17,6 +18,7 @@ type Teacher = {
   notes: string | null;
   status: string;
   end_date: string | null;
+  account_active?: boolean;
 };
 
 const SALARY_TYPES = [
@@ -57,6 +59,13 @@ export default function TeachersPage() {
   const [avatarUrl, setAvatarUrl] = useState("");
   const [notes, setNotes] = useState("");
 
+  const [accountTeacher, setAccountTeacher] = useState<Teacher | null>(null);
+  const [accountEmail, setAccountEmail] = useState("");
+  const [accountPassword, setAccountPassword] = useState("");
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [accountActionBusy, setAccountActionBusy] = useState<string | null>(null);
+  const [accountPasswordNew, setAccountPasswordNew] = useState("");
+
   async function loadData() {
     setLoading(true);
 
@@ -71,7 +80,35 @@ export default function TeachersPage() {
       return;
     }
 
-    setTeachers(data ?? []);
+    const teacherRows = data ?? [];
+    const profileIds = teacherRows
+      .map((teacher) => teacher.profile_id)
+      .filter((id): id is string => Boolean(id));
+
+    let accountActiveByProfile = new Map<string, boolean>();
+    if (profileIds.length > 0) {
+      const { data: profileRows, error: profileError } = await supabase
+        .from("profiles")
+        .select("id,is_active")
+        .in("id", profileIds);
+
+      if (profileError) {
+        console.error("LOAD TEACHER ACCOUNT STATUS ERROR:", profileError);
+      } else {
+        accountActiveByProfile = new Map(
+          (profileRows ?? []).map((profile) => [profile.id, profile.is_active === true])
+        );
+      }
+    }
+
+    setTeachers(
+      teacherRows.map((teacher) => ({
+        ...teacher,
+        account_active: teacher.profile_id
+          ? accountActiveByProfile.get(teacher.profile_id) ?? true
+          : undefined,
+      }))
+    );
     setLoading(false);
   }
 
@@ -96,6 +133,12 @@ export default function TeachersPage() {
   function openAdd() {
     resetForm();
     setShowForm(true);
+    requestAnimationFrame(() => {
+      document.getElementById("teacher-editor")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
   }
 
   function openEdit(t: Teacher) {
@@ -111,6 +154,12 @@ export default function TeachersPage() {
     setAvatarUrl(t.avatar_url || "");
     setNotes(t.notes || "");
     setShowForm(true);
+    requestAnimationFrame(() => {
+      document.getElementById("teacher-editor")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
   }
 
   async function saveTeacher(e: React.FormEvent) {
@@ -198,6 +247,167 @@ export default function TeachersPage() {
 
     resetForm();
     setShowForm(false);
+  }
+
+  async function createTeacherAccount() {
+    if (!accountTeacher) return;
+
+    if (!accountEmail.trim() || !accountPassword) {
+      alert("Hãy nhập email và mật khẩu.");
+      return;
+    }
+
+    if (accountPassword.length < 6) {
+      alert("Mật khẩu phải có ít nhất 6 ký tự.");
+      return;
+    }
+
+    setAccountSaving(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        alert("❌ Phiên đăng nhập Admin đã hết. Vui lòng đăng nhập lại.");
+        return;
+      }
+
+      const response = await fetch("/api/admin/teachers/account", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          teacherId: accountTeacher.id,
+          email: accountEmail.trim().toLowerCase(),
+          password: accountPassword,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        alert("❌ " + (result.error || "Không thể tạo tài khoản."));
+        return;
+      }
+
+      alert(
+        "✅ Đã tạo tài khoản cho " +
+          accountTeacher.full_name +
+          "\n\nEmail: " +
+          accountEmail.trim().toLowerCase()
+      );
+
+      setAccountTeacher(null);
+      setAccountEmail("");
+      setAccountPassword("");
+
+      await loadData();
+    } catch (error) {
+      console.error("CREATE TEACHER ACCOUNT ERROR:", error);
+      alert("❌ Không kết nối được máy chủ.");
+    } finally {
+      setAccountSaving(false);
+    }
+  }
+
+  async function accountActionWithPassword(t: Teacher, password: string) {
+    if (!t.profile_id) return;
+    setAccountActionBusy(`reset_password:${t.id}`);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        alert("❌ Phiên đăng nhập Admin đã hết. Vui lòng đăng nhập lại.");
+        return;
+      }
+
+      const response = await fetch("/api/admin/teachers/account", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ teacherId: t.id, action: "reset_password", password }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        alert("❌ " + (result.error || "Không thể đổi mật khẩu."));
+        return;
+      }
+      alert(`✅ Đã đổi mật khẩu cho ${t.full_name}.`);
+      setAccountPasswordNew("");
+      await loadData();
+    } catch (error) {
+      console.error("RESET TEACHER PASSWORD ERROR:", error);
+      alert("❌ Không kết nối được máy chủ.");
+    } finally {
+      setAccountActionBusy(null);
+    }
+  }
+
+  async function accountAction(t: Teacher, action: "reset_password" | "lock" | "unlock" | "delete") {
+    if (!t.profile_id) return;
+
+    if (action === "delete") {
+      const ok = confirm(
+        `XÓA TÀI KHOẢN ĐĂNG NHẬP của ${t.full_name}?\n\n` +
+          `Chỉ xóa tài khoản đăng nhập. Hồ sơ giáo viên, lớp, điểm danh và lịch sử lương vẫn được giữ.`
+      );
+      if (!ok) return;
+    }
+
+    if (action === "reset_password") {
+      if (accountPasswordNew.length < 6) {
+        alert("Mật khẩu mới phải có ít nhất 6 ký tự.");
+        return;
+      }
+    }
+
+    setAccountActionBusy(`${action}:${t.id}`);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        alert("❌ Phiên đăng nhập Admin đã hết. Vui lòng đăng nhập lại.");
+        return;
+      }
+
+      const response = await fetch("/api/admin/teachers/account", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          teacherId: t.id,
+          action,
+          ...(action === "reset_password" ? { password: accountPasswordNew } : {}),
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        alert("❌ " + (result.error || "Không thể thao tác tài khoản."));
+        return;
+      }
+
+      if (action === "delete") {
+        alert(`✅ Đã xóa tài khoản đăng nhập của ${t.full_name}.\n\nHồ sơ giáo viên vẫn được giữ.`);
+      } else if (action === "reset_password") {
+        alert(`✅ Đã đổi mật khẩu cho ${t.full_name}.`);
+        setAccountPasswordNew("");
+      } else if (action === "lock") {
+        alert(`🔒 Đã khóa tài khoản ${t.full_name}.`);
+      } else {
+        alert(`🔓 Đã mở khóa tài khoản ${t.full_name}.`);
+      }
+
+      await loadData();
+    } catch (error) {
+      console.error("TEACHER ACCOUNT ACTION ERROR:", error);
+      alert("❌ Không kết nối được máy chủ.");
+    } finally {
+      setAccountActionBusy(null);
+    }
   }
 
   async function toggleStatus(t: Teacher) {
@@ -303,7 +513,10 @@ export default function TeachersPage() {
       </section>
 
       {showForm && (
-        <section className="ui-card p-6 sm:p-8">
+        <section
+          id="teacher-editor"
+          className="ui-card p-6 sm:p-8"
+        >
           <div className="mb-6">
             <div className="text-xs font-black uppercase tracking-widest text-blue-600">
               {editingId ? "CHỈNH SỬA" : "THÊM MỚI"}
@@ -450,6 +663,78 @@ export default function TeachersPage() {
         </section>
       )}
 
+      {accountTeacher && (
+        <section
+          id="teacher-account-editor"
+          className="ui-card border-2 border-blue-100 p-6 sm:p-8"
+        >
+          <div className="mb-5">
+            <div className="text-xs font-black uppercase tracking-widest text-blue-600">
+              TÀI KHOẢN ĐĂNG NHẬP
+            </div>
+            <h2 className="mt-1 text-2xl font-black">
+              Tạo tài khoản cho {accountTeacher.full_name}
+            </h2>
+            <p className="mt-2 text-sm text-slate-400">
+              Tài khoản này sẽ có quyền Giáo viên và chỉ xem được lớp được phân công.
+            </p>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2">
+            <label>
+              <div className="mb-2 text-sm font-bold">Email đăng nhập *</div>
+              <input
+                type="email"
+                className="ui-input"
+                value={accountEmail}
+                onChange={(e) => setAccountEmail(e.target.value)}
+                placeholder="teacher@example.com"
+                autoComplete="off"
+              />
+            </label>
+
+            <label>
+              <div className="mb-2 text-sm font-bold">Mật khẩu *</div>
+              <input
+                type="password"
+                className="ui-input"
+                value={accountPassword}
+                onChange={(e) => setAccountPassword(e.target.value)}
+                placeholder="Ít nhất 6 ký tự"
+                autoComplete="new-password"
+              />
+            </label>
+          </div>
+
+          <div className="mt-5 flex justify-end gap-3">
+            <button
+              type="button"
+              className="ui-btn"
+              onClick={() => {
+                setAccountTeacher(null);
+                setAccountEmail("");
+                setAccountPassword("");
+                setAccountPasswordNew("");
+              }}
+              disabled={accountSaving}
+            >
+              Hủy
+            </button>
+
+            <button
+              type="button"
+              className="ui-btn ui-btn-primary"
+              onClick={createTeacherAccount}
+              disabled={accountSaving}
+            >
+              {accountSaving
+                ? "Đang tạo..."
+                : "🔐 Tạo tài khoản"}
+            </button>
+          </div>
+        </section>
+      )}
+
       <section className="ui-card p-5">
         <input
           className="ui-input"
@@ -529,6 +814,84 @@ export default function TeachersPage() {
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
+                {!teacher.profile_id && teacher.status === "active" && (
+                  <button
+                    className="ui-btn bg-blue-50 text-blue-700"
+                    onClick={() => {
+                      setAccountTeacher(teacher);
+                      setAccountEmail("");
+                      setAccountPassword("");
+                      requestAnimationFrame(() => {
+                        document.getElementById("teacher-account-editor")?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "start",
+                        });
+                      });
+                    }}
+                  >
+                    🔐 Tạo tài khoản
+                  </button>
+                )}
+
+                {teacher.profile_id && (
+                  <>
+                    <span
+                      className={`ui-btn ${
+                        teacher.account_active === false
+                          ? "bg-slate-100 text-slate-600"
+                          : "bg-emerald-50 text-emerald-700"
+                      }`}
+                    >
+                      {teacher.account_active === false
+                        ? "🔒 Đã khóa"
+                        : "🟢 Đang hoạt động"}
+                    </span>
+
+                    <button
+                      className="ui-btn bg-amber-50 text-amber-700"
+                      onClick={() => {
+                        const password = prompt(`Nhập mật khẩu mới cho ${teacher.full_name}:`);
+                        if (password === null) return;
+                        const trimmed = password.trim();
+                        if (trimmed.length < 6) {
+                          alert("Mật khẩu mới phải có ít nhất 6 ký tự.");
+                          return;
+                        }
+                        setAccountPasswordNew(trimmed);
+                        void accountActionWithPassword(teacher, trimmed);
+                      }}
+                      disabled={accountActionBusy !== null}
+                    >
+                      🔑 Đổi mật khẩu
+                    </button>
+
+                    <button
+                      className={`ui-btn ${
+                        teacher.account_active === false
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-700"
+                      }`}
+                      onClick={() =>
+                        void accountAction(
+                          teacher,
+                          teacher.account_active === false ? "unlock" : "lock"
+                        )
+                      }
+                      disabled={accountActionBusy !== null}
+                    >
+                      {teacher.account_active === false ? "🔓 Mở khóa" : "🔒 Khóa"}
+                    </button>
+
+                    <button
+                      className="ui-btn bg-rose-50 text-rose-600"
+                      onClick={() => void accountAction(teacher, "delete")}
+                      disabled={accountActionBusy !== null}
+                    >
+                      🗑️ Xóa tài khoản
+                    </button>
+                  </>
+                )}
+
                 <button
                   className="ui-btn"
                   onClick={() => openEdit(teacher)}
@@ -543,13 +906,6 @@ export default function TeachersPage() {
                   {teacher.status === "active"
                     ? "🟠 Cho nghỉ"
                     : "🟢 Làm lại"}
-                </button>
-
-                <button
-                  className="ui-btn bg-rose-50 text-rose-600"
-                  onClick={() => deleteTeacher(teacher.id)}
-                >
-                  🗑️ Xóa
                 </button>
               </div>
             </article>

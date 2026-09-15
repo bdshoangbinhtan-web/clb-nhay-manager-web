@@ -14,6 +14,7 @@ type ClassItem = {
   name: string;
   branch_id: string;
   status: string;
+  schedule_days: string[] | null;
 };
 
 type Teacher = {
@@ -27,6 +28,14 @@ type Row = {
   teacher: Teacher;
   status: "taught" | "absent";
 };
+
+function getScheduleDayKey(value: string) {
+  const d = new Date(`${value}T12:00:00`);
+  const day = d.getDay();
+
+  if (day === 0) return "CN";
+  return String(day + 1);
+}
 
 export default function TeacherAttendancePage() {
   const supabase = createClient();
@@ -44,6 +53,12 @@ export default function TeacherAttendancePage() {
   const [loading, setLoading] = useState(true);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmedTeacherIds, setConfirmedTeacherIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [hasApprovedSubstitution, setHasApprovedSubstitution] = useState(false);
+  const [approvedSubstitutionTeacherIds, setApprovedSubstitutionTeacherIds] =
+    useState<Set<string>>(new Set());
 
   async function loadBase() {
     setLoading(true);
@@ -55,7 +70,7 @@ export default function TeacherAttendancePage() {
         .order("name"),
       supabase
         .from("classes")
-        .select("id,name,branch_id,status")
+        .select("id,name,branch_id,status,schedule_days")
         .eq("status", "active")
         .order("name"),
     ]);
@@ -99,6 +114,26 @@ export default function TeacherAttendancePage() {
       return;
     }
 
+    const { data: approvedSubstitutions, error: substitutionError } =
+      await supabase
+        .from("teacher_substitution_requests")
+        .select("standing_teacher_id")
+        .eq("class_id", classId)
+        .eq("session_date", date)
+        .eq("status", "approved");
+
+    if (substitutionError) {
+      console.error("APPROVED SUBSTITUTION ERROR:", substitutionError);
+    }
+
+    setApprovedSubstitutionTeacherIds(
+      new Set(
+        (approvedSubstitutions ?? [])
+          .map((item) => item.standing_teacher_id)
+          .filter(Boolean)
+      )
+    );
+
     const teachers = (teacherLinks ?? [])
       .map((item: any) => item.teachers)
       .filter((teacher: Teacher | null) => teacher && teacher.status === "active")
@@ -127,6 +162,28 @@ export default function TeacherAttendancePage() {
       (attendance ?? []).map((item) => [item.teacher_id, item.status])
     );
 
+    const { data: workSessions, error: workSessionError } = await supabase
+      .from("teacher_work_sessions")
+      .select("actual_teacher_id")
+      .eq("class_id", classId)
+      .eq("session_date", date);
+
+    if (workSessionError) {
+      console.error("TEACHER WORK SESSION ERROR:", workSessionError);
+    }
+
+    setConfirmedTeacherIds(
+      new Set(
+        (workSessions ?? [])
+          .map((item) => item.actual_teacher_id)
+          .filter(Boolean)
+      )
+    );
+
+    setHasApprovedSubstitution(
+      (approvedSubstitutions ?? []).length > 0
+    );
+
     setRows(
       teachers.map((teacher: Teacher) => ({
         teacher,
@@ -145,13 +202,27 @@ export default function TeacherAttendancePage() {
 
   useEffect(() => {
     if (classId) loadTeachers();
-    else setRows([]);
+    else {
+      setRows([]);
+      setApprovedSubstitutionTeacherIds(new Set());
+      setConfirmedTeacherIds(new Set());
+    }
   }, [classId, date]);
 
-  const filteredClasses = useMemo(
-    () => classes.filter((item) => item.branch_id === branchId),
-    [classes, branchId]
-  );
+  const filteredClasses = useMemo(() => {
+    const scheduleDay = getScheduleDayKey(date);
+
+    return classes.filter((item) => {
+      if (item.branch_id !== branchId) return false;
+
+      if (!Array.isArray(item.schedule_days)) return false;
+
+      return item.schedule_days.some(
+        (day) =>
+          String(day).trim().toUpperCase() === scheduleDay
+      );
+    });
+  }, [classes, branchId, date]);
 
   useEffect(() => {
     if (classId && !filteredClasses.some((item) => item.id === classId)) {
@@ -179,31 +250,104 @@ export default function TeacherAttendancePage() {
 
     setSaving(true);
 
-    const payload = rows.map((row) => ({
-      teacher_id: row.teacher.id,
-      class_id: classId,
-      attendance_date: date,
-      status: row.status,
-    }));
+    try {
+      const alreadyConfirmed = rows.filter(
+        (row) =>
+          row.status === "taught" &&
+          confirmedTeacherIds.has(row.teacher.id)
+      );
 
-    const { error } = await supabase
-      .from("teacher_attendance")
-      .upsert(payload, {
-        onConflict: "teacher_id,class_id,attendance_date",
-      });
+      const blockedBySubstitution = rows.filter(
+        (row) =>
+          row.status === "taught" &&
+          approvedSubstitutionTeacherIds.has(row.teacher.id)
+      );
 
-    setSaving(false);
+      if (blockedBySubstitution.length > 0) {
+        alert(
+          "⚠️ Lớp này đã có giáo viên dạy thay được Admin duyệt. " +
+          "Không thể điểm danh giáo viên đứng lớp là Đã dạy."
+        );
+        setRows((current) =>
+          current.map((row) =>
+            approvedSubstitutionTeacherIds.has(row.teacher.id)
+              ? { ...row, status: "absent" }
+              : row
+          )
+        );
+        return;
+      }
 
-    if (error) {
-      console.error(error);
-      alert("❌ Lưu điểm danh thất bại.");
-      return;
+      for (const row of rows) {
+        if (
+          row.status === "taught" &&
+          confirmedTeacherIds.has(row.teacher.id)
+        ) {
+          continue;
+        }
+
+        const { error } = await supabase.rpc(
+          "sync_teacher_attendance_to_work_session",
+          {
+            p_teacher_id: row.teacher.id,
+            p_class_id: classId,
+            p_attendance_date: date,
+            p_status: row.status,
+          }
+        );
+
+        if (error) {
+          if (error?.code !== "P0001") {
+          console.error(
+            "SYNC TEACHER ATTENDANCE ERROR:",
+            JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
+          );
+        }
+
+          alert(
+            error?.code === "P0001"
+              ? "🔒 Bảng lương tháng này đã chốt, không thể sửa điểm danh."
+              : "❌ Không thể lưu điểm danh giáo viên."
+          );
+
+          return;
+        }
+      }
+
+      await loadTeachers();
+
+      if (
+        alreadyConfirmed.length > 0 &&
+        alreadyConfirmed.length ===
+          rows.filter((row) => row.status === "taught").length
+      ) {
+        alert(
+          "⚠️ Buổi này đã điểm danh rồi. Không tạo thêm buổi lương."
+        );
+      } else if (alreadyConfirmed.length > 0) {
+        alert(
+          "⚠️ Một số giáo viên đã điểm danh trước đó. " +
+          "Hệ thống không tạo trùng buổi lương."
+        );
+      } else {
+        alert(
+          "✅ Đã lưu điểm danh giáo viên và đồng bộ vào bảng tính lương."
+        );
+      }
+    } catch (error) {
+      console.error("SAVE TEACHER ATTENDANCE ERROR:", error);
+      alert("❌ Có lỗi khi lưu điểm danh giáo viên.");
+    } finally {
+      setSaving(false);
     }
-
-    alert("✅ Đã lưu điểm danh giáo viên.");
   }
 
-  const taughtCount = rows.filter((row) => row.status === "taught").length;
+  const taughtCount = hasApprovedSubstitution
+    ? 0
+    : rows.filter((row) => row.status === "taught").length;
+
+  const substituteCount = hasApprovedSubstitution ? 1 : 0;
+
   const absentCount = rows.filter((row) => row.status === "absent").length;
 
   if (loading) {
@@ -273,7 +417,7 @@ export default function TeacherAttendancePage() {
 
       {classId && (
         <>
-          <section className="grid gap-4 md:grid-cols-3">
+          <section className="grid gap-4 md:grid-cols-4">
             <div className="rounded-3xl bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-400">
                 Giáo viên
@@ -287,6 +431,15 @@ export default function TeacherAttendancePage() {
               </div>
               <div className="mt-1 text-3xl font-black text-emerald-600">
                 {taughtCount}
+              </div>
+            </div>
+
+            <div className="rounded-3xl bg-white p-5 shadow-sm">
+              <div className="text-sm font-semibold text-slate-400">
+                Dạy thay
+              </div>
+              <div className="mt-1 text-3xl font-black text-amber-600">
+                {substituteCount}
               </div>
             </div>
 
@@ -355,14 +508,32 @@ export default function TeacherAttendancePage() {
 
                     <div className="flex gap-2">
                       <button
-                        onClick={() => setStatus(row.teacher.id, "taught")}
+                        onClick={() => {
+                          if (approvedSubstitutionTeacherIds.has(row.teacher.id)) {
+                            alert(
+                              "⚠️ Lớp này đã có giáo viên dạy thay được Admin duyệt. " +
+                              "Giáo viên đứng lớp không thể xác nhận Đã dạy cho buổi này."
+                            );
+                            return;
+                          }
+                          setStatus(row.teacher.id, "taught");
+                        }}
+                        disabled={approvedSubstitutionTeacherIds.has(row.teacher.id)}
                         className={`rounded-2xl px-5 py-3 text-sm font-black transition ${
-                          row.status === "taught"
-                            ? "bg-emerald-600 text-white shadow-sm"
-                            : "bg-slate-100 text-slate-500 hover:bg-emerald-50"
+                          approvedSubstitutionTeacherIds.has(row.teacher.id)
+                            ? "cursor-not-allowed bg-amber-100 text-amber-800 ring-1 ring-amber-300"
+                            : row.status === "taught" && confirmedTeacherIds.has(row.teacher.id)
+                              ? "bg-amber-100 text-amber-800 ring-1 ring-amber-300"
+                              : row.status === "taught"
+                                ? "bg-emerald-600 text-white shadow-sm"
+                                : "bg-slate-100 text-slate-500 hover:bg-emerald-50"
                         }`}
                       >
-                        ✅ Đã dạy
+                        {approvedSubstitutionTeacherIds.has(row.teacher.id)
+                          ? "🔄 Đã có GV dạy thay"
+                          : row.status === "taught" && confirmedTeacherIds.has(row.teacher.id)
+                            ? "⚠️ Đã điểm danh"
+                            : "✅ Đã dạy"}
                       </button>
 
                       <button

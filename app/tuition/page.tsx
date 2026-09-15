@@ -125,6 +125,8 @@ function lessonsInMonth(
 export default function TuitionPage() {
   const supabase = createClient();
 
+  const [isAdmin, setIsAdmin] = useState(false);
+
   const [tuition, setTuition] = useState<Tuition[]>([]);
   const [payments, setPayments] = useState<TuitionPayment[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -159,6 +161,18 @@ export default function TuitionPage() {
   const [voiceSupported, setVoiceSupported] = useState(true);
 
   async function loadData() {
+    const { data: authData } = await supabase.auth.getUser();
+
+    if (authData.user) {
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+
+      setIsAdmin(profileData?.role === "admin");
+    }
+
     setLoading(true);
 
     const [
@@ -982,6 +996,37 @@ export default function TuitionPage() {
     return true;
   }
 
+  async function deleteTuition(item: Tuition) {
+    if (!isAdmin) {
+      alert("Chỉ ADMIN mới được xóa học phí.");
+      return;
+    }
+
+    if (Number(item.amount_paid || 0) > 0) {
+      alert("Không thể xóa học phí đã thu tiền.");
+      return;
+    }
+
+    const ok = window.confirm(
+      `Xóa học phí ${money(Number(item.amount_due || 0))} của ${studentName(item.student_id)}?\n\n` +
+        "Chỉ xóa khoản học phí này, không xóa học viên, lớp hay dữ liệu khác."
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase.rpc("admin_delete_unpaid_tuition", {
+      p_tuition_id: item.id,
+    });
+
+    if (error) {
+      alert("Không thể xóa học phí: " + error.message);
+      return;
+    }
+
+    alert("Đã xóa khoản học phí chưa thu.");
+    await loadData();
+  }
+
   async function markPaid(item: Tuition) {
     const remain = Math.max(
       Number(item.amount_due) - Number(item.amount_paid),
@@ -1672,6 +1717,16 @@ export default function TuitionPage() {
                         </span>
                       )}
 
+                      {item && isAdmin && Number(item.amount_paid || 0) === 0 && (
+                        <button
+                          type="button"
+                          className="ui-btn whitespace-nowrap"
+                          onClick={() => deleteTuition(item)}
+                        >
+                          🗑️ Xóa
+                        </button>
+                      )}
+
                       {item &&
                         paymentsForTuition(item.id).map((payment) => (
                           <button
@@ -1807,6 +1862,16 @@ export default function TuitionPage() {
                               onClick={() => markPaid(item)}
                             >
                               💰 Thu tiền
+                            </button>
+                          )}
+
+                          {item && isAdmin && Number(item.amount_paid || 0) === 0 && (
+                            <button
+                              type="button"
+                              className="ui-btn whitespace-nowrap"
+                              onClick={() => deleteTuition(item)}
+                            >
+                              🗑️ Xóa
                             </button>
                           )}
 

@@ -69,6 +69,9 @@ export default function StudentDetailPage() {
   const [saving, setSaving] = useState(false);
   const [addingClass, setAddingClass] = useState(false);
   const [selectedClass, setSelectedClass] = useState("");
+  const [transferFromClass, setTransferFromClass] = useState<string | null>(null);
+  const [transferToClass, setTransferToClass] = useState("");
+  const [transferring, setTransferring] = useState(false);
 
   const [name, setName] = useState("");
   const [parentPhone, setParentPhone] = useState("");
@@ -110,7 +113,8 @@ export default function StudentDetailPage() {
         supabase
           .from("class_students")
           .select("class_id")
-          .eq("student_id", id),
+          .eq("student_id", id)
+          .eq("status", "active"),
       ]);
 
     if (studentRes.error) {
@@ -145,16 +149,24 @@ export default function StudentDetailPage() {
     loadData();
   }, [loadData]);
 
-  const availableClasses = useMemo(() => {
+  // THÊM LỚP: mọi cơ sở, không giới hạn theo students.branch_id.
+  const availableClassesForAdd = useMemo(() => {
     const currentIds = new Set(classes.map((item) => item.id));
+    return allClasses.filter(
+      (item) => item.status === "active" && !currentIds.has(item.id)
+    );
+  }, [allClasses, classes]);
 
+  // CHUYỂN LỚP: mọi cơ sở; loại lớp hiện tại và các lớp đang active.
+  const availableClassesForTransfer = useMemo(() => {
+    const currentIds = new Set(classes.map((item) => item.id));
     return allClasses.filter(
       (item) =>
         item.status === "active" &&
-        !currentIds.has(item.id) &&
-        (!branchId || item.branch_id === branchId)
+        item.id !== transferFromClass &&
+        !currentIds.has(item.id)
     );
-  }, [allClasses, classes, branchId]);
+  }, [allClasses, classes, transferFromClass]);
 
   const adjustmentByTuition = useMemo(() => {
     const map = new Map<string, { transferable: number; cancellable: number }>();
@@ -466,22 +478,246 @@ export default function StudentDetailPage() {
 
     setAddingClass(true);
 
-    const { error } = await supabase
-      .from("class_students")
-      .insert({
-        student_id: id,
-        class_id: selectedClass,
-      });
+    try {
+      const { data: existing, error: lookupError } = await supabase
+        .from("class_students")
+        .select("class_id,status")
+        .eq("student_id", id)
+        .eq("class_id", selectedClass)
+        .maybeSingle();
 
-    setAddingClass(false);
+      if (lookupError) {
+        throw new Error("Không kiểm tra được lớp: " + lookupError.message);
+      }
 
-    if (error) {
-      alert(error.message);
+      if (existing?.status === "active") {
+        throw new Error("Học viên đã đang học lớp này.");
+      }
+
+      const startDate = new Date().toISOString().slice(0, 10);
+
+      const result = existing
+        ? await supabase
+            .from("class_students")
+            .update({
+              status: "active",
+              start_date: startDate,
+              end_date: null,
+            })
+            .eq("student_id", id)
+            .eq("class_id", selectedClass)
+        : await supabase.from("class_students").insert({
+            student_id: id,
+            class_id: selectedClass,
+            status: "active",
+            start_date: startDate,
+            end_date: null,
+          });
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      setSelectedClass("");
+      await loadData();
+    } catch (error) {
+      alert(
+        "❌ Không thể thêm lớp: " +
+          (error instanceof Error ? error.message : String(error))
+      );
+    } finally {
+      setAddingClass(false);
+    }
+  }
+
+  async function transferClass() {
+    if (!transferFromClass || !transferToClass) {
+      alert("Vui lòng chọn lớp cũ và lớp mới.");
       return;
     }
 
-    setSelectedClass("");
-    await loadData();
+    const fromClass = classes.find((item) => item.id === transferFromClass);
+    const toClass = allClasses.find((item) => item.id === transferToClass);
+
+    if (!fromClass || !toClass) {
+      alert("Không tìm thấy lớp cần chuyển.");
+      return;
+    }
+
+    if (fromClass.id === toClass.id) {
+      alert("Lớp mới phải khác lớp hiện tại.");
+      return;
+    }
+
+    const ok = confirm(
+      `🔄 CHUYỂN LỚP\n\n` +
+        `Học viên: ${student?.full_name ?? ""}\n` +
+        `Từ: ${fromClass.name}\n` +
+        `Sang: ${toClass.name}\n\n` +
+        `• Có thể chuyển giữa bất kỳ cơ sở nào.\n` +
+        `• Lớp cũ: inactive + end_date, giữ lịch sử.\n` +
+        `• Lớp mới: active.\n` +
+        `• Không tạo học phí.`
+    );
+
+    if (!ok) return;
+
+    setTransferring(true);
+    const transferDate = new Date().toISOString().slice(0, 10);
+    let targetChanged = false;
+    let targetWasExistingInactive = false;
+
+    try {
+      const { data: sourceRows, error: sourceError } = await supabase
+        .from("class_students")
+        .select("class_id,status,start_date,end_date")
+        .eq("student_id", id)
+        .eq("class_id", fromClass.id)
+        .eq("status", "active");
+
+      if (sourceError) {
+        throw new Error("Không kiểm tra được lớp cũ: " + sourceError.message);
+      }
+
+      if ((sourceRows ?? []).length !== 1) {
+        throw new Error("Lớp cũ không có đúng 1 enrollment active. Hệ thống dừng.");
+      }
+
+      const { data: targetRows, error: targetError } = await supabase
+        .from("class_students")
+        .select("class_id,status,start_date,end_date")
+        .eq("student_id", id)
+        .eq("class_id", toClass.id);
+
+      if (targetError) {
+        throw new Error("Không kiểm tra được lớp mới: " + targetError.message);
+      }
+
+      if ((targetRows ?? []).length > 1) {
+        throw new Error("Lớp mới có nhiều enrollment trùng. Hệ thống dừng.");
+      }
+
+      const target = targetRows?.[0] ?? null;
+
+      if (target?.status === "active") {
+        throw new Error(
+          `Học viên đã đang học lớp "${toClass.name}". Không thể chuyển trùng.`
+        );
+      }
+
+      targetWasExistingInactive = !!target;
+
+      // Bật/tạo lớp mới trước để không làm mất lớp cũ nếu bước này lỗi.
+      if (target) {
+        const { error } = await supabase
+          .from("class_students")
+          .update({
+            status: "active",
+            start_date: transferDate,
+            end_date: null,
+          })
+          .eq("student_id", id)
+          .eq("class_id", toClass.id)
+          .eq("status", "inactive");
+
+        if (error) {
+          throw new Error("Không thể kích hoạt lớp mới: " + error.message);
+        }
+      } else {
+        const { error } = await supabase
+          .from("class_students")
+          .insert({
+            student_id: id,
+            class_id: toClass.id,
+            status: "active",
+            start_date: transferDate,
+            end_date: null,
+          });
+
+        if (error) {
+          throw new Error("Không thể tạo lớp mới: " + error.message);
+        }
+      }
+
+      targetChanged = true;
+
+      const { data: verifiedTarget, error: verifyError } = await supabase
+        .from("class_students")
+        .select("class_id,status")
+        .eq("student_id", id)
+        .eq("class_id", toClass.id)
+        .eq("status", "active");
+
+      if (verifyError) {
+        throw new Error("Không xác minh được lớp mới: " + verifyError.message);
+      }
+
+      if ((verifiedTarget ?? []).length !== 1) {
+        throw new Error("Lớp mới chưa active đúng 1 enrollment.");
+      }
+
+      // Đóng lớp cũ nhưng GIỮ record lịch sử.
+      const { data: closedRows, error: closeError } = await supabase
+        .from("class_students")
+        .update({
+          status: "inactive",
+          end_date: transferDate,
+        })
+        .eq("student_id", id)
+        .eq("class_id", fromClass.id)
+        .eq("status", "active")
+        .select("class_id,status,end_date");
+
+      if (closeError) {
+        throw new Error("Không thể kết thúc lớp cũ: " + closeError.message);
+      }
+
+      if ((closedRows ?? []).length !== 1) {
+        throw new Error("Không xác nhận được lớp cũ đã inactive.");
+      }
+
+      // Không tạo học phí. Không đổi students.branch_id.
+      setTransferFromClass(null);
+      setTransferToClass("");
+      await loadData();
+
+      alert(
+        `✅ Đã chuyển lớp thành công\n\n` +
+          `Từ: ${fromClass.name}\n` +
+          `Sang: ${toClass.name}\n\n` +
+          `✓ Lớp cũ: inactive + giữ lịch sử\n` +
+          `✓ Lớp mới: active\n` +
+          `✓ Không tạo học phí`
+      );
+    } catch (error) {
+      // Nếu lớp mới đã đổi nhưng lớp cũ chưa đóng được, phục hồi lớp mới.
+      if (targetChanged) {
+        if (targetWasExistingInactive) {
+          await supabase
+            .from("class_students")
+            .update({ status: "inactive", end_date: null })
+            .eq("student_id", id)
+            .eq("class_id", toClass.id)
+            .eq("status", "active");
+        } else {
+          await supabase
+            .from("class_students")
+            .delete()
+            .eq("student_id", id)
+            .eq("class_id", toClass.id)
+            .eq("status", "active");
+        }
+      }
+
+      await loadData();
+
+      alert(
+        "❌ Chuyển lớp thất bại:\n\n" +
+          (error instanceof Error ? error.message : String(error))
+      );
+    } finally {
+      setTransferring(false);
+    }
   }
 
   async function removeClass(classId: string) {
@@ -745,7 +981,7 @@ export default function StudentDetailPage() {
                 className="ui-input flex-1"
               >
                 <option value="">＋ Chọn lớp để thêm...</option>
-                {availableClasses.map((item) => (
+                {availableClassesForAdd.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name} —{" "}
                     {new Intl.NumberFormat("vi-VN").format(
@@ -800,6 +1036,17 @@ export default function StudentDetailPage() {
                       </Link>
 
                       <button
+                        onClick={() => {
+                          setTransferFromClass(item.id);
+                          setTransferToClass("");
+                        }}
+                        className="flex h-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 px-3 text-xs font-black text-blue-700 shadow-none transition hover:bg-blue-100"
+                        title="Chuyển sang lớp khác"
+                      >
+                        🔄 Chuyển
+                      </button>
+
+                      <button
                         onClick={() => removeClass(item.id)}
                         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-50 text-sm shadow-none transition hover:bg-rose-100"
                         title="Xóa khỏi lớp"
@@ -809,6 +1056,48 @@ export default function StudentDetailPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {transferFromClass && (
+              <div className="mt-5 rounded-[22px] border border-blue-100 bg-blue-50/60 p-5">
+                <div className="text-sm font-black text-blue-900">🔄 Chuyển lớp</div>
+                <div className="mt-1 text-xs text-blue-700">Lớp cũ vẫn được giữ trong lịch sử; chỉ trạng thái lớp đang học được chuyển.</div>
+
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                  <select
+                    value={transferToClass}
+                    onChange={(e) => setTransferToClass(e.target.value)}
+                    className="ui-input flex-1"
+                    disabled={transferring}
+                  >
+                    <option value="">＋ Chọn lớp mới...</option>
+                    {availableClassesForTransfer.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} — {new Intl.NumberFormat("vi-VN").format(Number(item.monthly_fee))} đ/tháng
+                        </option>
+                      ))}
+                  </select>
+
+                  <button
+                    onClick={transferClass}
+                    disabled={transferring || !transferToClass}
+                    className="ui-btn ui-btn-primary whitespace-nowrap"
+                  >
+                    {transferring ? "Đang chuyển..." : "Xác nhận chuyển lớp"}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setTransferFromClass(null);
+                      setTransferToClass("");
+                    }}
+                    disabled={transferring}
+                    className="ui-btn ui-btn-light whitespace-nowrap"
+                  >
+                    Hủy
+                  </button>
+                </div>
               </div>
             )}
           </section>

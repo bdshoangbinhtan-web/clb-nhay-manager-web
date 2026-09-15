@@ -9,11 +9,28 @@ function money(value: number) {
   return new Intl.NumberFormat("vi-VN").format(value) + " đ";
 }
 
-const PRINT_BRIDGE_URL =
-  process.env.NEXT_PUBLIC_PRINT_BRIDGE_URL || "http://127.0.0.1:8765";
+const DEFAULT_PRINT_BRIDGE_URL = "http://127.0.0.1:8765";
+
+function getPrintBridgeUrl(data: any) {
+  const branch = String(data?.branch || "").trim().toLowerCase();
+
+  // CS2 có Bridge USB riêng. CS1 giữ nguyên Bridge hiện tại.
+  if (
+    branch.includes("cơ sở 2") ||
+    branch.includes("co so 2") ||
+    branch.includes("cs2") ||
+    branch.includes("cs 2")
+  ) {
+    return "http://192.168.1.161:8765";
+  }
+
+  return DEFAULT_PRINT_BRIDGE_URL;
+}
 
 async function printViaBridge(data: any) {
-  const response = await fetch(`${PRINT_BRIDGE_URL}/print`, {
+  const bridgeUrl = getPrintBridgeUrl(data);
+
+  const response = await fetch(`${bridgeUrl}/print`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),

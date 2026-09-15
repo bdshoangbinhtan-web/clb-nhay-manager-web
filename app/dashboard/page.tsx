@@ -40,6 +40,12 @@ type Payment = {
   payment_method: string | null;
 };
 
+type OtherRevenue = {
+  id: string;
+  amount: number;
+  revenue_date: string;
+};
+
 type Expense = {
   id: string;
   amount: number;
@@ -135,11 +141,13 @@ export default function DashboardPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [otherRevenues, setOtherRevenues] = useState<OtherRevenue[]>([]);
   const [adjustments, setAdjustments] = useState<TuitionAdjustment[]>([]);
   const [loading, setLoading] = useState(true);
   const [tuitionAlerts, setTuitionAlerts] = useState<TuitionForAlert[]>([]);
   const [teachersAlerts, setTeachersAlerts] = useState<TeacherForAlert[]>([]);
   const [payrollAlerts, setPayrollAlerts] = useState<PayrollForAlert[]>([]);
+  const [pendingSubstitutionCount, setPendingSubstitutionCount] = useState(0);
 
   const [classStudents, setClassStudents] = useState<ClassStudent[]>([]);
 
@@ -158,6 +166,7 @@ export default function DashboardPage() {
       tuitionAlertsRes,
       teachersAlertsRes,
       payrollAlertsRes,
+      substitutionRequestsRes,
     ] = await Promise.all([
         supabase
           .from("students")
@@ -205,6 +214,10 @@ export default function DashboardPage() {
         supabase
           .from("teacher_payrolls")
           .select("id,teacher_id,payroll_month,status"),
+        supabase
+          .from("teacher_substitution_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending"),
       ]);
 
     if (studentsRes.error) console.error(studentsRes.error);
@@ -217,6 +230,11 @@ export default function DashboardPage() {
     if (tuitionAlertsRes.error) console.error(tuitionAlertsRes.error);
     if (teachersAlertsRes.error) console.error(teachersAlertsRes.error);
     if (payrollAlertsRes.error) console.error(payrollAlertsRes.error);
+    if (substitutionRequestsRes.error) {
+      console.error(substitutionRequestsRes.error);
+    }
+
+    setPendingSubstitutionCount(substitutionRequestsRes.count ?? 0);
 
     setStudents(studentsRes.data ?? []);
     setClasses(classesRes.data ?? []);
@@ -228,6 +246,14 @@ export default function DashboardPage() {
     
     setPayments(paymentsRes.data ?? []);
     setExpenses(expensesRes.data ?? []);
+
+    const { data: otherRevenueData, error: otherRevenueError } = await supabase
+      .from("other_revenues")
+      .select("id,amount,revenue_date")
+      .order("revenue_date", { ascending: false });
+
+    if (otherRevenueError) console.error(otherRevenueError);
+    setOtherRevenues((otherRevenueData ?? []) as OtherRevenue[]);
     setAdjustments((adjustmentsRes.data ?? []) as TuitionAdjustment[]);
     setLoading(false);
   }, [supabase]);
@@ -333,7 +359,31 @@ export default function DashboardPage() {
     }, 0);
   };
 
-  const now = new Date();
+  // Luôn dùng múi giờ Việt Nam để Dashboard không bị lệch ngày
+  // khi máy/browser đang ở timezone khác.
+  const vietnamNowParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+
+  const vnPart = (type: string) =>
+    vietnamNowParts.find((part) => part.type === type)?.value ?? "0";
+
+  const now = new Date(
+    Number(vnPart("year")),
+    Number(vnPart("month")) - 1,
+    Number(vnPart("day")),
+    Number(vnPart("hour")),
+    Number(vnPart("minute")),
+    Number(vnPart("second"))
+  );
+
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
@@ -346,6 +396,15 @@ export default function DashboardPage() {
     [payments, currentMonth, currentYear]
   );
 
+  const monthOtherRevenues = useMemo(
+    () =>
+      otherRevenues.filter((item) => {
+        const d = new Date(item.revenue_date);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      }),
+    [otherRevenues, currentMonth, currentYear]
+  );
+
   const monthExpenses = useMemo(
     () =>
       expenses.filter((item) => {
@@ -355,7 +414,15 @@ export default function DashboardPage() {
     [expenses, currentMonth, currentYear]
   );
 
-  const revenue = monthPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const tuitionRevenue = monthPayments.reduce(
+    (sum, item) => sum + Number(item.amount || 0),
+    0
+  );
+  const otherRevenue = monthOtherRevenues.reduce(
+    (sum, item) => sum + Number(item.amount || 0),
+    0
+  );
+  const revenue = tuitionRevenue + otherRevenue;
   const refundTotal = adjustments.reduce((sum, item) => {
     const d = new Date(item.created_at);
     return d.getMonth() === currentMonth && d.getFullYear() === currentYear
@@ -386,14 +453,18 @@ export default function DashboardPage() {
     ).length,
   }));
 
-  const todayDay = now.getDay();
+  // Dữ liệu schedule_days của CLB: T2=2 ... T7=7, CN="CN".
+  // JS getDay(): CN=0, T2=1 ... T7=6.
+  // Dùng 8 nội bộ cho CN để không nhầm CN với T7.
+  const todayDay = now.getDay() === 0 ? 8 : now.getDay() + 1;
 
   const todayClasses = useMemo(() => {
+    // schedule_days của CLB: T2=2 ... T7=7, CN="CN".
     const dayNames: Record<string, number> = {
-      sun: 0,
-      sunday: 0,
-      cn: 0,
-      "chủ nhật": 0,
+      sun: 8,
+      sunday: 8,
+      cn: 8,
+      "chủ nhật": 8,
       mon: 1,
       monday: 1,
       t2: 1,
@@ -425,7 +496,7 @@ export default function DashboardPage() {
 
       if (/^\d+$/.test(text)) {
         const n = Number(text);
-        return n >= 0 && n <= 6 ? n : null;
+        return n >= 2 && n <= 7 ? n : null;
       }
 
       return dayNames[text] ?? null;
@@ -642,6 +713,37 @@ export default function DashboardPage() {
         </div>
       </section>
 
+      {/* CẢNH BÁO DẠY THAY */}
+      {pendingSubstitutionCount > 0 && (
+        <Link
+          href="/teacher-payroll/substitution"
+          className="group flex items-center justify-between rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm transition hover:-translate-y-0.5 hover:bg-amber-100 hover:shadow-md"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-xl">
+              🔔
+            </div>
+            <div>
+              <div className="font-black text-amber-900">
+                Có {pendingSubstitutionCount} yêu cầu GV dạy thay đang chờ duyệt
+              </div>
+              <div className="mt-0.5 text-xs font-medium text-amber-700">
+                Bấm để xem và xử lý yêu cầu
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 min-w-8 items-center justify-center rounded-full bg-amber-300 px-2 text-sm font-black text-amber-900">
+              {pendingSubstitutionCount}
+            </span>
+            <span className="text-lg text-amber-500 transition group-hover:translate-x-1">
+              →
+            </span>
+          </div>
+        </Link>
+      )}
+
       {/* GLOBAL SEARCH */}
       <section
         id="global-dashboard-search"
@@ -799,6 +901,27 @@ export default function DashboardPage() {
             </span>
           </div>
         </div>
+
+        <Link
+          href="/teacher-payroll/substitution"
+          className="mt-4 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-300 hover:bg-amber-50/40 hover:shadow-md"
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-xl">🔄</span>
+            <span className="font-black text-slate-900">Duyệt GV dạy thay</span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {pendingSubstitutionCount > 0 && (
+              <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-amber-200 px-2 text-sm font-black text-amber-800">
+                {pendingSubstitutionCount}
+              </span>
+            )}
+            <span className="text-lg text-slate-300 transition group-hover:text-amber-500">
+              →
+            </span>
+          </div>
+        </Link>
 
         <div className="mt-5 space-y-3">
           {loading ? (

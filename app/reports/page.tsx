@@ -23,6 +23,14 @@ type Expense = {
   amount: number;
 };
 
+type OtherRevenue = {
+  id: string;
+  revenue_date: string;
+  category: string;
+  amount: number;
+  branch_id: string | null;
+};
+
 type Adjustment = {
   id: string;
   amount: number;
@@ -64,6 +72,7 @@ export default function ReportsPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [otherRevenues, setOtherRevenues] = useState<OtherRevenue[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -135,6 +144,20 @@ export default function ReportsPage() {
     setBranches(branchData ?? []);
     setPayments((paymentData ?? []) as unknown as Payment[]);
     setExpenses(expenseData ?? []);
+
+  const {
+    data: otherRevenueData,
+    error: otherRevenueError,
+  } = await supabase
+    .from("other_revenues")
+    .select("id,revenue_date,amount,branch_id")
+    .order("revenue_date", { ascending: false });
+
+  if (otherRevenueError) {
+    console.error(otherRevenueError);
+  }
+
+  setOtherRevenues((otherRevenueData ?? []) as OtherRevenue[]);
     setAdjustments((adjustmentData ?? []) as unknown as Adjustment[]);
     setLoading(false);
   }
@@ -212,10 +235,26 @@ export default function ReportsPage() {
     });
   }, [adjustments, period, mode, branchFilter]);
 
-  const totalThu = filteredPayments.reduce(
+  const filteredOtherRevenues = useMemo(() => {
+    return otherRevenues.filter((item) => {
+      const inPeriod = mode === "month"
+        ? item.revenue_date.startsWith(period)
+        : item.revenue_date.startsWith(period.slice(0, 4));
+      if (!inPeriod) return false;
+      if (branchFilter && item.branch_id !== branchFilter) return false;
+      return true;
+    });
+  }, [otherRevenues, period, mode, branchFilter]);
+
+  const tuitionThu = filteredPayments.reduce(
     (sum, item) => sum + Number(item.amount),
     0
   );
+  const otherThu = filteredOtherRevenues.reduce(
+    (sum, item) => sum + Number(item.amount),
+    0
+  );
+  const totalThu = tuitionThu + otherThu;
 
   const totalRefund = filteredRefunds.reduce(
     (sum, item) => sum + Number(item.amount),

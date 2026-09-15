@@ -125,9 +125,10 @@ export default function ClassDetailPage() {
 
         supabase
           .from("class_students")
-          .select("student_id, students(id,full_name)")
+          .select("student_id, students!inner(id,full_name,status)")
           .eq("class_id", classId)
-          .eq("status", "active"),
+          .eq("status", "active")
+          .eq("students.status", "active"),
 
         supabase
           .from("class_teachers")

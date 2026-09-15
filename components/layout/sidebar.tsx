@@ -5,19 +5,35 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-const menus = [
+type Role = "admin" | "manager" | "teacher" | "";
+
+const adminManagerMenus = [
   ["🏠", "Dashboard", "/dashboard"],
+
   ["🏢", "Cơ sở & Lớp", "/branches"],
   ["🏆", "Học viên", "/students"],
   ["✨", "Đăng ký học thử", "/dashboard/trial-leads"],
   ["👨‍🏫", "Giáo viên", "/teachers"],
   ["📋", "Điểm danh", "/attendance"],
+  ["🕘", "Lịch sử điểm danh", "/attendance-history"],
+  ["🎟️", "Quản lý học thử", "/trial-students"],
   ["📋", "Điểm danh GV", "/teacher-attendance"],
   ["💰", "Học phí", "/tuition"],
+  ["💵", "Thu khác", "/other-revenue"],
   ["💵", "Lương giáo viên", "/teacher-payroll"],
   ["💸", "Chi phí", "/expenses"],
   ["📊", "Báo cáo", "/reports"],
   ["⚙️", "Cài đặt", "/settings"],
+] as const;
+
+const teacherMenus = [
+  ["📚", "Lớp của tôi", "/teacher-classes"],
+  ["📝", "Điểm danh học viên", "/teacher-student-attendance"],
+  ["🎟️", "Học thử", "/teacher-trial-students"],
+  ["👨‍🏫", "Xác nhận buổi dạy", "/teacher-session"],
+  ["🔄", "Tôi dạy thay hôm nay", "/teacher-substitution"],
+  ["💰", "Lương của tôi", "/teacher-salary"],
+
 ] as const;
 
 export default function Sidebar({
@@ -30,32 +46,46 @@ export default function Sidebar({
   const pathname = usePathname();
   const supabase = createClient();
 
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [role, setRole] = useState<Role>("");
   const [newLeadCount, setNewLeadCount] = useState(0);
 
   useEffect(() => {
     async function loadRole() {
-      const { data: authData } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      if (!authData.user) return;
+      if (!user) return;
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("role")
-        .eq("id", authData.user.id)
+        .select("role,is_active")
+        .eq("id", user.id)
         .single();
 
-      setIsAdmin(profile?.role === "admin");
+      if (!profile?.is_active) return;
 
-      const { count } = await supabase
-        .from("trial_class_leads")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "new");
-      setNewLeadCount(count ?? 0);
+      setRole((profile.role ?? "") as Role);
+
+      if (profile.role === "admin") {
+        const { count } = await supabase
+          .from("trial_class_leads")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "new");
+
+        setNewLeadCount(count ?? 0);
+      }
     }
 
     loadRole();
   }, [supabase]);
+
+  const menus =
+    role === "teacher"
+      ? teacherMenus
+      : role === "admin" || role === "manager"
+        ? adminManagerMenus
+        : [];
 
   return (
     <>
@@ -82,7 +112,6 @@ export default function Sidebar({
               <div className="text-[17px] font-extrabold tracking-tight">
                 CLB NHẢY
               </div>
-
               <div className="text-xs font-semibold text-slate-400">
                 MANAGER V2
               </div>
@@ -94,7 +123,8 @@ export default function Sidebar({
           {menus.map(([icon, label, href]) => {
             const active =
               pathname === href ||
-              (href === "/branches" && pathname.startsWith("/branches/"));
+              (href === "/branches" &&
+                pathname.startsWith("/branches/"));
 
             return (
               <Link
@@ -109,15 +139,25 @@ export default function Sidebar({
               >
                 <span className="text-lg">{icon}</span>
                 <span>{label}</span>
-                {href === "/dashboard/trial-leads" && newLeadCount > 0 && (
-                  <span className={`ml-auto min-w-5 rounded-full px-1.5 py-0.5 text-center text-[11px] font-black ${active ? "bg-white/20 text-white" : "bg-violet-100 text-violet-700"}`}>{newLeadCount}</span>
-                )}
+
+                {href === "/dashboard/trial-leads" &&
+                  newLeadCount > 0 && (
+                    <span
+                      className={`ml-auto min-w-5 rounded-full px-1.5 py-0.5 text-center text-[11px] font-black ${
+                        active
+                          ? "bg-white/20 text-white"
+                          : "bg-violet-100 text-violet-700"
+                      }`}
+                    >
+                      {newLeadCount}
+                    </span>
+                  )}
               </Link>
             );
           })}
 
           {/* ADMIN ONLY */}
-          {isAdmin && (
+          {role === "admin" && (
             <>
               <div className="my-2 border-t border-slate-200" />
 
