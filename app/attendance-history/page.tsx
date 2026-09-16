@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamMonthStart, vietnamToday } from "@/lib/vietnam-date";
 
 type Branch = { id: string; name: string };
 type ClassItem = { id: string; name: string; branch_id: string };
@@ -28,13 +29,11 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return vietnamToday();
 }
 
 function monthStart() {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
+  return vietnamMonthStart();
 }
 
 export default function AttendanceHistoryPage() {

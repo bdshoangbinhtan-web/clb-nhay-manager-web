@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamToday } from "@/lib/vietnam-date";
 
 type Teacher = {
   id: string;
@@ -419,7 +420,7 @@ export default function TeachersPage() {
         status: next,
         end_date:
           next === "inactive"
-            ? new Date().toISOString().slice(0, 10)
+            ? vietnamToday()
             : null,
       })
       .eq("id", t.id);

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 
 type Branch = {
   id: string;
@@ -49,7 +50,7 @@ export default function ExpensesPage() {
   const [branchId, setBranchId] = useState("");
   const [category, setCategory] = useState("other");
   const [expenseDate, setExpenseDate] = useState(
-    new Date().toISOString().slice(0, 10)
+    vietnamToday()
   );
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -58,7 +59,7 @@ export default function ExpensesPage() {
   const [filterBranch, setFilterBranch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterMonth, setFilterMonth] = useState(
-    new Date().toISOString().slice(0, 7)
+    vietnamCurrentMonth()
   );
   const [search, setSearch] = useState("");
 
@@ -101,7 +102,7 @@ export default function ExpensesPage() {
     setEditingId(null);
     setBranchId("");
     setCategory("other");
-    setExpenseDate(new Date().toISOString().slice(0, 10));
+    setExpenseDate(vietnamToday());
     setDescription("");
     setAmount("");
     setNote("");

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamToday } from "@/lib/vietnam-date";
 
 type ClassItem = {
   id: string;
@@ -22,7 +23,7 @@ export default function TeacherTrialStudentsPage() {
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [classId, setClassId] = useState("");
   const [trialDate, setTrialDate] = useState(
-    new Date().toISOString().slice(0, 10)
+    vietnamToday()
   );
 
   const [fullName, setFullName] = useState("");

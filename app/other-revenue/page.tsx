@@ -1,21 +1,22 @@
 "use client";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 type Branch={id:string;name:string};
 type Revenue={id:string;revenue_date:string;category:string;description:string;payer_name:string|null;amount:number;payment_method:string|null;branch_id:string|null;note:string|null;created_at:string;branch?:{id:string;name:string}|null};
 const CATEGORIES=[['room_rental','🏠 Cho thuê phòng'],['workshop','🎤 Workshop / Khóa ngắn hạn'],['event','🎪 Sự kiện / Biểu diễn'],['equipment','🎛️ Cho thuê thiết bị'],['materials','📦 Giáo trình / Tài liệu'],['partnership','🤝 Hợp tác / Đối tác'],['other','💵 Khoản thu khác']] as const;
 const METHODS=[['cash','Tiền mặt'],['transfer','Chuyển khoản'],['other','Khác']] as const;
 const money=(n:number)=>new Intl.NumberFormat('vi-VN').format(n)+' đ';
 const categoryLabel=(v:string)=>CATEGORIES.find(([k])=>k===v)?.[1]??v;
-const currentMonth=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`};
+const currentMonth = () => vietnamCurrentMonth();
 export default function OtherRevenuePage(){
  const supabase=createClient(); const [rows,setRows]=useState<Revenue[]>([]); const [branches,setBranches]=useState<Branch[]>([]); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false); const [isAdmin,setIsAdmin]=useState(false); const [month,setMonth]=useState(currentMonth()); const [categoryFilter,setCategoryFilter]=useState(''); const [branchFilter,setBranchFilter]=useState(''); const [showForm,setShowForm]=useState(false); const [editing,setEditing]=useState<Revenue|null>(null);
- const blank={revenue_date:new Date().toISOString().slice(0,10),category:'room_rental',description:'',payer_name:'',amount:'',payment_method:'transfer',branch_id:'',note:''}; const [form,setForm]=useState(blank);
+ const blank={revenue_date:vietnamToday(),category:'room_rental',description:'',payer_name:'',amount:'',payment_method:'transfer',branch_id:'',note:''}; const [form,setForm]=useState(blank);
  async function loadData(){setLoading(true);const [a,b,r]=await Promise.all([supabase.auth.getUser(),supabase.from('branches').select('id,name').order('name'),supabase.from('other_revenues').select('id,revenue_date,category,description,payer_name,amount,payment_method,branch_id,note,created_at,branch:branch_id(id,name)').order('revenue_date',{ascending:false}).order('created_at',{ascending:false})]);if(b.error)alert('Không tải được cơ sở: '+b.error.message);if(r.error)alert('Không tải được khoản thu: '+r.error.message);if(a.data.user){const {data:p}=await supabase.from('profiles').select('role').eq('id',a.data.user.id).maybeSingle();setIsAdmin(p?.role==='admin')}setBranches(b.data??[]);setRows((r.data??[]) as unknown as Revenue[]);setLoading(false)}
  useEffect(()=>{loadData()},[]);
  const filtered=useMemo(()=>rows.filter(r=>r.revenue_date.startsWith(month)&&(!categoryFilter||r.category===categoryFilter)&&(!branchFilter||r.branch_id===branchFilter)),[rows,month,categoryFilter,branchFilter]);
  const total=filtered.reduce((s,r)=>s+Number(r.amount||0),0);
- function openCreate(){setEditing(null);setForm({...blank,revenue_date:new Date().toISOString().slice(0,10)});setShowForm(true)}
+ function openCreate(){setEditing(null);setForm({...blank,revenue_date:vietnamToday()});setShowForm(true)}
  function openEdit(r:Revenue){setEditing(r);setForm({revenue_date:r.revenue_date,category:r.category,description:r.description,payer_name:r.payer_name??'',amount:String(r.amount),payment_method:r.payment_method??'transfer',branch_id:r.branch_id??'',note:r.note??''});setShowForm(true)}
  async function save(e:FormEvent){e.preventDefault();const amount=Number(form.amount);if(!form.description.trim())return alert('Vui lòng nhập nội dung khoản thu.');if(!Number.isFinite(amount)||amount<=0)return alert('Số tiền phải lớn hơn 0.');setSaving(true);const payload={revenue_date:form.revenue_date,category:form.category,description:form.description.trim(),payer_name:form.payer_name.trim()||null,amount,payment_method:form.payment_method,branch_id:form.branch_id||null,note:form.note.trim()||null};const result=editing?await supabase.from('other_revenues').update(payload).eq('id',editing.id):await supabase.from('other_revenues').insert(payload);setSaving(false);if(result.error)return alert('Không thể lưu khoản thu: '+result.error.message);setShowForm(false);await loadData()}
  async function remove(r:Revenue){if(!isAdmin)return alert('⛔ Chỉ ADMIN mới được xóa khoản thu.');if(!window.confirm(`Xóa khoản thu ${money(Number(r.amount))} — ${r.description}?`))return;const {error}=await supabase.from('other_revenues').delete().eq('id',r.id);if(error)return alert('Không thể xóa khoản thu: '+error.message);await loadData()}

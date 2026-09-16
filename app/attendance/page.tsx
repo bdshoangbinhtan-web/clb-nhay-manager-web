@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamToday } from "@/lib/vietnam-date";
 
 type Branch = { id: string; name: string };
 type ClassItem = {
@@ -36,7 +37,7 @@ export default function AttendancePage() {
   const [branchId, setBranchId] = useState("");
   const [classId, setClassId] = useState("");
   const [date, setDate] = useState(
-    new Date().toISOString().slice(0, 10)
+    vietnamToday()
   );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

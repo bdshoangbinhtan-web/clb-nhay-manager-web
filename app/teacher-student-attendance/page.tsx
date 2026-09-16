@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
+import { vietnamToday } from "@/lib/vietnam-date";
 
 type ClassItem = {
 
@@ -43,7 +44,7 @@ export default function TeacherStudentAttendancePage() {
 
   const [date, setDate] = useState(
 
-    new Date().toISOString().slice(0, 10)
+    vietnamToday()
 
   );
 

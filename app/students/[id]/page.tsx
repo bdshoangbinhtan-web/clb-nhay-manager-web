@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamToday } from "@/lib/vietnam-date";
 
 type Student = {
   id: string;
@@ -494,7 +495,7 @@ export default function StudentDetailPage() {
         throw new Error("Học viên đã đang học lớp này.");
       }
 
-      const startDate = new Date().toISOString().slice(0, 10);
+      const startDate = vietnamToday();
 
       const result = existing
         ? await supabase

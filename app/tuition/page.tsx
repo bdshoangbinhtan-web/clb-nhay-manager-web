@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 
 type Student = {
   id: string;
@@ -138,7 +139,7 @@ export default function TuitionPage() {
 
   const [search, setSearch] = useState("");
   const [billingMonth, setBillingMonth] = useState(
-    new Date().toISOString().slice(0, 7)
+    vietnamCurrentMonth()
   );
 
   const [studentId, setStudentId] = useState("");
