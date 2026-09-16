@@ -1,5 +1,7 @@
 "use client";
 
+import { vietnamCurrentMonth } from "@/lib/vietnam-date";
+
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -29,8 +31,7 @@ function money(value: number) {
 }
 
 function getLocalMonth() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return vietnamCurrentMonth();
 }
 
 function monthLabel(value: string) {

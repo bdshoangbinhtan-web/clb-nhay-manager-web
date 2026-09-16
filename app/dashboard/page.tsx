@@ -649,10 +649,14 @@ export default function DashboardPage() {
       ? ((revenue - previousMonthRevenue) / previousMonthRevenue) * 100
       : null;
 
+  const currentMonthStartKey = `${currentMonthKey}-01`;
+
   const previousMonthActiveStudents = students.filter((student) => {
     if (student.status !== "active") return false;
-    const d = new Date(student.created_at);
-    return d <= new Date(previousMonthYear, previousMonth + 1, 0, 23, 59, 59);
+
+    const createdDate = toVietnamDateKey(student.created_at);
+
+    return createdDate !== "" && createdDate < currentMonthStartKey;
   }).length;
 
   const studentChange = activeStudents - previousMonthActiveStudents;
