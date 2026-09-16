@@ -938,22 +938,14 @@ export default function TuitionPage() {
     // Mở cửa sổ ngay trong thao tác xác nhận để trình duyệt không chặn popup.
     const receiptWindow = window.open("", "_blank");
 
-    const newPaid = Number(item.amount_paid) + payment;
-
-    // Ngày thanh toán = ngày thực tế nhận tiền.
-    const today = new Date().toISOString().slice(0, 10);
-
-    const { data: paymentData, error: paymentError } =
-      await supabase
-        .from("tuition_payments")
-        .insert({
-          tuition_id: item.id,
-          amount: payment,
-          payment_method: paymentMethod,
-          payment_date: today,
-        })
-        .select("id")
-        .single();
+    const { data: paymentData, error: paymentError } = await supabase.rpc(
+      "record_tuition_payment_atomic",
+      {
+        p_tuition_id: item.id,
+        p_amount: payment,
+        p_payment_method: paymentMethod,
+      }
+    );
 
     if (paymentError) {
       if (receiptWindow) receiptWindow.close();
@@ -961,33 +953,36 @@ export default function TuitionPage() {
       return false;
     }
 
-    const { error: updateError } = await supabase
-      .from("tuition")
-      .update({
-        amount_paid: newPaid,
-        payment_date: today,
-      })
-      .eq("id", item.id);
+    const paymentResult = paymentData as {
+      payment_id?: string;
+      new_amount_paid?: number | string;
+      amount_due?: number | string;
+      payment_date?: string;
+    } | null;
 
-    if (updateError) {
+    const paymentId = paymentResult?.payment_id;
+    const newPaid = Number(paymentResult?.new_amount_paid ?? item.amount_paid);
+    const amountDue = Number(paymentResult?.amount_due ?? item.amount_due);
+
+    if (!paymentId || !Number.isFinite(newPaid)) {
       if (receiptWindow) receiptWindow.close();
-      alert(updateError.message);
+      alert("Máy chủ chưa xác nhận thanh toán học phí thành công.");
       return false;
     }
 
-    if (receiptWindow && paymentData?.id) {
+    if (receiptWindow && paymentId) {
       receiptWindow.location.href =
-        `/tuition/receipt/${paymentData.id}`;
-    } else if (paymentData?.id) {
+        `/tuition/receipt/${paymentId}`;
+    } else if (paymentId) {
       window.location.href =
-        `/tuition/receipt/${paymentData.id}`;
+        `/tuition/receipt/${paymentId}`;
     }
 
     alert(
-      newPaid >= Number(item.amount_due)
+      newPaid >= amountDue
         ? "🟢 Đã thanh toán đủ học phí."
         : `Đã thu ${money(payment)}. Còn lại ${money(
-            Number(item.amount_due) - newPaid
+            amountDue - newPaid
           )}.`
     );
 
