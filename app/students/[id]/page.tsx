@@ -536,8 +536,13 @@ export default function StudentDetailPage() {
       return;
     }
 
-    const fromClass = classes.find((item) => item.id === transferFromClass);
-    const toClass = allClasses.find((item) => item.id === transferToClass);
+    const fromClass = classes.find(
+      (item) => item.id === transferFromClass
+    );
+
+    const toClass = allClasses.find(
+      (item) => item.id === transferToClass
+    );
 
     if (!fromClass || !toClass) {
       alert("Không tìm thấy lớp cần chuyển.");
@@ -549,171 +554,66 @@ export default function StudentDetailPage() {
       return;
     }
 
+    if (toClass.status !== "active") {
+      alert("Lớp mới hiện không ACTIVE.");
+      return;
+    }
+
     const ok = confirm(
       `🔄 CHUYỂN LỚP\n\n` +
-        `Học viên: ${student?.full_name ?? ""}\n` +
-        `Từ: ${fromClass.name}\n` +
-        `Sang: ${toClass.name}\n\n` +
-        `• Có thể chuyển giữa bất kỳ cơ sở nào.\n` +
-        `• Lớp cũ: inactive + end_date, giữ lịch sử.\n` +
-        `• Lớp mới: active.\n` +
-        `• Không tạo học phí.`
+      `Học viên: ${student?.full_name ?? ""}\n` +
+      `Từ: ${fromClass.name}\n` +
+      `Sang: ${toClass.name}\n\n` +
+      `Lớp cũ sẽ được lưu lịch sử.\n` +
+      `Lớp mới sẽ được kích hoạt.\n` +
+      `Không tạo học phí mới.\n\n` +
+      `Xác nhận chuyển?`
     );
 
     if (!ok) return;
 
     setTransferring(true);
-    const transferDate = new Date().toISOString().slice(0, 10);
-    let targetChanged = false;
-    let targetWasExistingInactive = false;
 
     try {
-      const { data: sourceRows, error: sourceError } = await supabase
-        .from("class_students")
-        .select("class_id,status,start_date,end_date")
-        .eq("student_id", id)
-        .eq("class_id", fromClass.id)
-        .eq("status", "active");
-
-      if (sourceError) {
-        throw new Error("Không kiểm tra được lớp cũ: " + sourceError.message);
-      }
-
-      if ((sourceRows ?? []).length !== 1) {
-        throw new Error("Lớp cũ không có đúng 1 enrollment active. Hệ thống dừng.");
-      }
-
-      const { data: targetRows, error: targetError } = await supabase
-        .from("class_students")
-        .select("class_id,status,start_date,end_date")
-        .eq("student_id", id)
-        .eq("class_id", toClass.id);
-
-      if (targetError) {
-        throw new Error("Không kiểm tra được lớp mới: " + targetError.message);
-      }
-
-      if ((targetRows ?? []).length > 1) {
-        throw new Error("Lớp mới có nhiều enrollment trùng. Hệ thống dừng.");
-      }
-
-      const target = targetRows?.[0] ?? null;
-
-      if (target?.status === "active") {
-        throw new Error(
-          `Học viên đã đang học lớp "${toClass.name}". Không thể chuyển trùng.`
-        );
-      }
-
-      targetWasExistingInactive = !!target;
-
-      // Bật/tạo lớp mới trước để không làm mất lớp cũ nếu bước này lỗi.
-      if (target) {
-        const { error } = await supabase
-          .from("class_students")
-          .update({
-            status: "active",
-            start_date: transferDate,
-            end_date: null,
-          })
-          .eq("student_id", id)
-          .eq("class_id", toClass.id)
-          .eq("status", "inactive");
-
-        if (error) {
-          throw new Error("Không thể kích hoạt lớp mới: " + error.message);
+      // DB tự lấy ngày Việt Nam từ RPC.
+      // Toàn bộ thao tác chuyển lớp chạy trong 1 transaction.
+      const { data, error } = await supabase.rpc(
+        "transfer_student_class",
+        {
+          p_student_id: id,
+          p_source_class_id: fromClass.id,
+          p_target_class_id: toClass.id,
         }
-      } else {
-        const { error } = await supabase
-          .from("class_students")
-          .insert({
-            student_id: id,
-            class_id: toClass.id,
-            status: "active",
-            start_date: transferDate,
-            end_date: null,
-          });
+      );
 
-        if (error) {
-          throw new Error("Không thể tạo lớp mới: " + error.message);
-        }
+      if (error) {
+        throw new Error(error.message);
       }
 
-      targetChanged = true;
-
-      const { data: verifiedTarget, error: verifyError } = await supabase
-        .from("class_students")
-        .select("class_id,status")
-        .eq("student_id", id)
-        .eq("class_id", toClass.id)
-        .eq("status", "active");
-
-      if (verifyError) {
-        throw new Error("Không xác minh được lớp mới: " + verifyError.message);
+      if (!data?.success) {
+        throw new Error("RPC không xác nhận chuyển lớp thành công.");
       }
 
-      if ((verifiedTarget ?? []).length !== 1) {
-        throw new Error("Lớp mới chưa active đúng 1 enrollment.");
-      }
-
-      // Đóng lớp cũ nhưng GIỮ record lịch sử.
-      const { data: closedRows, error: closeError } = await supabase
-        .from("class_students")
-        .update({
-          status: "inactive",
-          end_date: transferDate,
-        })
-        .eq("student_id", id)
-        .eq("class_id", fromClass.id)
-        .eq("status", "active")
-        .select("class_id,status,end_date");
-
-      if (closeError) {
-        throw new Error("Không thể kết thúc lớp cũ: " + closeError.message);
-      }
-
-      if ((closedRows ?? []).length !== 1) {
-        throw new Error("Không xác nhận được lớp cũ đã inactive.");
-      }
-
-      // Không tạo học phí. Không đổi students.branch_id.
       setTransferFromClass(null);
       setTransferToClass("");
+
       await loadData();
 
       alert(
-        `✅ Đã chuyển lớp thành công\n\n` +
-          `Từ: ${fromClass.name}\n` +
-          `Sang: ${toClass.name}\n\n` +
-          `✓ Lớp cũ: inactive + giữ lịch sử\n` +
-          `✓ Lớp mới: active\n` +
-          `✓ Không tạo học phí`
+        `✅ CHUYỂN LỚP THÀNH CÔNG!\n\n` +
+        `Học viên: ${student?.full_name ?? ""}\n` +
+        `Từ: ${fromClass.name}\n` +
+        `Sang: ${toClass.name}\n\n` +
+        `✓ Lớp cũ đã lưu lịch sử\n` +
+        `✓ Lớp mới đã ACTIVE\n` +
+        `✓ Không tạo học phí mới`
       );
     } catch (error) {
-      // Nếu lớp mới đã đổi nhưng lớp cũ chưa đóng được, phục hồi lớp mới.
-      if (targetChanged) {
-        if (targetWasExistingInactive) {
-          await supabase
-            .from("class_students")
-            .update({ status: "inactive", end_date: null })
-            .eq("student_id", id)
-            .eq("class_id", toClass.id)
-            .eq("status", "active");
-        } else {
-          await supabase
-            .from("class_students")
-            .delete()
-            .eq("student_id", id)
-            .eq("class_id", toClass.id)
-            .eq("status", "active");
-        }
-      }
-
-      await loadData();
-
       alert(
-        "❌ Chuyển lớp thất bại:\n\n" +
-          (error instanceof Error ? error.message : String(error))
+        `❌ CHUYỂN LỚP THẤT BẠI:\n\n` +
+        (error instanceof Error
+          ? error.message
+          : String(error))
       );
     } finally {
       setTransferring(false);
