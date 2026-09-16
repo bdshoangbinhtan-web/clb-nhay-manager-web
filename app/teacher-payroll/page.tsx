@@ -503,8 +503,53 @@ export default function TeacherPayrollPage() {
     }));
   }
 
+  async function savePayroll(
+    item: CalculatedTeacher,
+    targetStatus: "draft" | "locked"
+  ) {
+    setWorking(true);
+
+    try {
+      const { data, error } = await supabase.rpc("save_teacher_payroll_atomic", {
+        p_teacher_id: item.teacher.id,
+        p_payroll_month: `${month}-01`,
+        p_target_status: targetStatus,
+        p_details: item.sessions.map((session) => ({
+          class_id: session.classId,
+          attendance_date: session.date,
+          amount: session.actualAmount,
+        })),
+      });
+
+      if (error) throw error;
+      if (!data?.success) {
+        throw new Error("Máy chủ chưa xác nhận lưu bảng lương thành công.");
+      }
+
+      alert(
+        data.already_locked
+          ? "🔒 Bảng lương này đã được chốt trước đó."
+          : targetStatus === "draft"
+            ? `✅ Đã lưu bảng lương nháp cho ${item.teacher.full_name}.`
+            : `🔒 Đã chốt lương ${item.teacher.full_name}.`
+      );
+      await loadData();
+    } catch (error) {
+      const message =
+        error && typeof error === "object" && "message" in error
+          ? String(error.message)
+          : "Đã xảy ra lỗi không xác định.";
+      alert(
+        (targetStatus === "draft"
+          ? "❌ Không thể lưu bảng lương nháp.\n\n"
+          : "❌ Không thể chốt lương.\n\n") + message
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function saveDraft(item: CalculatedTeacher) {
-    const payrollMonth = `${month}-01`;
     const existing = payrollMap.get(item.teacher.id);
 
     if (existing?.status === "locked" || existing?.status === "paid") {
@@ -512,100 +557,7 @@ export default function TeacherPayrollPage() {
       return;
     }
 
-    setWorking(true);
-
-    let payrollId = existing?.id;
-
-    if (payrollId) {
-      const { error } = await supabase
-        .from("teacher_payrolls")
-        .update({
-          total_sessions: item.totalSessions,
-          salary_rate: Number(item.teacher.salary_rate || 0),
-          total_amount: item.totalAmount,
-          status: "draft",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", payrollId);
-
-      if (error) {
-        setWorking(false);
-        alert("❌ Không thể cập nhật bảng lương.\n\n" + error.message);
-        return;
-      }
-
-      const { error: deleteError } = await supabase
-        .from("teacher_payroll_details")
-        .delete()
-        .eq("payroll_id", payrollId);
-
-      if (deleteError) {
-        setWorking(false);
-        alert(
-          "❌ Không thể cập nhật chi tiết bảng lương.\n\n" +
-            deleteError.message
-        );
-        return;
-      }
-    } else {
-      const { data, error } = await supabase
-        .from("teacher_payrolls")
-        .insert({
-          teacher_id: item.teacher.id,
-          payroll_month: payrollMonth,
-          total_sessions: item.totalSessions,
-          salary_rate: Number(item.teacher.salary_rate || 0),
-          total_amount: item.totalAmount,
-          status: "draft",
-        })
-        .select(
-          "id,teacher_id,payroll_month,total_sessions,salary_rate,total_amount,status"
-        )
-        .single();
-
-      if (error || !data) {
-        setWorking(false);
-        alert(
-          "❌ Không thể tạo bảng lương.\n\n" +
-            (error?.message ?? "")
-        );
-        return;
-      }
-
-      payrollId = data.id;
-    }
-
-    const detailRows = item.sessions.map((session) => ({
-      payroll_id: payrollId,
-      class_id: session.classId,
-      sessions: 1,
-      salary_rate: session.hourlyRate,
-      amount: session.actualAmount,
-      attendance_date: session.date,
-      teacher_id: item.teacher.id,
-      standing_teacher_id: session.standingTeacherId,
-      duration_multiplier: session.multiplier,
-      is_substitute: session.teachingType === "substitute",
-      amount_override:
-        Math.abs(session.actualAmount - session.calculatedAmount) > 0.01,
-    }));
-
-    const { error: detailError } = await supabase
-      .from("teacher_payroll_details")
-      .insert(detailRows);
-
-    setWorking(false);
-
-    if (detailError) {
-      alert(
-        "❌ Không thể lưu chi tiết bảng lương.\n\n" +
-          detailError.message
-      );
-      return;
-    }
-
-    alert(`✅ Đã lưu bảng lương nháp cho ${item.teacher.full_name}.`);
-    await loadData();
+    await savePayroll(item, "draft");
   }
 
   async function lockPayroll(item: CalculatedTeacher) {
@@ -625,99 +577,7 @@ export default function TeacherPayrollPage() {
 
     if (!ok) return;
 
-    setWorking(true);
-
-    // Trước khi chốt, lưu lại toàn bộ chi tiết hiện tại.
-    let payrollId = existing?.id;
-
-    if (!payrollId) {
-      const { data, error } = await supabase
-        .from("teacher_payrolls")
-        .insert({
-          teacher_id: item.teacher.id,
-          payroll_month: `${month}-01`,
-          total_sessions: item.totalSessions,
-          salary_rate: Number(item.teacher.salary_rate || 0),
-          total_amount: item.totalAmount,
-          status: "locked",
-        })
-        .select("id")
-        .single();
-
-      if (error || !data) {
-        setWorking(false);
-        alert(
-          "❌ Không thể chốt lương.\n\n" +
-            (error?.message ?? "")
-        );
-        return;
-      }
-
-      payrollId = data.id;
-    } else {
-      const { error } = await supabase
-        .from("teacher_payrolls")
-        .update({
-          total_sessions: item.totalSessions,
-          salary_rate: Number(item.teacher.salary_rate || 0),
-          total_amount: item.totalAmount,
-          status: "locked",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", payrollId);
-
-      if (error) {
-        setWorking(false);
-        alert("❌ Không thể chốt lương.\n\n" + error.message);
-        return;
-      }
-
-      const { error: deleteError } = await supabase
-        .from("teacher_payroll_details")
-        .delete()
-        .eq("payroll_id", payrollId);
-
-      if (deleteError) {
-        setWorking(false);
-        alert(
-          "❌ Không thể lưu chi tiết chốt lương.\n\n" +
-            deleteError.message
-        );
-        return;
-      }
-    }
-
-    const detailRows = item.sessions.map((session) => ({
-      payroll_id: payrollId,
-      class_id: session.classId,
-      sessions: 1,
-      salary_rate: session.hourlyRate,
-      amount: session.actualAmount,
-      attendance_date: session.date,
-      teacher_id: item.teacher.id,
-      standing_teacher_id: session.standingTeacherId,
-      duration_multiplier: session.multiplier,
-      is_substitute: session.teachingType === "substitute",
-      amount_override:
-        Math.abs(session.actualAmount - session.calculatedAmount) > 0.01,
-    }));
-
-    const { error: detailError } = await supabase
-      .from("teacher_payroll_details")
-      .insert(detailRows);
-
-    if (detailError) {
-      setWorking(false);
-      alert(
-        "❌ Không thể lưu chi tiết chốt lương.\n\n" +
-          detailError.message
-      );
-      return;
-    }
-
-    setWorking(false);
-    alert(`🔒 Đã chốt lương ${item.teacher.full_name}.`);
-    await loadData();
+    await savePayroll(item, "locked");
   }
 
   async function unlockPayroll(item: CalculatedTeacher & { payroll?: Payroll }) {
