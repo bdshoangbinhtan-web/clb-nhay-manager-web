@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 type RequestRow = {
@@ -30,7 +30,8 @@ function statusLabel(status: string) {
 }
 
 export default function AdminSubstitutionPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const loadRequestRef = useRef(0);
 
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,11 +39,8 @@ export default function AdminSubstitutionPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    loadRequests();
-  }, []);
-
-  async function loadRequests() {
+  const loadRequests = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
     setError("");
 
@@ -65,6 +63,8 @@ export default function AdminSubstitutionPage() {
       .order("session_date", { ascending: false })
       .order("created_at", { ascending: false });
 
+    if (requestId !== loadRequestRef.current) return;
+
     if (error) {
       setError(error.message);
       setLoading(false);
@@ -73,7 +73,11 @@ export default function AdminSubstitutionPage() {
 
     setRequests((data ?? []) as unknown as RequestRow[]);
     setLoading(false);
-  }
+  }, [supabase]);
+
+  useEffect(() => {
+    void loadRequests();
+  }, [loadRequests]);
 
   async function updateRequest(id: string, status: "approved" | "rejected") {
     setProcessingId(id);

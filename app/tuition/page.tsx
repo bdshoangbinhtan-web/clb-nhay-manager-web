@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 
@@ -59,6 +59,8 @@ type VoicePayment = {
   method: "cash" | "transfer";
   transcript: string;
 };
+
+const TUITION_PER_BATCH = 80;
 
 const DAY_MAP: Record<string, number> = {
   "2": 1,
@@ -124,7 +126,9 @@ function lessonsInMonth(
 }
 
 export default function TuitionPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const loadRequestRef = useRef(0);
+  const newStudentPrefillRef = useRef(false);
 
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -136,8 +140,13 @@ export default function TuitionPage() {
 
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [isNewStudentFlow, setIsNewStudentFlow] = useState(false);
+  const [newStudentClassQueue, setNewStudentClassQueue] = useState<string[]>([]);
 
   const [search, setSearch] = useState("");
+  const [visibleTuitionCount, setVisibleTuitionCount] = useState(
+    TUITION_PER_BATCH
+  );
   const [billingMonth, setBillingMonth] = useState(
     vietnamCurrentMonth()
   );
@@ -159,10 +168,14 @@ export default function TuitionPage() {
   const [selectedTuitionClassId, setSelectedTuitionClassId] = useState("");
   const [classStudentSearch, setClassStudentSearch] = useState("");
   const [isListening, setIsListening] = useState(false);
-  const [voiceSupported, setVoiceSupported] = useState(true);
+  const loadData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    const billingDate = `${billingMonth}-01`;
+    setLoading(true);
 
-  async function loadData() {
     const { data: authData } = await supabase.auth.getUser();
+
+    if (requestId !== loadRequestRef.current) return;
 
     if (authData.user) {
       const { data: profileData } = await supabase
@@ -171,14 +184,13 @@ export default function TuitionPage() {
         .eq("id", authData.user.id)
         .maybeSingle();
 
+      if (requestId !== loadRequestRef.current) return;
+
       setIsAdmin(profileData?.role === "admin");
     }
 
-    setLoading(true);
-
     const [
       { data: tuitionData, error: tuitionError },
-      { data: paymentData, error: paymentError },
       { data: studentData, error: studentError },
       { data: branchData, error: branchError },
       { data: classData, error: classError },
@@ -187,12 +199,8 @@ export default function TuitionPage() {
       supabase
         .from("tuition")
         .select("*")
+        .eq("billing_month", billingDate)
         .order("billing_month", { ascending: false }),
-
-      supabase
-        .from("tuition_payments")
-        .select("id,tuition_id,amount,payment_method,payment_date,receipt_no")
-        .order("payment_date", { ascending: false }),
 
       supabase
         .from("students")
@@ -213,34 +221,75 @@ export default function TuitionPage() {
         .eq("status", "active"),
     ]);
 
+    if (requestId !== loadRequestRef.current) return;
+
     if (tuitionError) {
       alert(tuitionError.message);
-      return;
-    }
-
-    if (paymentError) {
-      alert(paymentError.message);
+      setLoading(false);
       return;
     }
 
     if (studentError) {
       alert(studentError.message);
+      setLoading(false);
       return;
     }
 
     if (branchError) {
       alert(branchError.message);
+      setLoading(false);
       return;
     }
 
     if (classError) {
       alert(classError.message);
+      setLoading(false);
       return;
     }
 
     if (membershipError) {
       alert(membershipError.message);
+      setLoading(false);
       return;
+    }
+
+    const tuitionIds = (tuitionData ?? []).map((item) => item.id);
+    let paymentData: TuitionPayment[] = [];
+
+    if (tuitionIds.length > 0) {
+      const chunks: string[][] = [];
+
+      for (let index = 0; index < tuitionIds.length; index += 200) {
+        chunks.push(tuitionIds.slice(index, index + 200));
+      }
+
+      const paymentResults = await Promise.all(
+        chunks.map((ids) =>
+          supabase
+            .from("tuition_payments")
+            .select(
+              "id,tuition_id,amount,payment_method,payment_date,receipt_no"
+            )
+            .in("tuition_id", ids)
+            .order("payment_date", { ascending: false })
+        )
+      );
+
+      if (requestId !== loadRequestRef.current) return;
+
+      const paymentError = paymentResults.find(
+        (result) => result.error
+      )?.error;
+
+      if (paymentError) {
+        alert(paymentError.message);
+        setLoading(false);
+        return;
+      }
+
+      paymentData = paymentResults.flatMap(
+        (result) => (result.data ?? []) as TuitionPayment[]
+      );
     }
 
     setTuition(tuitionData ?? []);
@@ -250,13 +299,28 @@ export default function TuitionPage() {
     setClasses(classData ?? []);
     setClassMemberships(membershipData ?? []);
     setLoading(false);
-  }
+  }, [billingMonth, supabase]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
-  const selectedStudent = students.find((x) => x.id === studentId);
+  const studentById = useMemo(
+    () => new Map(students.map((student) => [student.id, student])),
+    [students]
+  );
+
+  const classById = useMemo(
+    () => new Map(classes.map((item) => [item.id, item])),
+    [classes]
+  );
+
+  const branchById = useMemo(
+    () => new Map(branches.map((branch) => [branch.id, branch])),
+    [branches]
+  );
+
+  const selectedStudent = studentById.get(studentId);
 
   const studentClasses = useMemo(() => {
     if (!studentId) return [];
@@ -278,6 +342,41 @@ export default function TuitionPage() {
     () => classMemberships.filter((m) => m.status === "active"),
     [classMemberships]
   );
+
+  const activeStudentIdsByClass = useMemo(() => {
+    const result = new Map<string, string[]>();
+
+    for (const membership of activeMemberships) {
+      const ids = result.get(membership.class_id) ?? [];
+      ids.push(membership.student_id);
+      result.set(membership.class_id, ids);
+    }
+
+    return result;
+  }, [activeMemberships]);
+
+  const tuitionByStudentClass = useMemo(() => {
+    const result = new Map<string, Tuition>();
+
+    for (const item of tuition) {
+      if (!item.class_id) continue;
+      result.set(`${item.student_id}__${item.class_id}`, item);
+    }
+
+    return result;
+  }, [tuition]);
+
+  const paymentsByTuition = useMemo(() => {
+    const result = new Map<string, TuitionPayment[]>();
+
+    for (const payment of payments) {
+      const items = result.get(payment.tuition_id) ?? [];
+      items.push(payment);
+      result.set(payment.tuition_id, items);
+    }
+
+    return result;
+  }, [payments]);
 
   const selectedTuitionClass = classes.find(
     (c) => c.id === selectedTuitionClassId
@@ -319,18 +418,11 @@ export default function TuitionPage() {
   ]);
 
   function tuitionForStudentClass(studentId: string, classId: string) {
-    return tuition.find(
-      (item) =>
-        item.student_id === studentId &&
-        item.class_id === classId &&
-        item.billing_month === `${billingMonth}-01`
-    );
+    return tuitionByStudentClass.get(`${studentId}__${classId}`);
   }
 
   function classStats(classId: string) {
-    const studentIds = activeMemberships
-      .filter((m) => m.class_id === classId)
-      .map((m) => m.student_id);
+    const studentIds = activeStudentIdsByClass.get(classId) ?? [];
 
     const records = studentIds
       .map((studentId) => tuitionForStudentClass(studentId, classId))
@@ -367,7 +459,6 @@ export default function TuitionPage() {
       (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      setVoiceSupported(false);
       alert(
         "Trình duyệt này chưa hỗ trợ nhập giọng nói. Bạn có thể dùng Chrome/Cốc Cốc trên điện thoại."
       );
@@ -565,41 +656,10 @@ export default function TuitionPage() {
     recognition.start();
   }
 
-  async function loadStudentClasses(id: string) {
-    setStudentId(id);
-    setClassId("");
-    setAmountDue("");
-
-    if (!id) return;
-
-    const { data, error } = await supabase
-      .from("class_students")
-      .select("class_id")
-      .eq("student_id", id)
-      .eq("status", "active");
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    const ids = (data ?? []).map((x) => x.class_id);
-    setStudentClassIds(ids);
-
-    const myClasses = classes.filter(
-      (c) => c.status === "active" && ids.includes(c.id)
-    );
-
-    if (myClasses.length === 1) {
-      setClassId(myClasses[0].id);
-      calculateAmount(myClasses[0], students.find((s) => s.id === id));
-    }
-  }
-
-  function calculateAmount(
+  const calculateAmount = useCallback((
     classItem: ClassItem,
     student = selectedStudent
-  ) {
+  ) => {
     if (!student) return;
 
     const lessons = lessonsInMonth(
@@ -649,14 +709,72 @@ export default function TuitionPage() {
     } else {
       setAmountDue("0");
     }
-  }
+  }, [billingMonth, selectedStudent]);
 
   useEffect(() => {
     const selected = classes.find((c) => c.id === classId);
     if (selected && selectedStudent) {
       calculateAmount(selected, selectedStudent);
     }
-  }, [billingMonth, classId, selectedStudent, classes]);
+  }, [classId, classes, calculateAmount, selectedStudent]);
+
+  useEffect(() => {
+    if (loading || newStudentPrefillRef.current) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const newStudentId = params.get("newStudentId");
+
+    if (!newStudentId) return;
+
+    const student = students.find((item) => item.id === newStudentId);
+    if (!student) return;
+
+    const assignedClassIds = activeMemberships
+      .filter((membership) => membership.student_id === newStudentId)
+      .map((membership) => membership.class_id);
+    const requestedClassId = params.get("classId");
+    const requestedClassIds = (params.get("classIds") ?? "")
+      .split(",")
+      .filter((id) => assignedClassIds.includes(id));
+    const requestedBillingMonth = params.get("billingMonth");
+    const initialClassId =
+      requestedClassId && assignedClassIds.includes(requestedClassId)
+        ? requestedClassId
+        : requestedClassIds[0] ?? assignedClassIds[0] ?? "";
+
+    newStudentPrefillRef.current = true;
+    setStudentId(student.id);
+    setStudentSearch(student.full_name);
+    setStudentClassIds(assignedClassIds);
+    setClassId(initialClassId);
+    setNote("Học phí khi tạo học viên mới");
+    setShowForm(true);
+    setIsNewStudentFlow(true);
+    setNewStudentClassQueue(
+      requestedClassIds.length > 0
+        ? requestedClassIds
+        : initialClassId
+          ? [initialClassId]
+          : []
+    );
+
+    if (requestedBillingMonth && requestedBillingMonth !== billingMonth) {
+      setBillingMonth(requestedBillingMonth);
+    }
+
+    window.history.replaceState({}, "", "/tuition");
+
+    window.setTimeout(() => {
+      document
+        .getElementById("create-tuition-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }, [
+    activeMemberships,
+    billingMonth,
+    loading,
+    students,
+  ]);
 
 
   async function createMonthlyTuition() {
@@ -911,12 +1029,26 @@ export default function TuitionPage() {
 
     alert(`Đã tạo học phí ${money(amount)} cho ${monthLabel(billingMonth)}.`);
 
+    const remainingClassIds = newStudentClassQueue.filter(
+      (id) => id !== classId
+    );
+
+    if (isNewStudentFlow && remainingClassIds.length > 0) {
+      setNewStudentClassQueue(remainingClassIds);
+      setClassId(remainingClassIds[0]);
+      setAmountDue("");
+      await loadData();
+      return;
+    }
+
     setStudentId("");
     setStudentClassIds([]);
     setClassId("");
     setAmountDue("");
     setNote("");
     setShowForm(false);
+    setIsNewStudentFlow(false);
+    setNewStudentClassQueue([]);
 
     await loadData();
   }
@@ -1094,19 +1226,19 @@ export default function TuitionPage() {
   }
 
   function studentName(id: string) {
-    return students.find((s) => s.id === id)?.full_name ?? "Không rõ";
+    return studentById.get(id)?.full_name ?? "Không rõ";
   }
 
   function className(id: string | null) {
-    return classes.find((c) => c.id === id)?.name ?? "Chưa chọn lớp";
+    return (id ? classById.get(id)?.name : null) ?? "Chưa chọn lớp";
   }
 
   function branchName(id: string | null) {
-    return branches.find((b) => b.id === id)?.name ?? "Chưa gán cơ sở";
+    return (id ? branchById.get(id)?.name : null) ?? "Chưa gán cơ sở";
   }
 
   function paymentsForTuition(tuitionId: string) {
-    return payments.filter((payment) => payment.tuition_id === tuitionId);
+    return paymentsByTuition.get(tuitionId) ?? [];
   }
 
   const filteredTuition = tuition.filter((item) => {
@@ -1139,6 +1271,11 @@ export default function TuitionPage() {
 
   const totalRemain = Math.max(totalDue - totalPaid, 0);
 
+  useEffect(() => {
+    setVisibleTuitionCount(TUITION_PER_BATCH);
+  }, [billingMonth, search]);
+
+  const visibleTuition = filteredTuition.slice(0, visibleTuitionCount);
 
   const filteredStudents = students
     .filter((student) =>
@@ -1176,7 +1313,10 @@ export default function TuitionPage() {
 
           <button
             className="ui-btn ui-btn-primary"
-            onClick={() => setShowForm(!showForm)}
+            onClick={() => {
+              setShowForm(!showForm);
+              setIsNewStudentFlow(false);
+            }}
           >
             {showForm ? "Đóng" : "+ Tạo học phí"}
           </button>
@@ -1205,7 +1345,7 @@ export default function TuitionPage() {
       </section>
 
       {showForm && (
-        <section className="ui-card p-6 sm:p-8">
+        <section id="create-tuition-form" className="ui-card p-6 sm:p-8">
           <div className="mb-6">
             <div className="text-xs font-black uppercase tracking-widest text-blue-600">
               TẠO KỲ HỌC PHÍ
@@ -1213,6 +1353,16 @@ export default function TuitionPage() {
             <h2 className="mt-1 text-2xl font-black">
               Học phí thu ngày 1
             </h2>
+            {isNewStudentFlow && (
+              <div className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">
+                ✅ Đã tạo học viên. Kiểm tra học phí bên dưới rồi bấm Lưu học phí.
+                {newStudentClassQueue.length > 1 && (
+                  <span>
+                    {" "}Sau đó hệ thống sẽ tiếp tục {newStudentClassQueue.length - 1} lớp còn lại.
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           <form
@@ -1250,40 +1400,20 @@ export default function TuitionPage() {
                           type="button"
                           className="block w-full rounded-lg px-3 py-2 text-left hover:bg-slate-100"
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={async () => {
+                          onClick={() => {
                             setStudentId(student.id);
                             setStudentSearch(student.full_name);
                             setShowStudentSearch(false);
-                              setClassId("");
-                              setAmountDue("");
-
-                              // Nạp đúng các lớp mà học viên đang được gán
-                              const { data: memberships, error: membershipError } =
-                                await supabase
-                                  .from("class_students")
-                                  .select("class_id")
-                                  .eq("student_id", student.id);
-
-                              if (membershipError) {
-                                alert(
-                                  "Không lấy được lớp của học viên: " +
-                                    membershipError.message
-                                );
-                                setStudentClassIds([]);
-                                return;
-                              }
-
-                              const classIds = (memberships || [])
-                                .map((m) => m.class_id)
-                                .filter(Boolean);
-
-                              setStudentClassIds(classIds);
-
-                              const assignedClasses = classes.filter((c) =>
-                                classIds.includes(c.id)
-                              );
-
-
+                            setClassId("");
+                            setAmountDue("");
+                            setStudentClassIds(
+                              activeMemberships
+                                .filter(
+                                  (membership) =>
+                                    membership.student_id === student.id
+                                )
+                                .map((membership) => membership.class_id)
+                            );
                           }}
                         >
                           <div className="font-semibold">
@@ -1770,7 +1900,7 @@ export default function TuitionPage() {
             <div>
               <h2 className="text-2xl font-black">📋 Danh sách học phí</h2>
               <p className="mt-1 text-sm text-slate-400">
-                {filteredTuition.length} khoản học phí
+                Đang hiển thị {visibleTuition.length}/{filteredTuition.length} khoản học phí
               </p>
             </div>
 
@@ -1809,7 +1939,7 @@ export default function TuitionPage() {
               </thead>
 
               <tbody>
-                {filteredTuition.map((item) => {
+                {visibleTuition.map((item) => {
                   const remain = Math.max(
                     Number(item.amount_due) -
                       Number(item.amount_paid),
@@ -1912,6 +2042,28 @@ export default function TuitionPage() {
                 })}
               </tbody>
             </table>
+
+            {visibleTuition.length < filteredTuition.length && (
+              <div className="border-t border-slate-100 p-5 text-center">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVisibleTuitionCount((current) =>
+                      Math.min(
+                        current + TUITION_PER_BATCH,
+                        filteredTuition.length
+                      )
+                    )
+                  }
+                  className="ui-btn ui-btn-light"
+                >
+                  Hiển thị thêm {Math.min(
+                    TUITION_PER_BATCH,
+                    filteredTuition.length - visibleTuition.length
+                  )} khoản học phí
+                </button>
+              </div>
+            )}
           </div>
         )}
       </section>

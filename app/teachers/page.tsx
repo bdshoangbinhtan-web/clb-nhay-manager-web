@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
 
@@ -40,7 +40,8 @@ function salaryLabel(value: string) {
 }
 
 export default function TeachersPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const loadRequestRef = useRef(0);
 
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,9 +55,7 @@ export default function TeachersPage() {
   const [birthDate, setBirthDate] = useState("");
   const [address, setAddress] = useState("");
   const [startDate, setStartDate] = useState("");
-  const [salaryType, setSalaryType] = useState("per_session");
   const [salaryRate, setSalaryRate] = useState("");
-  const [allowance, setAllowance] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -67,13 +66,16 @@ export default function TeachersPage() {
   const [accountActionBusy, setAccountActionBusy] = useState<string | null>(null);
   const [accountPasswordNew, setAccountPasswordNew] = useState("");
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
 
     const { data, error } = await supabase
       .from("teachers")
       .select("*")
       .order("created_at", { ascending: false });
+
+    if (requestId !== loadRequestRef.current) return;
 
     if (error) {
       alert(error.message);
@@ -93,6 +95,8 @@ export default function TeachersPage() {
         .select("id,is_active")
         .in("id", profileIds);
 
+      if (requestId !== loadRequestRef.current) return;
+
       if (profileError) {
         console.error("LOAD TEACHER ACCOUNT STATUS ERROR:", profileError);
       } else {
@@ -111,11 +115,11 @@ export default function TeachersPage() {
       }))
     );
     setLoading(false);
-  }
+  }, [supabase]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   function resetForm() {
     setEditingId(null);
@@ -124,9 +128,7 @@ export default function TeachersPage() {
     setBirthDate("");
     setAddress("");
     setStartDate("");
-    setSalaryType("per_session");
     setSalaryRate("");
-    setAllowance("");
     setAvatarUrl("");
     setNotes("");
   }
@@ -149,9 +151,7 @@ export default function TeachersPage() {
     setBirthDate(t.birth_date || "");
     setAddress(t.address || "");
     setStartDate(t.start_date || "");
-    setSalaryType("per_session");
     setSalaryRate(String(t.salary_rate ?? ""));
-    setAllowance(String(t.allowance ?? ""));
     setAvatarUrl(t.avatar_url || "");
     setNotes(t.notes || "");
     setShowForm(true);
@@ -424,22 +424,6 @@ export default function TeachersPage() {
             : null,
       })
       .eq("id", t.id);
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    await loadData();
-  }
-
-  async function deleteTeacher(id: string) {
-    if (!confirm("Bạn có chắc muốn xóa giáo viên này?")) return;
-
-    const { error } = await supabase
-      .from("teachers")
-      .delete()
-      .eq("id", id);
 
     if (error) {
       alert(error.message);
@@ -759,6 +743,8 @@ export default function TeachersPage() {
             <article key={teacher.id} className="ui-card p-6">
               <div className="flex items-start gap-4">
                 {teacher.avatar_url ? (
+                  // URL ảnh do người dùng nhập nên không thể giới hạn hostname cho next/image.
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={teacher.avatar_url}
                     alt={teacher.full_name}

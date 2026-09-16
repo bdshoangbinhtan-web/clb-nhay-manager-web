@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
 
@@ -12,27 +12,13 @@ type ClassItem = {
   schedule_days: string[] | null;
 };
 type Student = { id: string; full_name: string };
-type Attendance = {
-  id: string;
-  student_id: string;
-  class_id: string;
-  attendance_date: string;
-  status: string;
-};
-
-const STATUS = {
-  present: "Có mặt",
-  absent: "Vắng",
-  excused: "Có phép",
-};
-
 export default function AttendancePage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const studentLoadRequestRef = useRef(0);
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
-  const [attendance, setAttendance] = useState<Attendance[]>([]);
 
   const [branchId, setBranchId] = useState("");
   const [classId, setClassId] = useState("");
@@ -43,8 +29,10 @@ export default function AttendancePage() {
   const [saving, setSaving] = useState(false);
 
   const [statusMap, setStatusMap] = useState<Record<string, string>>({});
+  const selectionRef = useRef({ classId, date });
+  selectionRef.current = { classId, date };
 
-  async function loadBase() {
+  const loadBase = useCallback(async () => {
     setLoading(true);
 
     const [
@@ -61,22 +49,24 @@ export default function AttendancePage() {
 
     if (branchError) {
       alert(branchError.message);
+      setLoading(false);
       return;
     }
 
     if (classError) {
       alert(classError.message);
+      setLoading(false);
       return;
     }
 
     setBranches(branchData ?? []);
     setClasses(classData ?? []);
     setLoading(false);
-  }
+  }, [supabase]);
 
   useEffect(() => {
-    loadBase();
-  }, []);
+    void loadBase();
+  }, [loadBase]);
 
   const filteredClasses = useMemo(
     () =>
@@ -84,10 +74,18 @@ export default function AttendancePage() {
     [classes, branchId]
   );
 
-  async function loadStudents() {
+  const loadStudents = useCallback(async () => {
+    if (
+      classId !== selectionRef.current.classId ||
+      date !== selectionRef.current.date
+    ) {
+      return;
+    }
+
+    const requestId = ++studentLoadRequestRef.current;
+
     if (!classId) {
       setStudents([]);
-      setAttendance([]);
       setStatusMap({});
       return;
     }
@@ -100,6 +98,14 @@ export default function AttendancePage() {
       .eq("class_id", classId)
       .eq("status", "active");
 
+    if (
+      requestId !== studentLoadRequestRef.current ||
+      classId !== selectionRef.current.classId ||
+      date !== selectionRef.current.date
+    ) {
+      return;
+    }
+
     if (memberError) {
       alert(memberError.message);
       setLoading(false);
@@ -110,7 +116,6 @@ export default function AttendancePage() {
 
     if (!ids.length) {
       setStudents([]);
-      setAttendance([]);
       setStatusMap({});
       setLoading(false);
       return;
@@ -131,6 +136,14 @@ export default function AttendancePage() {
           .eq("attendance_date", date),
       ]);
 
+    if (
+      requestId !== studentLoadRequestRef.current ||
+      classId !== selectionRef.current.classId ||
+      date !== selectionRef.current.date
+    ) {
+      return;
+    }
+
     if (studentError) {
       alert(studentError.message);
       setLoading(false);
@@ -150,14 +163,13 @@ export default function AttendancePage() {
     });
 
     setStudents(studentData ?? []);
-    setAttendance(attData ?? []);
     setStatusMap(map);
     setLoading(false);
-  }
+  }, [classId, date, supabase]);
 
   useEffect(() => {
-    loadStudents();
-  }, [classId, date]);
+    void loadStudents();
+  }, [loadStudents]);
 
   function setStudentStatus(studentId: string, status: string) {
     setStatusMap((prev) => ({

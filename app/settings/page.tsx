@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 type Branch = {
@@ -17,7 +17,8 @@ type Profile = {
 };
 
 export default function SettingsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const loadRequestRef = useRef(0);
 
   const [me, setMe] = useState<Profile | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -25,10 +26,13 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
 
     const { data: authData } = await supabase.auth.getUser();
+
+    if (requestId !== loadRequestRef.current) return;
 
     if (!authData.user) {
       setLoading(false);
@@ -48,6 +52,8 @@ export default function SettingsPage() {
         .order("name"),
     ]);
 
+    if (requestId !== loadRequestRef.current) return;
+
     if (!myProfile) {
       setLoading(false);
       return;
@@ -66,15 +72,17 @@ export default function SettingsPage() {
         .from("profiles")
         .select("id,full_name,role,branch_id");
 
+      if (requestId !== loadRequestRef.current) return;
+
       setProfiles(allProfiles ?? []);
     }
 
     setLoading(false);
-  }
+  }, [supabase]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   function branchName(id: string | null) {
     return branches.find((b) => b.id === id)?.name ?? "Toàn CLB";

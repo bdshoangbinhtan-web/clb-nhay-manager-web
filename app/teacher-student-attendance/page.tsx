@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
@@ -34,7 +34,7 @@ const STATUS = {
 
 export default function TeacherStudentAttendancePage() {
 
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [classes, setClasses] = useState<ClassItem[]>([]);
 
@@ -59,6 +59,8 @@ export default function TeacherStudentAttendancePage() {
   const [error, setError] = useState("");
 
     useEffect(() => {
+      let cancelled = false;
+
       async function loadClasses() {
         setLoadingClasses(true);
         setError("");
@@ -68,6 +70,8 @@ export default function TeacherStudentAttendancePage() {
           .select("id,name")
           .eq("status", "active")
           .order("name");
+
+        if (cancelled) return;
 
         if (error) {
           console.error(error);
@@ -80,6 +84,8 @@ export default function TeacherStudentAttendancePage() {
         // Chỉ lấy buổi dạy thay đã được Admin duyệt ĐÚNG ngày đang chọn.
         const { data: substituteSessions, error: substituteError } =
           await supabase.rpc("get_teacher_approved_substitution_sessions");
+
+        if (cancelled) return;
 
         if (substituteError) {
           console.error("SUBSTITUTE LOAD ERROR:", substituteError);
@@ -105,6 +111,8 @@ export default function TeacherStudentAttendancePage() {
             .select("id,name")
             .in("id", Array.from(substituteClassIds))
             .eq("status", "active");
+
+          if (cancelled) return;
 
           if (extraClassError) {
             console.error("SUBSTITUTE CLASS ERROR:", extraClassError);
@@ -143,10 +151,16 @@ export default function TeacherStudentAttendancePage() {
       }
 
       loadClasses();
-    }, [date]);
+
+      return () => {
+        cancelled = true;
+      };
+    }, [date, supabase]);
 
     
 useEffect(() => {
+
+    let cancelled = false;
 
     async function loadStudents() {
 
@@ -155,6 +169,8 @@ useEffect(() => {
         setStudents([]);
 
         setStatusMap({});
+
+        setLoadingStudents(false);
 
         return;
 
@@ -173,6 +189,8 @@ useEffect(() => {
         .eq("class_id", classId)
 
         .eq("status", "active");
+
+      if (cancelled) return;
 
       if (memberError) {
 
@@ -236,6 +254,8 @@ useEffect(() => {
 
       ]);
 
+      if (cancelled) return;
+
       if (studentError || attendanceError) {
 
         console.error(studentError || attendanceError);
@@ -270,7 +290,11 @@ useEffect(() => {
 
     loadStudents();
 
-  }, [classId, date]);
+    return () => {
+      cancelled = true;
+    };
+
+  }, [classId, date, supabase]);
 
   function setStudentStatus(studentId: string, status: string) {
 

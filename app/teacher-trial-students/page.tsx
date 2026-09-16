@@ -1,6 +1,6 @@
  "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
 
@@ -18,7 +18,8 @@ type TrialStudent = {
 };
 
 export default function TeacherTrialStudentsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const rowLoadRequestRef = useRef(0);
 
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [classId, setClassId] = useState("");
@@ -33,8 +34,10 @@ export default function TeacherTrialStudentsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingRows, setLoadingRows] = useState(false);
   const [saving, setSaving] = useState(false);
+  const selectionRef = useRef({ classId, trialDate });
+  selectionRef.current = { classId, trialDate };
 
-  async function loadClasses() {
+  const loadClasses = useCallback(async () => {
     setLoading(true);
 
     const { data, error } = await supabase
@@ -57,11 +60,21 @@ export default function TeacherTrialStudentsPage() {
     }
 
     setLoading(false);
-  }
+  }, [supabase]);
 
-  async function loadTrialStudents() {
+  const loadTrialStudents = useCallback(async () => {
+    if (
+      classId !== selectionRef.current.classId ||
+      trialDate !== selectionRef.current.trialDate
+    ) {
+      return;
+    }
+
+    const requestId = ++rowLoadRequestRef.current;
+
     if (!classId) {
       setRows([]);
+      setLoadingRows(false);
       return;
     }
 
@@ -74,6 +87,14 @@ export default function TeacherTrialStudentsPage() {
       .eq("trial_date", trialDate)
       .order("created_at", { ascending: false });
 
+    if (
+      requestId !== rowLoadRequestRef.current ||
+      classId !== selectionRef.current.classId ||
+      trialDate !== selectionRef.current.trialDate
+    ) {
+      return;
+    }
+
     if (error) {
       console.error(error);
       setRows([]);
@@ -83,15 +104,15 @@ export default function TeacherTrialStudentsPage() {
     }
 
     setLoadingRows(false);
-  }
+  }, [classId, supabase, trialDate]);
 
   useEffect(() => {
-    loadClasses();
-  }, []);
+    void loadClasses();
+  }, [loadClasses]);
 
   useEffect(() => {
-    loadTrialStudents();
-  }, [classId, trialDate]);
+    void loadTrialStudents();
+  }, [loadTrialStudents]);
 
   async function saveTrialStudent() {
     if (!classId) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 
@@ -37,7 +37,8 @@ function categoryLabel(value: string) {
 }
 
 export default function ExpensesPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const loadRequestRef = useRef(0);
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -63,7 +64,8 @@ export default function ExpensesPage() {
   );
   const [search, setSearch] = useState("");
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
 
     const [
@@ -79,24 +81,28 @@ export default function ExpensesPage() {
         .order("expense_date", { ascending: false }),
     ]);
 
+    if (requestId !== loadRequestRef.current) return;
+
     if (branchError) {
       alert(branchError.message);
+      setLoading(false);
       return;
     }
 
     if (expenseError) {
       alert(expenseError.message);
+      setLoading(false);
       return;
     }
 
     setBranches(branchData ?? []);
     setExpenses(expenseData ?? []);
     setLoading(false);
-  }
+  }, [supabase]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   function resetForm() {
     setEditingId(null);

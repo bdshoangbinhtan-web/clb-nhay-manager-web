@@ -30,7 +30,7 @@ const teacherMenus = [
   ["📚", "Lớp của tôi", "/teacher-classes"],
   ["📝", "Điểm danh học viên", "/teacher-student-attendance"],
   ["🎟️", "Học thử", "/teacher-trial-students"],
-  ["👨‍🏫", "Xác nhận buổi dạy", "/teacher-session"],
+  ["✅", "Chấm công", "/teacher-session"],
   ["🔄", "Tôi dạy thay hôm nay", "/teacher-substitution"],
   ["💰", "Lương của tôi", "/teacher-salary"],
 

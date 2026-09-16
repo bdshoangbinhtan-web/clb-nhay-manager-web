@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamMonthStart, vietnamToday } from "@/lib/vietnam-date";
 
@@ -37,7 +37,8 @@ function monthStart() {
 }
 
 export default function AttendanceHistoryPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const historyLoadRequestRef = useRef(0);
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
@@ -54,8 +55,7 @@ export default function AttendanceHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadBase() {
-    setLoading(true);
+  const loadBase = useCallback(async () => {
     setError("");
 
     const [
@@ -83,17 +83,16 @@ export default function AttendanceHistoryPage() {
           studentError?.message ||
           "Không tải được dữ liệu."
       );
-      setLoading(false);
       return;
     }
 
     setBranches(branchData ?? []);
     setClasses(classData ?? []);
     setStudents(studentData ?? []);
-    setLoading(false);
-  }
+  }, [supabase]);
 
-  async function loadHistory() {
+  const loadHistory = useCallback(async () => {
+    const requestId = ++historyLoadRequestRef.current;
     setLoading(true);
     setError("");
 
@@ -110,6 +109,8 @@ export default function AttendanceHistoryPage() {
 
     const { data, error: historyError } = await query;
 
+    if (requestId !== historyLoadRequestRef.current) return;
+
     if (historyError) {
       setError(historyError.message);
       setRows([]);
@@ -119,15 +120,15 @@ export default function AttendanceHistoryPage() {
 
     setRows(data ?? []);
     setLoading(false);
-  }
+  }, [classId, fromDate, status, studentId, supabase, toDate]);
 
   useEffect(() => {
-    loadBase();
-  }, []);
+    void loadBase();
+  }, [loadBase]);
 
   useEffect(() => {
-    loadHistory();
-  }, [fromDate, toDate, classId, studentId, status]);
+    void loadHistory();
+  }, [loadHistory]);
 
   const filteredClasses = useMemo(
     () =>

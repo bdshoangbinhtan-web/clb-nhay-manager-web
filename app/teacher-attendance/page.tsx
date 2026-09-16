@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
 
@@ -39,7 +39,8 @@ function getScheduleDayKey(value: string) {
 }
 
 export default function TeacherAttendancePage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const teacherLoadRequestRef = useRef(0);
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
@@ -60,8 +61,10 @@ export default function TeacherAttendancePage() {
   const [hasApprovedSubstitution, setHasApprovedSubstitution] = useState(false);
   const [approvedSubstitutionTeacherIds, setApprovedSubstitutionTeacherIds] =
     useState<Set<string>>(new Set());
+  const selectionRef = useRef({ classId, date });
+  selectionRef.current = { classId, date };
 
-  async function loadBase() {
+  const loadBase = useCallback(async () => {
     setLoading(true);
 
     const [{ data: branchData }, { data: classData }] = await Promise.all([
@@ -79,14 +82,23 @@ export default function TeacherAttendancePage() {
     setBranches(branchData ?? []);
     setClasses(classData ?? []);
 
-    if (!branchId && branchData?.length) {
-      setBranchId(branchData[0].id);
+    if (branchData?.length) {
+      setBranchId((current) => current || branchData[0].id);
     }
 
     setLoading(false);
-  }
+  }, [supabase]);
 
-  async function loadTeachers() {
+  const loadTeachers = useCallback(async () => {
+    if (
+      classId !== selectionRef.current.classId ||
+      date !== selectionRef.current.date
+    ) {
+      return;
+    }
+
+    const requestId = ++teacherLoadRequestRef.current;
+
     if (!classId || !date) {
       setRows([]);
       return;
@@ -107,6 +119,14 @@ export default function TeacherAttendancePage() {
       `)
       .eq("class_id", classId);
 
+    if (
+      requestId !== teacherLoadRequestRef.current ||
+      classId !== selectionRef.current.classId ||
+      date !== selectionRef.current.date
+    ) {
+      return;
+    }
+
     if (teacherError) {
       console.error(teacherError);
       alert("Không tải được giáo viên của lớp.");
@@ -122,6 +142,14 @@ export default function TeacherAttendancePage() {
         .eq("class_id", classId)
         .eq("session_date", date)
         .eq("status", "approved");
+
+    if (
+      requestId !== teacherLoadRequestRef.current ||
+      classId !== selectionRef.current.classId ||
+      date !== selectionRef.current.date
+    ) {
+      return;
+    }
 
     if (substitutionError) {
       console.error("APPROVED SUBSTITUTION ERROR:", substitutionError);
@@ -148,6 +176,14 @@ export default function TeacherAttendancePage() {
       .eq("class_id", classId)
       .eq("attendance_date", date);
 
+    if (
+      requestId !== teacherLoadRequestRef.current ||
+      classId !== selectionRef.current.classId ||
+      date !== selectionRef.current.date
+    ) {
+      return;
+    }
+
     if (attendanceError) {
       console.error("TEACHER ATTENDANCE ERROR:", attendanceError);
       alert(
@@ -168,6 +204,14 @@ export default function TeacherAttendancePage() {
       .select("actual_teacher_id")
       .eq("class_id", classId)
       .eq("session_date", date);
+
+    if (
+      requestId !== teacherLoadRequestRef.current ||
+      classId !== selectionRef.current.classId ||
+      date !== selectionRef.current.date
+    ) {
+      return;
+    }
 
     if (workSessionError) {
       console.error("TEACHER WORK SESSION ERROR:", workSessionError);
@@ -195,20 +239,23 @@ export default function TeacherAttendancePage() {
     );
 
     setLoadingTeachers(false);
-  }
+  }, [classId, date, supabase]);
 
   useEffect(() => {
-    loadBase();
-  }, []);
+    void loadBase();
+  }, [loadBase]);
 
   useEffect(() => {
-    if (classId) loadTeachers();
+    if (classId) void loadTeachers();
     else {
+      teacherLoadRequestRef.current += 1;
       setRows([]);
       setApprovedSubstitutionTeacherIds(new Set());
       setConfirmedTeacherIds(new Set());
+      setHasApprovedSubstitution(false);
+      setLoadingTeachers(false);
     }
-  }, [classId, date]);
+  }, [classId, loadTeachers]);
 
   const filteredClasses = useMemo(() => {
     const scheduleDay = getScheduleDayKey(date);

@@ -338,6 +338,7 @@ export default function ReportsPage() {
         return {
           ...branch,
           thu,
+          otherThu,
           refund,
           chi,
           remaining: thu - refund - chi,
@@ -643,7 +644,7 @@ export default function ReportsPage() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-400">
-                Thu − Hoàn − Chi = Còn lại
+                Tổng thu (gồm học phí + thu khác) − Hoàn − Chi = Còn lại
               </p>
             </div>
 
@@ -659,7 +660,8 @@ export default function ReportsPage() {
                   <thead>
                     <tr className="border-b border-slate-100 text-left text-sm text-slate-400">
                       <th className="p-4">Cơ sở</th>
-                      <th className="p-4 text-right">Thu</th>
+                      <th className="p-4 text-right">Tổng thu</th>
+                      <th className="p-4 text-right">Thu khác</th>
                       <th className="p-4 text-right">Hoàn</th>
                       <th className="p-4 text-right">Chi</th>
                       <th className="p-4 text-right">
@@ -680,6 +682,10 @@ export default function ReportsPage() {
 
                         <td className="p-4 text-right font-bold text-emerald-600">
                           {money(branch.thu)}
+                        </td>
+
+                        <td className="p-4 text-right font-bold text-cyan-600">
+                          {money(branch.otherThu)}
                         </td>
 
                         <td className="p-4 text-right font-bold text-amber-600">
@@ -714,6 +720,10 @@ export default function ReportsPage() {
                           {money(unassignedThu)}
                         </td>
 
+                        <td className="p-4 text-right font-bold text-cyan-600">
+                          {money(unassignedOtherThu)}
+                        </td>
+
                         <td className="p-4 text-right font-bold text-amber-600">
                           {money(unassignedRefund)}
                         </td>
@@ -737,6 +747,10 @@ export default function ReportsPage() {
 
                       <td className="p-4 text-right font-black text-emerald-600">
                         {money(totalThu)}
+                      </td>
+
+                      <td className="p-4 text-right font-black text-cyan-600">
+                        {money(otherThu)}
                       </td>
 
                       <td className="p-4 text-right font-black text-amber-600">

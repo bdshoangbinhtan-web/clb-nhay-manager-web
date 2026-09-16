@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
  "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
@@ -25,12 +25,11 @@ type DanceClass = {
 
 export default function NewStudentPage() {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [name, setName] = useState("");
-  const [parentPhone, setParentPhone] = useState("");
   const [joinDate, setJoinDate] = useState("");
   const [branchId, setBranchId] = useState("");
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
@@ -121,73 +120,6 @@ export default function NewStudentPage() {
     );
   }
 
-  function calculateNewStudentTuition(
-    classItem: DanceClass,
-    joinDateValue: string,
-    billingMonth: string
-  ) {
-    const monthlyFee = Number(classItem.monthly_fee || 0);
-
-    // 750k, 1.5tr và các mức khác: lấy đúng giá tháng.
-    // Chỉ lớp 600k mới tính theo số buổi thực tế.
-    if (monthlyFee !== 600000) {
-      return monthlyFee;
-    }
-
-    const startMinutes = classItem.schedule_start
-      ? Number(classItem.schedule_start.slice(0, 2)) * 60 +
-        Number(classItem.schedule_start.slice(3, 5))
-      : 0;
-
-    const endMinutes = classItem.schedule_end
-      ? Number(classItem.schedule_end.slice(0, 2)) * 60 +
-        Number(classItem.schedule_end.slice(3, 5))
-      : 0;
-
-    const durationMinutes =
-      endMinutes > startMinutes ? endMinutes - startMinutes : 60;
-
-    const feePerLesson = (durationMinutes / 60) * 50000;
-
-    if (!joinDateValue) return monthlyFee;
-
-    const [year, month] = billingMonth.split("-").map(Number);
-    const joined = new Date(joinDateValue + "T00:00:00");
-    const firstDay = new Date(year, month - 1, 1);
-    const lastDay = new Date(year, month, 0);
-
-    if (joined > lastDay) return 0;
-    if (joined < firstDay) return monthlyFee;
-
-    const dayMap: Record<string, number> = {
-      "2": 1,
-      "3": 2,
-      "4": 3,
-      "5": 4,
-      "6": 5,
-      "7": 6,
-      "CN": 0,
-    };
-
-    const scheduleDays = Array.isArray(classItem.schedule_days)
-      ? classItem.schedule_days
-      : [];
-
-    const jsDays = scheduleDays
-      .map((day) => dayMap[String(day)])
-      .filter((day): day is number => day !== undefined);
-
-    let lessons = 0;
-    const cursor = new Date(joined);
-
-    while (cursor <= lastDay) {
-      if (jsDays.includes(cursor.getDay())) lessons++;
-      cursor.setDate(cursor.getDate() + 1);
-    }
-
-    return Math.min(lessons * feePerLesson, monthlyFee);
-  }
-
   async function createStudent() {
     if (!name.trim()) {
       alert("Vui lòng nhập tên học viên.");
@@ -196,6 +128,11 @@ export default function NewStudentPage() {
 
     if (!joinDate) {
       alert("Vui lòng nhập ngày tham gia.");
+      return;
+    }
+
+    if (status === "active" && selectedClasses.length === 0) {
+      alert("Vui lòng chọn ít nhất một lớp để tiếp tục tạo học phí.");
       return;
     }
 
@@ -208,7 +145,7 @@ export default function NewStudentPage() {
       .from("students")
       .insert({
         full_name: name.trim(),
-        parent_phone: parentPhone.trim() || null,
+        parent_phone: null,
         join_date: effectiveJoinDate,
         branch_id: branchId || null,
         status,
@@ -243,58 +180,20 @@ export default function NewStudentPage() {
       }
     }
 
-    // Tự tạo học phí tháng hiện tại cho từng lớp vừa gán.
-    // Mỗi học viên + lớp + tháng chỉ có đúng 1 khoản tuition.
-    if (selectedClasses.length && status === "active") {
-      const billingMonth = vietnamCurrentMonth();
-      const billingDate = `${billingMonth}-01`;
+    setSaving(false);
 
-      const tuitionRows = selectedClasses.flatMap((classId) => {
-        const classItem = classes.find((item) => item.id === classId);
-        if (!classItem) return [];
-
-        const amount = calculateNewStudentTuition(
-          classItem,
-          effectiveJoinDate,
-          billingMonth
-        );
-
-        // Nếu ngày vào học nằm sau tháng đang tính thì chưa phát sinh học phí.
-        if (amount <= 0) return [];
-
-        return [
-          {
-            student_id: data.id,
-            class_id: classItem.id,
-            branch_id: branchId || classItem.branch_id || null,
-            billing_month: billingDate,
-            description: `Học phí ${billingMonth.slice(5, 7)}/${billingMonth.slice(0, 4)}`,
-            amount_due: amount,
-            amount_paid: 0,
-            payment_date: null,
-            note: "Tự tạo khi thêm học viên",
-          },
-        ];
+    if (status === "active" && selectedClasses.length > 0) {
+      const params = new URLSearchParams({
+        newStudentId: data.id,
+        classId: selectedClasses[0],
+        classIds: selectedClasses.join(","),
+        billingMonth: vietnamCurrentMonth(),
       });
 
-      if (tuitionRows.length) {
-        const { error: tuitionError } = await supabase
-          .from("tuition")
-          .insert(tuitionRows);
-
-        if (tuitionError) {
-          setSaving(false);
-          alert(
-            "⚠️ Đã tạo học viên và gán lớp nhưng chưa tạo được học phí: " +
-              tuitionError.message
-          );
-          router.push(`/students/${data.id}`);
-          return;
-        }
-      }
+      router.push(`/tuition?${params.toString()}`);
+      return;
     }
 
-    setSaving(false);
     router.push(`/students/${data.id}`);
   }
 
@@ -498,7 +397,7 @@ export default function NewStudentPage() {
             disabled={saving}
             className="ui-btn ui-btn-primary w-full min-w-0 sm:w-auto sm:min-w-[150px]"
           >
-            {saving ? "Đang tạo..." : "Tạo học viên"}
+            {saving ? "Đang tạo..." : "Tạo học viên → Học phí"}
           </button>
         </div>
       </section>

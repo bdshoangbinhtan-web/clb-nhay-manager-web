@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState } from "react";
+import Image from "next/image";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -45,18 +46,22 @@ async function printViaBridge(data: any) {
 
 export default function ReceiptPage() {
   const { id } = useParams();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       const { data: payment, error } = await supabase
         .from("tuition_payments")
         .select("id,tuition_id,amount,payment_method,payment_date,receipt_no")
         .eq("id", String(id))
         .single();
+
+      if (cancelled) return;
 
       if (error || !payment) {
         alert(error?.message || "Không tìm thấy phiếu thu.");
@@ -69,6 +74,8 @@ export default function ReceiptPage() {
         .select("id,student_id,class_id,branch_id,billing_month,amount_due,amount_paid")
         .eq("id", payment.tuition_id)
         .single();
+
+      if (cancelled) return;
 
       if (tuitionError || !tuition) {
         alert(tuitionError?.message || "Không tìm thấy học phí.");
@@ -85,10 +92,14 @@ export default function ReceiptPage() {
             : Promise.resolve({ data: null }),
         ]);
 
+      if (cancelled) return;
+
       const { data: payments } = await supabase
         .from("tuition_payments")
         .select("amount")
         .eq("tuition_id", tuition.id);
+
+      if (cancelled) return;
 
       const totalPaid = (payments || []).reduce(
         (sum, x) => sum + Number(x.amount),
@@ -122,8 +133,12 @@ export default function ReceiptPage() {
       setLoading(false);
     }
 
-    load();
-  }, [id]);
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, supabase]);
 
   if (loading) {
     return <div className="p-10 text-center">Đang tải phiếu thu...</div>;
@@ -340,9 +355,11 @@ export default function ReceiptPage() {
 
         <main className="receipt-card mx-auto max-w-[700px] rounded-2xl bg-white p-10 shadow-xl">
           <header className="receipt-header border-b-2 border-slate-900 pb-5 text-center">
-            <img
+            <Image
               src="/angelbk-logo.jpg"
               alt="ANGEL BK Dance Club"
+              width={96}
+              height={96}
               className="mx-auto mb-4 h-24 w-24 rounded-full object-cover"
             />
             <div>

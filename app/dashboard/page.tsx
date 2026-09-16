@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { toVietnamDateKey, vietnamToday } from "@/lib/vietnam-date";
+import {
+  toVietnamDateKey,
+  vietnamCurrentMonth,
+  vietnamToday,
+} from "@/lib/vietnam-date";
 
 type Student = {
   id: string;
@@ -111,6 +115,15 @@ const categoryLabel: Record<string, string> = {
   other: "Khác",
 };
 
+function shiftMonthKey(monthKey: string, offset: number) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1 + offset, 1));
+
+  return `${shifted.getUTCFullYear()}-${String(
+    shifted.getUTCMonth() + 1
+  ).padStart(2, "0")}`;
+}
+
 type TuitionForAlert = {
   id: string;
   student_id: string;
@@ -134,7 +147,7 @@ type PayrollForAlert = {
 };
 
 export default function DashboardPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [students, setStudents] = useState<Student[]>([]);
   const [globalSearch, setGlobalSearch] = useState("");
@@ -157,6 +170,13 @@ export default function DashboardPage() {
   const loadDashboard = useCallback(async () => {
     setLoading(true);
 
+    const dashboardMonth = vietnamCurrentMonth();
+    const previousDashboardMonth = shiftMonthKey(dashboardMonth, -1);
+    const nextDashboardMonth = shiftMonthKey(dashboardMonth, 1);
+    const currentMonthStart = `${dashboardMonth}-01`;
+    const previousMonthStart = `${previousDashboardMonth}-01`;
+    const nextMonthStart = `${nextDashboardMonth}-01`;
+
     const [
       studentsRes,
       classesRes,
@@ -169,6 +189,7 @@ export default function DashboardPage() {
       teachersAlertsRes,
       payrollAlertsRes,
       substitutionRequestsRes,
+      otherRevenuesRes,
     ] = await Promise.all([
         supabase
           .from("students")
@@ -187,16 +208,21 @@ export default function DashboardPage() {
         supabase
           .from("tuition_payments")
           .select("id,amount,payment_date,payment_method")
+          .gte("payment_date", previousMonthStart)
+          .lt("payment_date", nextMonthStart)
           .order("payment_date", { ascending: false }),
         supabase
           .from("expenses")
           .select("id,amount,expense_date,category,description")
-          .order("expense_date", { ascending: false })
-          .limit(100),
+          .gte("expense_date", currentMonthStart)
+          .lt("expense_date", nextMonthStart)
+          .order("expense_date", { ascending: false }),
         supabase
           .from("tuition_adjustments")
           .select("id,student_id,action,amount,created_at")
           .eq("action", "refund")
+          .gte("created_at", `${currentMonthStart}T00:00:00+07:00`)
+          .lt("created_at", `${nextMonthStart}T00:00:00+07:00`)
           .order("created_at", { ascending: false }),
 
         supabase
@@ -206,7 +232,8 @@ export default function DashboardPage() {
 
         supabase
           .from("tuition")
-          .select("id,student_id,class_id,billing_month,amount_due,amount_paid"),
+          .select("id,student_id,class_id,billing_month,amount_due,amount_paid")
+          .eq("billing_month", currentMonthStart),
 
         supabase
           .from("teachers")
@@ -215,11 +242,18 @@ export default function DashboardPage() {
 
         supabase
           .from("teacher_payrolls")
-          .select("id,teacher_id,payroll_month,status"),
+          .select("id,teacher_id,payroll_month,status")
+          .eq("payroll_month", currentMonthStart),
         supabase
           .from("teacher_substitution_requests")
           .select("id", { count: "exact", head: true })
           .eq("status", "pending"),
+        supabase
+          .from("other_revenues")
+          .select("id,amount,revenue_date")
+          .gte("revenue_date", previousMonthStart)
+          .lt("revenue_date", nextMonthStart)
+          .order("revenue_date", { ascending: false }),
       ]);
 
     if (studentsRes.error) console.error(studentsRes.error);
@@ -235,6 +269,7 @@ export default function DashboardPage() {
     if (substitutionRequestsRes.error) {
       console.error(substitutionRequestsRes.error);
     }
+    if (otherRevenuesRes.error) console.error(otherRevenuesRes.error);
 
     setPendingSubstitutionCount(substitutionRequestsRes.count ?? 0);
 
@@ -248,14 +283,7 @@ export default function DashboardPage() {
     
     setPayments(paymentsRes.data ?? []);
     setExpenses(expensesRes.data ?? []);
-
-    const { data: otherRevenueData, error: otherRevenueError } = await supabase
-      .from("other_revenues")
-      .select("id,amount,revenue_date")
-      .order("revenue_date", { ascending: false });
-
-    if (otherRevenueError) console.error(otherRevenueError);
-    setOtherRevenues((otherRevenueData ?? []) as OtherRevenue[]);
+    setOtherRevenues((otherRevenuesRes.data ?? []) as OtherRevenue[]);
     setAdjustments((adjustmentsRes.data ?? []) as TuitionAdjustment[]);
     setLoading(false);
   }, [supabase]);
@@ -594,7 +622,7 @@ export default function DashboardPage() {
     payrollAlerts
       .filter(
         (item) =>
-          item.payroll_month === currentMonthKey &&
+          item.payroll_month.startsWith(currentMonthKey) &&
           (item.status === "locked" || item.status === "paid")
       )
       .map((item) => item.teacher_id)

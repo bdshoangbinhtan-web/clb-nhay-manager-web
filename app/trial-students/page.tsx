@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 type TrialStudent = {
@@ -16,19 +16,23 @@ type TrialStudent = {
 };
 
 export default function TrialStudentsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const loadRequestRef = useRef(0);
 
   const [rows, setRows] = useState<TrialStudent[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
 
     const { data, error } = await supabase.rpc(
       "get_trial_students_admin"
     );
+
+    if (requestId !== loadRequestRef.current) return;
 
     if (error) {
       console.error("TRIAL ADMIN LOAD ERROR:", error);
@@ -67,7 +71,7 @@ export default function TrialStudentsPage() {
     }
 
     setLoading(false);
-  }
+  }, [supabase]);
 
   async function convertTrial(row: TrialStudent) {
     const confirmed = window.confirm(
@@ -123,8 +127,8 @@ export default function TrialStudentsPage() {
   }
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   const filteredRows = rows.filter((row) =>
     row.full_name.toLowerCase().includes(search.toLowerCase())

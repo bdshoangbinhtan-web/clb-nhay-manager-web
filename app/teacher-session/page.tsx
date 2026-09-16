@@ -214,7 +214,7 @@ export default function TeacherSessionPage() {
 
     setSessions(finalSessions);
 
-    // 3. Lấy các buổi đã xác nhận.
+    // 3. Lấy các buổi đã chấm công.
     const regularClassIds = regularSessions.map((item) => {
       return item.id.replace("regular-", "");
     });
@@ -290,7 +290,7 @@ export default function TeacherSessionPage() {
       return;
     }
 
-    // Dùng ngày Việt Nam tại đúng thời điểm giáo viên bấm xác nhận.
+    // Dùng ngày Việt Nam tại đúng thời điểm giáo viên bấm chấm công.
     const sessionDate = getTodayDate();
 
     setSavingId(session.id);
@@ -321,7 +321,7 @@ export default function TeacherSessionPage() {
 
       if (error) {
         console.error(error);
-        alert("❌ Không thể xác nhận buổi dạy: " + error.message);
+        alert("❌ Không thể chấm công buổi dạy: " + error.message);
         return;
       }
 
@@ -330,7 +330,8 @@ export default function TeacherSessionPage() {
         [session.id]: true,
       }));
 
-      alert("✅ Đã xác nhận buổi dạy thay.");
+      alert("✅ Đã chấm công buổi dạy thay.");
+      window.dispatchEvent(new Event("teacher-attendance-updated"));
       await loadData();
       return;
     }
@@ -359,11 +360,11 @@ export default function TeacherSessionPage() {
         message.includes("được Admin duyệt")
       ) {
         alert(
-          "❌ Bạn không được xác nhận buổi dạy này. " +
+          "❌ Bạn không được chấm công buổi dạy này. " +
           "Buổi này đã được Admin duyệt cho giáo viên khác dạy thay."
         );
       } else {
-        alert("❌ Không thể xác nhận buổi dạy: " + message);
+        alert("❌ Không thể chấm công buổi dạy: " + message);
       }
 
       return;
@@ -374,28 +375,29 @@ export default function TeacherSessionPage() {
       [session.id]: true,
     }));
 
-    alert("✅ Đã xác nhận buổi dạy.");
+    alert("✅ Đã chấm công buổi dạy.");
+    window.dispatchEvent(new Event("teacher-attendance-updated"));
     await loadData();
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <section>
         <div className="text-xs font-black uppercase tracking-widest text-blue-600">
           Giáo viên
         </div>
 
         <h1 className="mt-1 text-2xl font-black text-slate-900">
-          👨‍🏫 Xác nhận buổi dạy
+          ✅ Chấm công
         </h1>
 
         <p className="mt-1 text-sm text-slate-500">
-          Hiển thị các lớp bạn được phân công và các buổi dạy thay đã được
+          Chấm công các lớp bạn được phân công và các buổi dạy thay đã được
           Admin duyệt hôm nay.
         </p>
       </section>
 
-      <section className="rounded-2xl border bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border bg-white p-4 shadow-sm sm:p-5">
         <div className="text-sm font-bold text-slate-700">
           📅 Hôm nay
         </div>
@@ -405,7 +407,7 @@ export default function TeacherSessionPage() {
         </div>
 
         <div className="mt-1 text-sm text-slate-500">
-          Chỉ có thể xác nhận buổi dạy của ngày hôm nay.
+          Chỉ có thể chấm công buổi dạy của ngày hôm nay.
         </div>
       </section>
 
@@ -421,7 +423,7 @@ export default function TeacherSessionPage() {
         </div>
       ) : sessions.length === 0 ? (
         <div className="rounded-2xl border bg-white p-6 text-slate-500">
-          Hôm nay bạn không có lớp nào để xác nhận.
+          Hôm nay bạn không có lớp nào cần chấm công.
         </div>
       ) : (
         <section className="space-y-3">
@@ -431,7 +433,7 @@ export default function TeacherSessionPage() {
             return (
               <div
                 key={item.id}
-                className="flex flex-col gap-4 rounded-2xl border bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-4 rounded-2xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-5"
               >
                 <div>
                   <div className="text-lg font-bold text-slate-900">
@@ -457,8 +459,8 @@ export default function TeacherSessionPage() {
 
                   <div className="mt-1 text-sm text-slate-500">
                     {isConfirmed
-                      ? "Buổi dạy đã được xác nhận."
-                      : "Chưa xác nhận buổi dạy."}
+                      ? "Buổi dạy đã được chấm công."
+                      : "Chưa chấm công buổi dạy."}
                   </div>
                 </div>
 
@@ -468,17 +470,17 @@ export default function TeacherSessionPage() {
                   disabled={
                     isConfirmed || savingId === item.id
                   }
-                  className={`rounded-xl px-5 py-3 font-bold ${
+                  className={`min-h-12 w-full rounded-xl px-5 py-3 text-base font-bold sm:w-auto ${
                     isConfirmed
                       ? "cursor-default bg-green-100 text-green-700"
                       : "bg-slate-900 text-white hover:opacity-90"
                   } disabled:opacity-70`}
                 >
                   {savingId === item.id
-                    ? "Đang lưu..."
+                      ? "Đang lưu..."
                     : isConfirmed
-                      ? "✅ Đã xác nhận"
-                      : "Tôi đã dạy buổi này"}
+                      ? "✅ Đã chấm công"
+                      : "Chấm công buổi này"}
                 </button>
               </div>
             );

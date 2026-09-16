@@ -36,8 +36,10 @@ type ClassStudent = {
     | null;
 };
 
+const STUDENTS_PER_BATCH = 60;
+
 export default function StudentsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [students, setStudents] = useState<Student[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -47,6 +49,7 @@ export default function StudentsPage() {
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("active");
+  const [visibleCount, setVisibleCount] = useState(STUDENTS_PER_BATCH);
   const [voiceSearching, setVoiceSearching] = useState(false);
   type SpeechRecognitionResultLike = {
     [index: number]: {
@@ -148,7 +151,8 @@ export default function StudentsPage() {
         .from("class_students")
         .select(
           "student_id,class_id,classes(id,name,branch_id)"
-        ),
+        )
+        .eq("status", "active"),
     ]);
 
     if (studentsRes.error) console.error(studentsRes.error);
@@ -214,6 +218,12 @@ export default function StudentsPage() {
   ).length;
 
   const inactiveCount = students.length - activeCount;
+
+  useEffect(() => {
+    setVisibleCount(STUDENTS_PER_BATCH);
+  }, [search, branchFilter, statusFilter]);
+
+  const visibleStudents = filteredStudents.slice(0, visibleCount);
 
   return (
     <div className="space-y-7">
@@ -350,7 +360,7 @@ export default function StudentsPage() {
           <div>
             <h2 className="text-xl font-black">👥 Danh sách học viên</h2>
             <p className="mt-1 text-sm text-slate-400">
-              {filteredStudents.length} học viên đang hiển thị
+              Đang hiển thị {visibleStudents.length}/{filteredStudents.length} học viên
             </p>
           </div>
         </div>
@@ -371,7 +381,7 @@ export default function StudentsPage() {
           </div>
         ) : (
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {filteredStudents.map((student) => {
+            {visibleStudents.map((student) => {
               const classes = classMap.get(student.id) ?? [];
               const active = student.status === "active";
 
@@ -459,6 +469,26 @@ export default function StudentsPage() {
                 </article>
               );
             })}
+
+            {visibleStudents.length < filteredStudents.length && (
+              <button
+                type="button"
+                onClick={() =>
+                  setVisibleCount((current) =>
+                    Math.min(
+                      current + STUDENTS_PER_BATCH,
+                      filteredStudents.length
+                    )
+                  )
+                }
+                className="ui-card flex min-h-40 items-center justify-center p-5 font-black text-blue-600 transition hover:-translate-y-1 hover:shadow-[0_20px_42px_rgba(35,50,75,.13)]"
+              >
+                Hiển thị thêm {Math.min(
+                  STUDENTS_PER_BATCH,
+                  filteredStudents.length - visibleStudents.length
+                )} học viên
+              </button>
+            )}
           </div>
         )}
       </section>

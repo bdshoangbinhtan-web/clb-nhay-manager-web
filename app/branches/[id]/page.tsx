@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -63,7 +63,8 @@ function formatSchedule(
 export default function ClassDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const loadRequestRef = useRef(0);
 
   const classId = String(params.id);
 
@@ -80,7 +81,8 @@ export default function ClassDetailPage() {
   const [selectedTeacherId, setSelectedTeacherId] = useState("");
   const [savingTeacher, setSavingTeacher] = useState(false);
 
-  async function loadClass() {
+  const loadClass = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
     setError("");
 
@@ -100,6 +102,8 @@ export default function ClassDetailPage() {
 
       classData = result.data;
       classError = result.error;
+
+      if (requestId !== loadRequestRef.current) return;
 
       if (classData || classError) break;
 
@@ -140,7 +144,9 @@ export default function ClassDetailPage() {
           .select("id,full_name,salary_rate")
           .eq("status", "active")
           .order("full_name"),
-      ]);
+    ]);
+
+    if (requestId !== loadRequestRef.current) return;
 
     setBranch(branchData);
 
@@ -158,7 +164,7 @@ export default function ClassDetailPage() {
     setAvailableTeachers(allTeachers ?? []);
 
     setLoading(false);
-  }
+  }, [classId, supabase]);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,8 +187,9 @@ export default function ClassDetailPage() {
 
     return () => {
       cancelled = true;
+      loadRequestRef.current += 1;
     };
-  }, [classId, supabase]);
+  }, [loadClass, supabase]);
 
   async function addTeacher() {
     if (!selectedTeacherId) {
