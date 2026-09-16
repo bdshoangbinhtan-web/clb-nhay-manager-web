@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, toVietnamDateKey } from "@/lib/vietnam-date";
 
@@ -61,7 +61,7 @@ function monthName(month: string) {
 }
 
 export default function ReportsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [mode, setMode] = useState<"month" | "year">("month");
   const [period, setPeriod] = useState(vietnamCurrentMonth());
@@ -74,7 +74,7 @@ export default function ReportsPage() {
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
 
     const [
@@ -158,13 +158,13 @@ export default function ReportsPage() {
   setOtherRevenues((otherRevenueData ?? []) as OtherRevenue[]);
     setAdjustments((adjustmentData ?? []) as unknown as Adjustment[]);
     setLoading(false);
-  }
+  }, [supabase]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
-  function paymentInPeriod(item: Payment) {
+  const paymentInPeriod = useCallback((item: Payment) => {
     if (!item.payment_date) return false;
 
     const date = item.payment_date.slice(0, 10);
@@ -174,17 +174,17 @@ export default function ReportsPage() {
     }
 
     return date.startsWith(period.slice(0, 4));
-  }
+  }, [mode, period]);
 
-  function expenseInPeriod(item: Expense) {
+  const expenseInPeriod = useCallback((item: Expense) => {
     if (mode === "month") {
       return item.expense_date.startsWith(period);
     }
 
     return item.expense_date.startsWith(period.slice(0, 4));
-  }
+  }, [mode, period]);
 
-  function adjustmentInPeriod(item: Adjustment) {
+  const adjustmentInPeriod = useCallback((item: Adjustment) => {
     // created_at là timestamptz: quy về ngày Việt Nam trước khi lọc kỳ.
     const date = toVietnamDateKey(item.created_at);
 
@@ -193,7 +193,7 @@ export default function ReportsPage() {
     }
 
     return date.startsWith(period.slice(0, 4));
-  }
+  }, [mode, period]);
 
   const filteredPayments = useMemo(() => {
     return payments.filter((item) => {
@@ -208,7 +208,7 @@ export default function ReportsPage() {
 
       return true;
     });
-  }, [payments, period, mode, branchFilter]);
+  }, [payments, branchFilter, paymentInPeriod]);
 
   const filteredExpenses = useMemo(() => {
     return expenses.filter((item) => {
@@ -220,7 +220,7 @@ export default function ReportsPage() {
 
       return true;
     });
-  }, [expenses, period, mode, branchFilter]);
+  }, [expenses, branchFilter, expenseInPeriod]);
 
   const filteredRefunds = useMemo(() => {
     return adjustments.filter((item) => {
@@ -232,7 +232,7 @@ export default function ReportsPage() {
 
       return true;
     });
-  }, [adjustments, period, mode, branchFilter]);
+  }, [adjustments, branchFilter, adjustmentInPeriod]);
 
   const filteredOtherRevenues = useMemo(() => {
     return otherRevenues.filter((item) => {
@@ -354,6 +354,9 @@ export default function ReportsPage() {
     expenses,
     period,
     mode,
+    paymentInPeriod,
+    adjustmentInPeriod,
+    expenseInPeriod,
   ]);
 
   const unassignedTuitionThu = payments

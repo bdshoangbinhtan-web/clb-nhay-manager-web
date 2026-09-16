@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 
@@ -102,9 +102,13 @@ function formatDate(value: string) {
 }
 
 export default function TeacherPayrollPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const loadRequestRef = useRef(0);
 
   const [month, setMonth] = useState(getLocalMonth());
+  const monthRef = useRef(month);
+  monthRef.current = month;
+
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [workSessions, setWorkSessions] = useState<WorkSession[]>([]);
@@ -118,11 +122,17 @@ export default function TeacherPayrollPage() {
   // Tiền Admin chỉnh riêng từng buổi.
   const [amountEdits, setAmountEdits] = useState<Record<string, string>>({});
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
+    const requestedMonth = month;
+
+    // Một callback cũ không được phép tải/ghi đè tháng đang xem.
+    if (requestedMonth !== monthRef.current) return;
+
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
 
-    const start = `${month}-01`;
-    const [year, monthNumber] = month.split("-").map(Number);
+    const start = `${requestedMonth}-01`;
+    const [year, monthNumber] = requestedMonth.split("-").map(Number);
 
     const lastDay = new Date(year, monthNumber, 0);
     const lastDayString =
@@ -178,6 +188,13 @@ export default function TeacherPayrollPage() {
           )
           .eq("payroll_month", start),
       ]);
+
+    if (
+      requestId !== loadRequestRef.current ||
+      requestedMonth !== monthRef.current
+    ) {
+      return;
+    }
 
     if (teachersRes.error) {
       console.error(teachersRes.error);
@@ -247,6 +264,13 @@ export default function TeacherPayrollPage() {
         )
         .in("payroll_id", payrollIds);
 
+      if (
+        requestId !== loadRequestRef.current ||
+        requestedMonth !== monthRef.current
+      ) {
+        return;
+      }
+
       if (detailError) {
         console.error(detailError);
         alert(
@@ -260,12 +284,17 @@ export default function TeacherPayrollPage() {
       setDetails([]);
     }
 
-    setLoading(false);
-  }
+    if (
+      requestId === loadRequestRef.current &&
+      requestedMonth === monthRef.current
+    ) {
+      setLoading(false);
+    }
+  }, [month, supabase]);
 
   useEffect(() => {
-    loadData();
-  }, [month]);
+    void loadData();
+  }, [loadData]);
 
   const classMap = useMemo(
     () => new Map(classes.map((item) => [item.id, item.name])),
@@ -409,7 +438,6 @@ export default function TeacherPayrollPage() {
     );
   }, [
     workSessions,
-    teacherAttendance,
     confirmedAttendanceKeys,
     teachers,
     payrollMap,

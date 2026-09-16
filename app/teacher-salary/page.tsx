@@ -46,36 +46,45 @@ function formatDate(value: string | null) {
 }
 
 export default function TeacherSalaryPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [month, setMonth] = useState(getLocalMonth());
   const [rows, setRows] = useState<SalaryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadData() {
-    setLoading(true);
-    setError("");
+  useEffect(() => {
+    let cancelled = false;
 
-    const { data, error } = await supabase.rpc("get_my_teacher_salary", {
-      p_payroll_month: `${month}-01`,
-    });
+    async function loadData() {
+      setLoading(true);
+      setError("");
 
-    if (error) {
-      console.error(error);
-      setError("Không tải được dữ liệu lương.\n\n" + error.message);
-      setRows([]);
+      const { data, error } = await supabase.rpc("get_my_teacher_salary", {
+        p_payroll_month: `${month}-01`,
+      });
+
+      // Request của tháng cũ không được ghi đè tháng mới.
+      if (cancelled) return;
+
+      if (error) {
+        console.error(error);
+        setError("Không tải được dữ liệu lương.\n\n" + error.message);
+        setRows([]);
+        setLoading(false);
+        return;
+      }
+
+      setRows((data ?? []) as SalaryRow[]);
       setLoading(false);
-      return;
     }
 
-    setRows((data ?? []) as SalaryRow[]);
-    setLoading(false);
-  }
+    void loadData();
 
-  useEffect(() => {
-    loadData();
-  }, [month]);
+    return () => {
+      cancelled = true;
+    };
+  }, [month, supabase]);
 
   const first = rows[0];
 
