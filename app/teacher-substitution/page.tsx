@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { vietnamScheduleDayKey, vietnamToday, vietnamTodayLabel } from "@/lib/vietnam-date";
+import { vietnamToday, vietnamTodayLabel } from "@/lib/vietnam-date";
 
 type Teacher = {
   id: string;
@@ -45,12 +45,8 @@ function todayLabel() {
   return vietnamTodayLabel();
 }
 
-function todayScheduleKey() {
-  return vietnamScheduleDayKey();
-}
-
 export default function TeacherSubstitutionPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [teacher, setTeacher] = useState<Teacher | null>(null);
   const [assignments, setAssignments] = useState<ClassTeacherRow[]>([]);
@@ -64,14 +60,31 @@ export default function TeacherSubstitutionPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const today = todayDate();
-  const todayKey = todayScheduleKey();
+  const loadRequests = useCallback(async (teacherId: string) => {
+    const { data, error } = await supabase
+      .from("teacher_substitution_requests")
+      .select(
+        `
+        id,
+        class_id,
+        standing_teacher_id,
+        substitute_teacher_id,
+        session_date,
+        status,
+        note,
+        classes(name),
+        standing_teacher:teachers!teacher_substitution_requests_standing_teacher_id_fkey(full_name)
+        `
+      )
+      .eq("substitute_teacher_id", teacherId)
+      .order("created_at", { ascending: false });
 
-  useEffect(() => {
-    loadPage();
-  }, []);
+    if (!error) {
+      setRequests((data ?? []) as unknown as RequestRow[]);
+    }
+  }, [supabase]);
 
-  async function loadPage() {
+  const loadPage = useCallback(async () => {
     setLoading(true);
     setError("");
 
@@ -147,31 +160,11 @@ export default function TeacherSubstitutionPage() {
     await loadRequests(teacherData.id);
 
     setLoading(false);
-  }
+  }, [loadRequests, supabase]);
 
-  async function loadRequests(teacherId: string) {
-    const { data, error } = await supabase
-      .from("teacher_substitution_requests")
-      .select(
-        `
-        id,
-        class_id,
-        standing_teacher_id,
-        substitute_teacher_id,
-        session_date,
-        status,
-        note,
-        classes(name),
-        standing_teacher:teachers!teacher_substitution_requests_standing_teacher_id_fkey(full_name)
-        `
-      )
-      .eq("substitute_teacher_id", teacherId)
-      .order("created_at", { ascending: false });
-
-    if (!error) {
-      setRequests((data ?? []) as unknown as RequestRow[]);
-    }
-  }
+  useEffect(() => {
+    void loadPage();
+  }, [loadPage]);
 
   const eligibleClasses = useMemo(() => {
     const map = new Map<string, ClassTeacherRow>();
@@ -190,7 +183,7 @@ export default function TeacherSubstitutionPage() {
     }
 
     return Array.from(map.values());
-  }, [assignments, teacher, todayKey]);
+  }, [assignments, teacher]);
 
   const standingTeachers = useMemo(() => {
     if (!selectedClassId) return [];
@@ -242,7 +235,7 @@ export default function TeacherSubstitutionPage() {
         class_id: selectedClassId,
         standing_teacher_id: selectedStandingTeacherId,
         substitute_teacher_id: teacher.id,
-        session_date: today,
+        session_date: todayDate(),
         status: "pending",
         note: "Giáo viên đăng ký dạy thay hôm nay.",
       });

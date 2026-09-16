@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamScheduleDayKey, vietnamToday } from "@/lib/vietnam-date";
 
@@ -68,7 +68,7 @@ function getTodayDate() {
 }
 
 export default function TeacherSessionPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [teacherId, setTeacherId] = useState("");
@@ -77,11 +77,13 @@ export default function TeacherSessionPage() {
   const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
 
-  const date = getTodayDate();
-  const todayKey = getTodayKey();
   const todayLabel = getTodayLabel();
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
+    // Lấy ngày hiện tại ngay lúc load, không giữ ngày cũ nếu trang mở qua 0 giờ.
+    const date = getTodayDate();
+    const todayKey = getTodayKey();
+
     setLoading(true);
     setError("");
 
@@ -276,17 +278,20 @@ export default function TeacherSessionPage() {
 
     setConfirmed(confirmedMap);
     setLoading(false);
-  }
+  }, [supabase]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   async function confirmSession(session: SessionItem) {
     if (!teacherId) {
       alert("Không xác định được tài khoản giáo viên.");
       return;
     }
+
+    // Dùng ngày Việt Nam tại đúng thời điểm giáo viên bấm xác nhận.
+    const sessionDate = getTodayDate();
 
     setSavingId(session.id);
 
@@ -304,7 +309,7 @@ export default function TeacherSessionPage() {
         "create_teacher_work_session",
         {
           p_class_id: session.classId,
-          p_session_date: date,
+          p_session_date: sessionDate,
           p_standing_teacher_id: session.standingTeacherId,
           p_actual_teacher_id: teacherId,
           p_teaching_type: "substitute",
@@ -338,7 +343,7 @@ export default function TeacherSessionPage() {
       "confirm_teacher_work_session",
       {
         p_class_id: classId,
-        p_session_date: date,
+        p_session_date: sessionDate,
       }
     );
 
@@ -370,7 +375,7 @@ export default function TeacherSessionPage() {
     }));
 
     alert("✅ Đã xác nhận buổi dạy.");
-    await loadData();    await loadData();
+    await loadData();
   }
 
   return (
