@@ -435,7 +435,8 @@ export default function StudentsPage() {
                     <span className="text-xs font-medium text-slate-400">
                       Tham gia{" "}
                       {new Date(student.created_at).toLocaleDateString(
-                        "vi-VN"
+                        "vi-VN",
+                        { timeZone: "Asia/Ho_Chi_Minh" }
                       )}
                     </span>
                   </div>

@@ -566,7 +566,9 @@ export default function ActivityLogPage() {
                 >
                   <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center">
                     <div className="shrink-0 text-xs font-semibold text-slate-400 lg:w-[150px]">
-                      {new Date(log.created_at).toLocaleString("vi-VN")}
+                      {new Date(log.created_at).toLocaleString("vi-VN", {
+                        timeZone: "Asia/Ho_Chi_Minh",
+                      })}
                     </div>
 
                     <div
@@ -632,7 +634,9 @@ export default function ActivityLogPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-400">
-                  {new Date(selectedLog.created_at).toLocaleString("vi-VN")}
+                  {new Date(selectedLog.created_at).toLocaleString("vi-VN", {
+                    timeZone: "Asia/Ho_Chi_Minh",
+                  })}
                 </p>
               </div>
 

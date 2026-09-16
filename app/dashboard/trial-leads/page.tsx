@@ -14,7 +14,12 @@ const statuses: { value: Status; label: string; tone: string }[] = [
   { value: "closed", label: "Đã đóng", tone: "bg-slate-200 text-slate-600" },
 ];
 const statusInfo = (status: Status) => statuses.find((item) => item.value === status) ?? statuses[0];
-const date = (value: string) => new Date(value).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" });
+const date = (value: string) =>
+  new Date(value).toLocaleString("vi-VN", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "Asia/Ho_Chi_Minh",
+  });
 
 export default function TrialLeadsPage() {
   const supabase = useMemo(() => createClient(), []);
