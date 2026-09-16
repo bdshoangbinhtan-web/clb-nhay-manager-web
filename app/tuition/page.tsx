@@ -1018,7 +1018,16 @@ export default function TuitionPage() {
       return;
     }
 
+    // Cập nhật UI ngay sau khi DB xóa thành công.
+    // Các ô Tổng phải thu / Đã thu / Còn nợ được tính từ state tuition,
+    // nên loại dòng vừa xóa khỏi state sẽ đồng bộ số liệu ngay lập tức.
+    setTuition((current) =>
+      current.filter((tuitionItem) => tuitionItem.id !== item.id)
+    );
+
     alert("Đã xóa khoản học phí chưa thu.");
+
+    // Đồng bộ lại lần nữa từ DB để đảm bảo state khớp production.
     await loadData();
   }
 
@@ -1100,6 +1109,11 @@ export default function TuitionPage() {
   }
 
   const filteredTuition = tuition.filter((item) => {
+    // Chỉ tính học phí của tháng đang xem.
+    if (item.billing_month !== `${billingMonth.slice(0, 7)}-01`) {
+      return false;
+    }
+
     const q = search.trim().toLowerCase();
 
     if (!q) return true;
@@ -1111,6 +1125,7 @@ export default function TuitionPage() {
     );
   });
 
+  // filteredTuition đã được giới hạn theo đúng tháng đang xem.
   const totalDue = filteredTuition.reduce(
     (sum, item) => sum + Number(item.amount_due),
     0
