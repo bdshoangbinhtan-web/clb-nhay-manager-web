@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { toVietnamDateKey, vietnamToday } from "@/lib/vietnam-date";
 
 type Student = {
   id: string;
@@ -387,31 +388,31 @@ export default function DashboardPage() {
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
+  const financeMonthKey =
+    `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`;
+
   const monthPayments = useMemo(
     () =>
-      payments.filter((item) => {
-        const d = new Date(item.payment_date);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-      }),
-    [payments, currentMonth, currentYear]
+      payments.filter((item) =>
+        String(item.payment_date ?? "").startsWith(financeMonthKey)
+      ),
+    [payments, financeMonthKey]
   );
 
   const monthOtherRevenues = useMemo(
     () =>
-      otherRevenues.filter((item) => {
-        const d = new Date(item.revenue_date);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-      }),
-    [otherRevenues, currentMonth, currentYear]
+      otherRevenues.filter((item) =>
+        String(item.revenue_date ?? "").startsWith(financeMonthKey)
+      ),
+    [otherRevenues, financeMonthKey]
   );
 
   const monthExpenses = useMemo(
     () =>
-      expenses.filter((item) => {
-        const d = new Date(item.expense_date);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-      }),
-    [expenses, currentMonth, currentYear]
+      expenses.filter((item) =>
+        String(item.expense_date ?? "").startsWith(financeMonthKey)
+      ),
+    [expenses, financeMonthKey]
   );
 
   const tuitionRevenue = monthPayments.reduce(
@@ -424,8 +425,9 @@ export default function DashboardPage() {
   );
   const revenue = tuitionRevenue + otherRevenue;
   const refundTotal = adjustments.reduce((sum, item) => {
-    const d = new Date(item.created_at);
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear
+    const refundDate = toVietnamDateKey(item.created_at);
+
+    return refundDate.startsWith(financeMonthKey)
       ? sum + Number(item.amount || 0)
       : sum;
   }, 0);
@@ -533,8 +535,6 @@ export default function DashboardPage() {
       });
   }, [classes, branches, classStudents, todayDay]);
 
-  const today = new Date();
-
   const currentMonthKey =
     `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`;
 
@@ -620,15 +620,29 @@ export default function DashboardPage() {
   const previousMonthYear =
     currentMonth === 0 ? currentYear - 1 : currentYear;
 
-  const previousMonthRevenue = payments
-    .filter((payment) => {
-      const d = new Date(payment.payment_date);
-      return (
-        d.getMonth() === previousMonth &&
-        d.getFullYear() === previousMonthYear
-      );
-    })
-    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const previousMonthKey =
+    `${previousMonthYear}-${String(previousMonth + 1).padStart(2, "0")}`;
+
+  const previousMonthTuitionRevenue = payments
+    .filter((payment) =>
+      String(payment.payment_date ?? "").startsWith(previousMonthKey)
+    )
+    .reduce(
+      (sum, payment) => sum + Number(payment.amount || 0),
+      0
+    );
+
+  const previousMonthOtherRevenue = otherRevenues
+    .filter((item) =>
+      String(item.revenue_date ?? "").startsWith(previousMonthKey)
+    )
+    .reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0
+    );
+
+  const previousMonthRevenue =
+    previousMonthTuitionRevenue + previousMonthOtherRevenue;
 
   const revenueChange =
     previousMonthRevenue > 0
@@ -643,45 +657,50 @@ export default function DashboardPage() {
 
   const studentChange = activeStudents - previousMonthActiveStudents;
 
-  const todayRevenue = payments
-    .filter((payment) => {
-      const d = new Date(payment.payment_date);
-      return (
-        d.getDate() === now.getDate() &&
-        d.getMonth() === now.getMonth() &&
-        d.getFullYear() === now.getFullYear()
-      );
-    })
-    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const todayKey = vietnamToday();
+
+  const todayTuitionRevenue = payments
+    .filter(
+      (payment) =>
+        String(payment.payment_date ?? "").slice(0, 10) === todayKey
+    )
+    .reduce(
+      (sum, payment) => sum + Number(payment.amount || 0),
+      0
+    );
+
+  const todayOtherRevenue = otherRevenues
+    .filter(
+      (item) =>
+        String(item.revenue_date ?? "").slice(0, 10) === todayKey
+    )
+    .reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0
+    );
+
+  const todayRevenue =
+    todayTuitionRevenue + todayOtherRevenue;
 
   const todayExpenseTotal = expenses
-    .filter((item) => {
-      const d = new Date(item.expense_date);
-      return (
-        d.getFullYear() === today.getFullYear() &&
-        d.getMonth() === today.getMonth() &&
-        d.getDate() === today.getDate()
-      );
-    })
-    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
-
-  const todayNewStudents = students.filter((item) => {
-    const d = new Date(item.created_at);
-    return (
-      d.getFullYear() === today.getFullYear() &&
-      d.getMonth() === today.getMonth() &&
-      d.getDate() === today.getDate()
+    .filter(
+      (item) =>
+        String(item.expense_date ?? "").slice(0, 10) === todayKey
+    )
+    .reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0
     );
-  }).length;
 
-  const todayPaymentCount = payments.filter((item) => {
-    const d = new Date(item.payment_date);
-    return (
-      d.getFullYear() === today.getFullYear() &&
-      d.getMonth() === today.getMonth() &&
-      d.getDate() === today.getDate()
-    );
-  }).length;
+  const todayNewStudents = students.filter(
+    (item) =>
+      toVietnamDateKey(item.created_at) === todayKey
+  ).length;
+
+  const todayPaymentCount = payments.filter(
+    (item) =>
+      String(item.payment_date ?? "").slice(0, 10) === todayKey
+  ).length;
 
   return (
     <div className="space-y-7">
@@ -708,7 +727,7 @@ export default function DashboardPage() {
         <div className="absolute right-7 top-7 hidden rounded-2xl bg-white/10 px-4 py-3 text-center backdrop-blur-md sm:block">
           <div className="text-xs text-slate-300">Hôm nay</div>
           <div className="mt-1 text-lg font-black">
-            {now.toLocaleDateString("vi-VN")}
+            {todayKey.split("-").reverse().join("/")}
           </div>
         </div>
       </section>
@@ -844,49 +863,21 @@ export default function DashboardPage() {
               <div className="rounded-2xl bg-rose-50 px-3 py-3">
                 <div className="text-xs font-bold text-rose-600">💸 Chi hôm nay</div>
                 <div className="mt-1 text-sm font-black text-rose-800">
-                  {money(
-  expenses
-    .filter((item) => {
-      const d = new Date(item.expense_date);
-      return (
-        d.getFullYear() === new Date().getFullYear() &&
-        d.getMonth() === new Date().getMonth() &&
-        d.getDate() === new Date().getDate()
-      );
-    })
-    .reduce((sum, item) => sum + Number(item.amount || 0), 0)
-)}
+                  {money(todayExpenseTotal)}
                 </div>
               </div>
 
               <div className="rounded-2xl bg-blue-50 px-3 py-3">
                 <div className="text-xs font-bold text-blue-600">🧑‍🎓 HV mới</div>
                 <div className="mt-1 text-sm font-black text-blue-800">
-                  {students.filter((item) => {
-  const d = new Date(item.created_at);
-  const now = new Date();
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-}).length} học viên
+                  {todayNewStudents} học viên
                 </div>
               </div>
 
               <div className="rounded-2xl bg-amber-50 px-3 py-3">
                 <div className="text-xs font-bold text-amber-600">🧾 Giao dịch</div>
                 <div className="mt-1 text-sm font-black text-amber-800">
-                  {payments.filter((item) => {
-  const d = new Date(item.payment_date);
-  const now = new Date();
-
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-}).length} lượt thu
+                  {todayPaymentCount} lượt thu
                 </div>
               </div>
             </div>

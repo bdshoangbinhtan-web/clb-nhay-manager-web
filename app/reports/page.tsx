@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { vietnamCurrentMonth } from "@/lib/vietnam-date";
+import { vietnamCurrentMonth, toVietnamDateKey } from "@/lib/vietnam-date";
 
 type Branch = { id: string; name: string };
 
@@ -185,7 +185,8 @@ export default function ReportsPage() {
   }
 
   function adjustmentInPeriod(item: Adjustment) {
-    const date = item.created_at.slice(0, 10);
+    // created_at là timestamptz: quy về ngày Việt Nam trước khi lọc kỳ.
+    const date = toVietnamDateKey(item.created_at);
 
     if (mode === "month") {
       return date.startsWith(period);
@@ -297,13 +298,26 @@ export default function ReportsPage() {
   const branchSummary = useMemo(() => {
     return branches
       .map((branch) => {
-        const thu = payments
+        const tuitionThu = payments
           .filter(
             (item) =>
               paymentInPeriod(item) &&
               item.tuition?.branch_id === branch.id
           )
           .reduce((sum, item) => sum + Number(item.amount), 0);
+
+        const otherThu = otherRevenues
+          .filter((item) => {
+            const inPeriod =
+              mode === "month"
+                ? item.revenue_date.startsWith(period)
+                : item.revenue_date.startsWith(period.slice(0, 4));
+
+            return inPeriod && item.branch_id === branch.id;
+          })
+          .reduce((sum, item) => sum + Number(item.amount), 0);
+
+        const thu = tuitionThu + otherThu;
 
         const refund = adjustments
           .filter(
@@ -332,14 +346,36 @@ export default function ReportsPage() {
       .filter(
         (item) => item.thu !== 0 || item.refund !== 0 || item.chi !== 0
       );
-  }, [branches, payments, adjustments, expenses, period, mode]);
+  }, [
+    branches,
+    payments,
+    otherRevenues,
+    adjustments,
+    expenses,
+    period,
+    mode,
+  ]);
 
-  const unassignedThu = payments
+  const unassignedTuitionThu = payments
     .filter(
       (item) =>
         paymentInPeriod(item) && !item.tuition?.branch_id
     )
     .reduce((sum, item) => sum + Number(item.amount), 0);
+
+  const unassignedOtherThu = otherRevenues
+    .filter((item) => {
+      const inPeriod =
+        mode === "month"
+          ? item.revenue_date.startsWith(period)
+          : item.revenue_date.startsWith(period.slice(0, 4));
+
+      return inPeriod && !item.branch_id;
+    })
+    .reduce((sum, item) => sum + Number(item.amount), 0);
+
+  const unassignedThu =
+    unassignedTuitionThu + unassignedOtherThu;
 
   const unassignedChi = expenses
     .filter(
