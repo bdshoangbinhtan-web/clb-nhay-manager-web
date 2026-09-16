@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 
 type Teacher = {
   id: string;
@@ -92,11 +93,7 @@ function monthLabel(value: string) {
 }
 
 function getLocalMonth() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
-    2,
-    "0"
-  )}`;
+  return vietnamCurrentMonth();
 }
 
 function formatDate(value: string) {

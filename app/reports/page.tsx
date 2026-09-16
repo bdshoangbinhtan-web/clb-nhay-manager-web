@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 
 type Branch = { id: string; name: string };
 
@@ -62,11 +63,8 @@ function monthName(month: string) {
 export default function ReportsPage() {
   const supabase = createClient();
 
-  const now = new Date();
   const [mode, setMode] = useState<"month" | "year">("month");
-  const [period, setPeriod] = useState(
-    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-  );
+  const [period, setPeriod] = useState(vietnamCurrentMonth());
   const [branchFilter, setBranchFilter] = useState("");
 
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -403,9 +401,7 @@ export default function ReportsPage() {
               setMode("month");
               if (period.length === 4) {
                 setPeriod(
-                  `${period}-${String(
-                    now.getMonth() + 1
-                  ).padStart(2, "0")}`
+                  `${period}-${vietnamCurrentMonth().slice(5, 7)}`
                 );
               }
             }}

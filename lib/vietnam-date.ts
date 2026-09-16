@@ -44,3 +44,29 @@ export function toVietnamDateKey(
 
   return vietnamToday(date);
 }
+
+
+export function vietnamScheduleDayKey(date: Date = new Date()) {
+  const [year, month, day] = vietnamToday(date)
+    .split("-")
+    .map(Number);
+
+  // Tính weekday từ date-key Việt Nam, không phụ thuộc timezone máy.
+  const weekday = new Date(
+    Date.UTC(year, month - 1, day)
+  ).getUTCDay();
+
+  // Quy ước của hệ thống:
+  // T2=2 ... T7=7, CN=0.
+  return String(weekday === 0 ? 0 : weekday + 1);
+}
+
+export function vietnamTodayLabel(date: Date = new Date()) {
+  return new Intl.DateTimeFormat("vi-VN", {
+    timeZone: VIETNAM_TIME_ZONE,
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamScheduleDayKey, vietnamToday, vietnamTodayLabel } from "@/lib/vietnam-date";
 
 type Teacher = {
   id: string;
@@ -37,27 +38,15 @@ type RequestRow = {
 };
 
 function todayDate() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return vietnamToday();
 }
 
 function todayLabel() {
-  return new Intl.DateTimeFormat("vi-VN", {
-    weekday: "long",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date());
+  return vietnamTodayLabel();
 }
 
 function todayScheduleKey() {
-  const day = new Date().getDay();
-
-  if (day === 0) return "0"; // CN
-  return String(day + 1); // T2=2 ... T7=7
+  return vietnamScheduleDayKey();
 }
 
 export default function TeacherSubstitutionPage() {

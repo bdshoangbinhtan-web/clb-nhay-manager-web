@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 
 type Branch = {
   id: string;
@@ -200,10 +201,7 @@ export default function NewStudentPage() {
 
     setSaving(true);
 
-    const today = new Date();
-    const localToday =
-      `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-
+    const localToday = vietnamToday();
     const effectiveJoinDate = joinDate || localToday;
 
     const { data, error } = await supabase
@@ -248,9 +246,7 @@ export default function NewStudentPage() {
     // Tự tạo học phí tháng hiện tại cho từng lớp vừa gán.
     // Mỗi học viên + lớp + tháng chỉ có đúng 1 khoản tuition.
     if (selectedClasses.length && status === "active") {
-      const now = new Date();
-      const billingMonth =
-        `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const billingMonth = vietnamCurrentMonth();
       const billingDate = `${billingMonth}-01`;
 
       const tuitionRows = selectedClasses.flatMap((classId) => {
