@@ -154,7 +154,7 @@ function changedFields(log: ActivityLog) {
 
 export default function ActivityLogPage() {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -170,6 +170,8 @@ export default function ActivityLogPage() {
   const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadData() {
       const { data: userData } = await supabase.auth.getUser();
 
@@ -189,40 +191,15 @@ export default function ActivityLogPage() {
         return;
       }
 
-      const [
-        logsRes,
-        profilesRes,
-        studentsRes,
-        teachersRes,
-        classesRes,
-        branchesRes,
-        tuitionRes,
-      ] = await Promise.all([
-        supabase
-          .from("activity_logs")
-          .select(
-            "id,created_at,user_id,action,entity_type,entity_id,old_data,new_data"
-          )
-          .order("created_at", { ascending: false })
-          .limit(100),
+      const logsRes = await supabase
+        .from("activity_logs")
+        .select(
+          "id,created_at,user_id,action,entity_type,entity_id,old_data,new_data"
+        )
+        .order("created_at", { ascending: false })
+        .limit(100);
 
-        supabase
-          .from("profiles")
-          .select("id,full_name,role")
-          .order("full_name"),
-
-        supabase.from("students").select("id,full_name"),
-
-        supabase.from("teachers").select("id,full_name"),
-
-        supabase.from("classes").select("id,name"),
-
-        supabase.from("branches").select("id,name"),
-
-        supabase
-          .from("tuition")
-          .select("id,student_id,amount_due,amount_paid,billing_month"),
-      ]);
+      if (cancelled) return;
 
       if (logsRes.error) {
         console.error(
@@ -237,9 +214,108 @@ export default function ActivityLogPage() {
             logsRes.error.code || "N/A"
           }`
         );
+        setLoading(false);
+        return;
       }
 
-      setLogs((logsRes.data as ActivityLog[]) ?? []);
+      const nextLogs = (logsRes.data as ActivityLog[]) ?? [];
+      const profileIds = new Set<string>();
+      const studentIds = new Set<string>();
+      const teacherIds = new Set<string>();
+      const classIds = new Set<string>();
+      const branchIds = new Set<string>();
+      const tuitionIds = new Set<string>();
+
+      const addId = (set: Set<string>, value: unknown) => {
+        if (typeof value === "string" && value) set.add(value);
+      };
+
+      for (const log of nextLogs) {
+        addId(profileIds, log.user_id);
+
+        if (log.entity_type === "profiles") addId(profileIds, log.entity_id);
+        if (log.entity_type === "students") addId(studentIds, log.entity_id);
+        if (log.entity_type === "teachers") addId(teacherIds, log.entity_id);
+        if (log.entity_type === "classes") addId(classIds, log.entity_id);
+        if (log.entity_type === "branches") addId(branchIds, log.entity_id);
+        if (log.entity_type === "tuition") addId(tuitionIds, log.entity_id);
+
+        for (const data of [log.old_data, log.new_data]) {
+          if (!data) continue;
+          addId(studentIds, data.student_id);
+          addId(teacherIds, data.teacher_id);
+          addId(teacherIds, data.actual_teacher_id);
+          addId(teacherIds, data.standing_teacher_id);
+          addId(classIds, data.class_id);
+          addId(branchIds, data.branch_id);
+          addId(tuitionIds, data.tuition_id);
+        }
+      }
+
+      const tuitionRes = tuitionIds.size
+        ? await supabase
+            .from("tuition")
+            .select("id,student_id,amount_due,amount_paid,billing_month")
+            .in("id", Array.from(tuitionIds))
+        : { data: [], error: null };
+
+      if (cancelled) return;
+
+      for (const item of tuitionRes.data ?? []) {
+        addId(studentIds, item.student_id);
+      }
+
+      const [profilesRes, studentsRes, teachersRes, classesRes, branchesRes] =
+        await Promise.all([
+          profileIds.size
+            ? supabase
+                .from("profiles")
+                .select("id,full_name,role")
+                .in("id", Array.from(profileIds))
+                .order("full_name")
+            : Promise.resolve({ data: [], error: null }),
+          studentIds.size
+            ? supabase
+                .from("students")
+                .select("id,full_name")
+                .in("id", Array.from(studentIds))
+            : Promise.resolve({ data: [], error: null }),
+          teacherIds.size
+            ? supabase
+                .from("teachers")
+                .select("id,full_name")
+                .in("id", Array.from(teacherIds))
+            : Promise.resolve({ data: [], error: null }),
+          classIds.size
+            ? supabase
+                .from("classes")
+                .select("id,name")
+                .in("id", Array.from(classIds))
+            : Promise.resolve({ data: [], error: null }),
+          branchIds.size
+            ? supabase
+                .from("branches")
+                .select("id,name")
+                .in("id", Array.from(branchIds))
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+
+      if (cancelled) return;
+
+      const relatedError = [
+        tuitionRes.error,
+        profilesRes.error,
+        studentsRes.error,
+        teachersRes.error,
+        classesRes.error,
+        branchesRes.error,
+      ].find(Boolean);
+
+      if (relatedError) {
+        console.error("Không tải được tên đối tượng trong nhật ký:", relatedError);
+      }
+
+      setLogs(nextLogs);
       setProfiles(profilesRes.data ?? []);
       setStudents(studentsRes.data ?? []);
       setTeachers(teachersRes.data ?? []);
@@ -249,7 +325,11 @@ export default function ActivityLogPage() {
       setLoading(false);
     }
 
-    loadData();
+    void loadData();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router, supabase]);
 
   const profileMap = useMemo(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, toVietnamDateKey } from "@/lib/vietnam-date";
 
@@ -60,8 +60,43 @@ function monthName(month: string) {
   return `${month.slice(5, 7)}/${month.slice(0, 4)}`;
 }
 
+function reportPeriodRange(mode: "month" | "year", period: string) {
+  if (mode === "year") {
+    const year = Number(period);
+    if (!/^\d{4}$/.test(period) || !Number.isFinite(year)) return null;
+
+    const start = `${year}-01-01`;
+    const end = `${year + 1}-01-01`;
+
+    return {
+      start,
+      end,
+      timestampStart: new Date(`${start}T00:00:00+07:00`).toISOString(),
+      timestampEnd: new Date(`${end}T00:00:00+07:00`).toISOString(),
+    };
+  }
+
+  if (!/^\d{4}-\d{2}$/.test(period)) return null;
+
+  const [year, month] = period.split("-").map(Number);
+  if (month < 1 || month > 12) return null;
+
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const start = `${period}-01`;
+  const end = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+
+  return {
+    start,
+    end,
+    timestampStart: new Date(`${start}T00:00:00+07:00`).toISOString(),
+    timestampEnd: new Date(`${end}T00:00:00+07:00`).toISOString(),
+  };
+}
+
 export default function ReportsPage() {
   const supabase = useMemo(() => createClient(), []);
+  const loadRequestRef = useRef(0);
 
   const [mode, setMode] = useState<"month" | "year">("month");
   const [period, setPeriod] = useState(vietnamCurrentMonth());
@@ -75,6 +110,14 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    const range = reportPeriodRange(mode, period);
+
+    if (!range) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
 
     const [
@@ -82,6 +125,7 @@ export default function ReportsPage() {
       { data: paymentData, error: paymentError },
       { data: expenseData, error: expenseError },
       { data: adjustmentData, error: adjustmentError },
+      { data: otherRevenueData, error: otherRevenueError },
     ] = await Promise.all([
       supabase.from("branches").select("id,name").order("name"),
 
@@ -95,11 +139,15 @@ export default function ReportsPage() {
           tuition:tuition_id (
             branch_id
           )
-        `),
+        `)
+        .gte("payment_date", range.start)
+        .lt("payment_date", range.end),
 
       supabase
         .from("expenses")
-        .select("id,branch_id,expense_date,category,amount"),
+        .select("id,branch_id,expense_date,category,amount")
+        .gte("expense_date", range.start)
+        .lt("expense_date", range.end),
 
       supabase
         .from("tuition_adjustments")
@@ -112,8 +160,19 @@ export default function ReportsPage() {
             branch_id
           )
         `)
-        .eq("action", "refund"),
+        .eq("action", "refund")
+        .gte("created_at", range.timestampStart)
+        .lt("created_at", range.timestampEnd),
+
+      supabase
+        .from("other_revenues")
+        .select("id,revenue_date,category,amount,branch_id")
+        .gte("revenue_date", range.start)
+        .lt("revenue_date", range.end)
+        .order("revenue_date", { ascending: false }),
     ]);
+
+    if (requestId !== loadRequestRef.current) return;
 
     if (branchError) {
       alert(branchError.message);
@@ -139,26 +198,19 @@ export default function ReportsPage() {
       return;
     }
 
+    if (otherRevenueError) {
+      alert(otherRevenueError.message);
+      setLoading(false);
+      return;
+    }
+
     setBranches(branchData ?? []);
     setPayments((paymentData ?? []) as unknown as Payment[]);
     setExpenses(expenseData ?? []);
-
-  const {
-    data: otherRevenueData,
-    error: otherRevenueError,
-  } = await supabase
-    .from("other_revenues")
-    .select("id,revenue_date,amount,branch_id")
-    .order("revenue_date", { ascending: false });
-
-  if (otherRevenueError) {
-    console.error(otherRevenueError);
-  }
-
-  setOtherRevenues((otherRevenueData ?? []) as OtherRevenue[]);
+    setOtherRevenues((otherRevenueData ?? []) as OtherRevenue[]);
     setAdjustments((adjustmentData ?? []) as unknown as Adjustment[]);
     setLoading(false);
-  }, [supabase]);
+  }, [mode, period, supabase]);
 
   useEffect(() => {
     void loadData();
