@@ -15,6 +15,39 @@ type ClassItem = {
 
 };
 
+type ClassRow = ClassItem & {
+
+  schedule_days: string[] | null;
+
+};
+
+function getScheduleDayKeys(date: string) {
+
+  // date có dạng YYYY-MM-DD. Dùng UTC để không bị lệch thứ theo timezone trình duyệt.
+  const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
+
+  if (dow === 0) return new Set(["CN", "0"]);
+
+  return new Set([String(dow + 1)]);
+
+}
+
+function classRunsOnDate(scheduleDays: string[] | null, date: string) {
+
+  if (!Array.isArray(scheduleDays) || scheduleDays.length === 0) return false;
+
+  const validKeys = getScheduleDayKeys(date);
+
+  return scheduleDays.some((value) => {
+
+    const normalized = String(value).trim().toUpperCase();
+
+    return validKeys.has(normalized);
+
+  });
+
+}
+
 type Student = {
 
   id: string;
@@ -70,7 +103,7 @@ export default function TeacherStudentAttendancePage() {
 
         const { data, error } = await supabase
           .from("classes")
-          .select("id,name")
+          .select("id,name,schedule_days")
           .eq("status", "active")
           .order("name");
 
@@ -94,7 +127,12 @@ export default function TeacherStudentAttendancePage() {
           console.error("SUBSTITUTE LOAD ERROR:", substituteError);
         }
 
-        const regularClasses = data ?? [];
+        // RLS hiện tại quyết định giáo viên được thấy những lớp nào.
+        // Ở frontend chỉ giữ các lớp có lịch đúng ngày đang chọn.
+        const regularClasses = ((data ?? []) as ClassRow[])
+          .filter((item) => classRunsOnDate(item.schedule_days, date))
+          .map(({ id, name }) => ({ id, name }));
+
         const approvedSubstitutionsForDate = (substituteSessions ?? []).filter(
           (item: { session_date?: string | null }) =>
             item.session_date === date
@@ -477,7 +515,7 @@ useEffect(() => {
 
               ) : classes.length === 0 ? (
 
-                <option value="">Chưa có lớp được phân công</option>
+                <option value="">Không có lớp học trong ngày này</option>
 
               ) : (
 
@@ -545,7 +583,9 @@ useEffect(() => {
 
         <div className="rounded-2xl border bg-white p-6 text-slate-500">
 
-          Lớp này hiện không có học viên đang hoạt động.
+          {classId
+            ? "Lớp này hiện không có học viên đang hoạt động."
+            : "Không có lớp học trong ngày này."}
 
         </div>
 
