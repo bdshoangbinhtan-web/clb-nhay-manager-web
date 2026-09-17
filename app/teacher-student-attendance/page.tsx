@@ -56,6 +56,26 @@ type Student = {
 
 };
 
+type SubstitutionSession = {
+
+  class_id: string;
+
+  class_name: string;
+
+  session_date: string;
+
+};
+
+type AttendanceRosterRow = {
+
+  student_id: string;
+
+  full_name: string;
+
+  attendance_status: string | null;
+
+};
+
 const STATUS = {
 
   present: "Có mặt",
@@ -133,34 +153,16 @@ export default function TeacherStudentAttendancePage() {
           .filter((item) => classRunsOnDate(item.schedule_days, date))
           .map(({ id, name }) => ({ id, name }));
 
-        const approvedSubstitutionsForDate = (substituteSessions ?? []).filter(
-          (item: { session_date?: string | null }) =>
-            item.session_date === date
-        );
-
-        const substituteClassIds = new Set(
-          approvedSubstitutionsForDate
-            .map((item: { class_id?: string }) => item.class_id)
-            .filter((id: string | undefined): id is string => Boolean(id))
-        );
-
-        let substituteClasses: ClassItem[] = [];
-
-        if (substituteClassIds.size > 0) {
-          const { data: extraClasses, error: extraClassError } = await supabase
-            .from("classes")
-            .select("id,name")
-            .in("id", Array.from(substituteClassIds))
-            .eq("status", "active");
-
-          if (cancelled) return;
-
-          if (extraClassError) {
-            console.error("SUBSTITUTE CLASS ERROR:", extraClassError);
-          } else {
-            substituteClasses = extraClasses ?? [];
-          }
-        }
+        // RPC đã trả về tên lớp dạy thay. Không query lại bảng classes vì
+        // quyền của giáo viên thay chỉ tồn tại cho đúng lớp + ngày được duyệt.
+        const substituteClasses = (
+          (substituteSessions ?? []) as SubstitutionSession[]
+        )
+          .filter((item) => item.session_date === date)
+          .map((item) => ({
+            id: item.class_id,
+            name: item.class_name,
+          }));
 
         const merged = [...regularClasses, ...substituteClasses].filter(
           (item, index, array) =>
@@ -221,21 +223,25 @@ useEffect(() => {
 
       setError("");
 
-      const { data: members, error: memberError } = await supabase
+      const { data: rosterData, error: rosterError } = await supabase.rpc(
 
-        .from("class_students")
+        "get_teacher_student_attendance_roster",
 
-        .select("student_id")
+        {
 
-        .eq("class_id", classId)
+          p_class_id: classId,
 
-        .eq("status", "active");
+          p_attendance_date: date,
+
+        }
+
+      );
 
       if (cancelled) return;
 
-      if (memberError) {
+      if (rosterError) {
 
-        console.error(memberError);
+        console.error(rosterError);
 
         setError("Không tải được danh sách học viên.");
 
@@ -249,59 +255,9 @@ useEffect(() => {
 
       }
 
-      const ids = (members ?? []).map((item) => item.student_id);
+      const roster = (rosterData ?? []) as AttendanceRosterRow[];
 
-      if (!ids.length) {
-
-        setStudents([]);
-
-        setStatusMap({});
-
-        setLoadingStudents(false);
-
-        return;
-
-      }
-
-      const [
-
-        { data: studentData, error: studentError },
-
-        { data: attendanceData, error: attendanceError },
-
-      ] = await Promise.all([
-
-        supabase
-
-          .from("students")
-
-          .select("id,full_name")
-
-          .in("id", ids)
-
-          .eq("status", "active")
-
-          .order("full_name"),
-
-        supabase
-
-          .from("attendance")
-
-          .select("student_id,status")
-
-          .eq("class_id", classId)
-
-          .eq("attendance_date", date),
-
-      ]);
-
-      if (cancelled) return;
-
-      if (studentError || attendanceError) {
-
-        console.error(studentError || attendanceError);
-
-        setError("Không tải được dữ liệu điểm danh.");
+      if (!roster.length) {
 
         setStudents([]);
 
@@ -315,13 +271,27 @@ useEffect(() => {
 
       const map: Record<string, string> = {};
 
-      (attendanceData ?? []).forEach((item) => {
+      roster.forEach((item) => {
 
-        map[item.student_id] = item.status;
+        if (item.attendance_status) {
+
+          map[item.student_id] = item.attendance_status;
+
+        }
 
       });
 
-      setStudents(studentData ?? []);
+      setStudents(
+
+        roster.map((item) => ({
+
+          id: item.student_id,
+
+          full_name: item.full_name,
+
+        }))
+
+      );
 
       setStatusMap(map);
 
@@ -387,23 +357,25 @@ useEffect(() => {
 
       student_id: student.id,
 
-      class_id: classId,
-
-      attendance_date: date,
-
       status: statusMap[student.id] || "present",
 
     }));
 
-    const { error } = await supabase
+    const { error } = await supabase.rpc(
 
-      .from("attendance")
+      "save_teacher_student_attendance",
 
-      .upsert(rows, {
+      {
 
-        onConflict: "student_id,class_id,attendance_date",
+        p_class_id: classId,
 
-      });
+        p_attendance_date: date,
+
+        p_rows: rows,
+
+      }
+
+    );
 
     setSaving(false);
 

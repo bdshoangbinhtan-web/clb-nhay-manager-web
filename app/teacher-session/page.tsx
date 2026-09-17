@@ -60,10 +60,6 @@ function getTodayKey() {
   return vietnamScheduleDayKey();
 }
 
-function getTodayLabel() {
-  return DAY_LABELS[getTodayKey()] ?? "";
-}
-
 function getTodayDate() {
   return vietnamToday();
 }
