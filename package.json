@@ -6,7 +6,9 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:payroll-lock": "node --experimental-strip-types --test tests/teacher-payroll-lock.test.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",

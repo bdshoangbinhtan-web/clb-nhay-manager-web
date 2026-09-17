@@ -247,16 +247,16 @@ export default function TeacherSalaryPage() {
                           <div className="grid gap-2 text-sm text-slate-600 sm:grid-cols-3 lg:min-w-[560px]">
                             <div>
                               <div className="font-bold text-slate-400">
-                                Rate
+                                Mức đã chốt
                               </div>
                               <div className="font-black text-slate-800">
-                                {money(Number(row.salary_rate ?? 0))}/giờ
+                                {money(Number(row.salary_rate ?? 0))}
                               </div>
                             </div>
 
                             <div>
                               <div className="font-bold text-slate-400">
-                                Hệ số
+                                Hệ số lưu
                               </div>
                               <div className="font-black text-slate-800">
                                 {Number(

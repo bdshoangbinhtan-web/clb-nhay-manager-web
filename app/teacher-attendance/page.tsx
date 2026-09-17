@@ -4,6 +4,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
+import { scheduleIncludesDay } from "@/lib/class-schedule";
+import {
+  PAYROLL_LOCKED_DETAIL,
+  teacherAttendanceErrorMessage,
+} from "@/lib/teacher-payroll-lock";
 
 type Branch = {
   id: string;
@@ -265,10 +270,7 @@ export default function TeacherAttendancePage() {
 
       if (!Array.isArray(item.schedule_days)) return false;
 
-      return item.schedule_days.some(
-        (day) =>
-          String(day).trim().toUpperCase() === scheduleDay
-      );
+      return scheduleIncludesDay(item.schedule_days, scheduleDay);
     });
   }, [classes, branchId, date]);
 
@@ -345,18 +347,14 @@ export default function TeacherAttendancePage() {
         );
 
         if (error) {
-          if (error?.code !== "P0001") {
-          console.error(
-            "SYNC TEACHER ATTENDANCE ERROR:",
-            JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
-          );
-        }
+          if (error?.details !== PAYROLL_LOCKED_DETAIL) {
+            console.error(
+              "SYNC TEACHER ATTENDANCE ERROR:",
+              JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
+            );
+          }
 
-          alert(
-            error?.code === "P0001"
-              ? "🔒 Bảng lương tháng này đã chốt, không thể sửa điểm danh."
-              : "❌ Không thể lưu điểm danh giáo viên."
-          );
+          alert(teacherAttendanceErrorMessage(error));
 
           return;
         }

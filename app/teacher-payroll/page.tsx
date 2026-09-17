@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
+import ClassSalaryPanel from "./class-salary-panel";
+
+type PayrollTab = "payroll" | "class-salaries";
 
 type Teacher = {
   id: string;
@@ -34,6 +37,7 @@ type WorkSession = {
   duration_multiplier: number | null;
   standing_hourly_rate: number | null;
   calculated_amount: number | null;
+  class_salary_per_session_snapshot: number | null;
   substitution_request_id: string | null;
 };
 
@@ -58,6 +62,7 @@ type PayrollDetail = {
   teacher_id: string | null;
   standing_teacher_id: string | null;
   duration_multiplier: number;
+  calculated_amount: number | null;
   is_substitute: boolean;
   amount_override: boolean;
 };
@@ -70,6 +75,8 @@ type DisplaySession = {
   standingTeacherId: string;
   standingTeacherName: string;
   hourlyRate: number;
+  classSalarySnapshot: number | null;
+  rateSource: "class-snapshot" | "legacy" | "locked";
   multiplier: number;
   calculatedAmount: number;
   actualAmount: number;
@@ -101,11 +108,48 @@ function formatDate(value: string) {
   return `${day}/${month}/${year}`;
 }
 
+function PayrollTabs({
+  active,
+  onChange,
+}: {
+  active: PayrollTab;
+  onChange: (tab: PayrollTab) => void;
+}) {
+  return (
+    <div className="flex w-fit gap-2 rounded-2xl bg-white p-1.5 shadow-sm">
+      <button
+        type="button"
+        onClick={() => onChange("payroll")}
+        className={`rounded-xl px-4 py-2.5 text-sm font-black transition ${
+          active === "payroll"
+            ? "bg-slate-900 text-white"
+            : "text-slate-600 hover:bg-slate-100"
+        }`}
+      >
+        Bảng lương
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("class-salaries")}
+        className={`rounded-xl px-4 py-2.5 text-sm font-black transition ${
+          active === "class-salaries"
+            ? "bg-slate-900 text-white"
+            : "text-slate-600 hover:bg-slate-100"
+        }`}
+      >
+        Lương theo lớp
+      </button>
+    </div>
+  );
+}
+
 export default function TeacherPayrollPage() {
   const supabase = useMemo(() => createClient(), []);
   const loadRequestRef = useRef(0);
 
   const [month, setMonth] = useState(getLocalMonth());
+  const [role, setRole] = useState("");
+  const [activeTab, setActiveTab] = useState<PayrollTab>("payroll");
   const monthRef = useRef(month);
   monthRef.current = month;
 
@@ -121,6 +165,32 @@ export default function TeacherPayrollPage() {
 
   // Tiền Admin chỉnh riêng từng buổi.
   const [amountEdits, setAmountEdits] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    async function loadRole() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role,is_active")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profile?.is_active) setRole(profile.role ?? "");
+    }
+
+    loadRole();
+  }, [supabase]);
+
+  useEffect(() => {
+    if (role && role !== "admin" && activeTab !== "payroll") {
+      setActiveTab("payroll");
+    }
+  }, [activeTab, role]);
 
   const loadData = useCallback(async () => {
     const requestedMonth = month;
@@ -167,6 +237,7 @@ export default function TeacherPayrollPage() {
               duration_multiplier,
               standing_hourly_rate,
               calculated_amount,
+              class_salary_per_session_snapshot,
               substitution_request_id
             `
           )
@@ -258,6 +329,7 @@ export default function TeacherPayrollPage() {
             teacher_id,
             standing_teacher_id,
             duration_multiplier,
+            calculated_amount,
             is_substitute,
             amount_override
           `
@@ -373,13 +445,22 @@ export default function TeacherPayrollPage() {
 
       const multiplier = Number(session.duration_multiplier ?? 1);
 
-      const hourlyRate =
+      const legacyHourlyRate =
         Number(session.standing_hourly_rate ?? 0) ||
         Number(teacher.salary_rate ?? 0);
 
-      const calculatedAmount =
-        Number(session.calculated_amount ?? 0) ||
-        hourlyRate * multiplier;
+      const snapshotValue = Number(
+        session.class_salary_per_session_snapshot ?? 0
+      );
+      const usesClassSnapshot = snapshotValue > 0;
+
+      // Phase 2 only affects sessions created after the cut-over trigger.
+      // Historical rows intentionally have no snapshot and retain the exact
+      // legacy hourly calculation instead of being repriced retroactively.
+      const calculatedAmount = usesClassSnapshot
+        ? snapshotValue
+        : Number(session.calculated_amount ?? 0) ||
+          legacyHourlyRate * multiplier;
 
       const detailKey =
         `${session.actual_teacher_id}|` +
@@ -408,7 +489,9 @@ export default function TeacherPayrollPage() {
         standingTeacherId: session.standing_teacher_id,
         standingTeacherName:
           teacherMap.get(session.standing_teacher_id) ?? "Không xác định",
-        hourlyRate,
+        hourlyRate: legacyHourlyRate,
+        classSalarySnapshot: usesClassSnapshot ? snapshotValue : null,
+        rateSource: usesClassSnapshot ? "class-snapshot" : "legacy",
         multiplier,
         calculatedAmount,
         actualAmount,
@@ -480,10 +563,13 @@ export default function TeacherPayrollPage() {
                 detail.standing_teacher_id ?? teacher.id
               ) ?? teacher.full_name,
             hourlyRate: Number(detail.salary_rate || 0),
+            classSalarySnapshot: null,
+            rateSource: "locked",
             multiplier: Number(detail.duration_multiplier || 1),
             calculatedAmount:
+              Number(detail.calculated_amount ?? 0) ||
               Number(detail.salary_rate || 0) *
-              Number(detail.duration_multiplier || 1),
+                Number(detail.duration_multiplier || 1),
             actualAmount: Number(detail.amount || 0),
             override: Boolean(detail.amount_override),
           })
@@ -753,6 +839,28 @@ export default function TeacherPayrollPage() {
     );
   }
 
+  if (role === "admin" && activeTab === "class-salaries") {
+    return (
+      <main className="space-y-6 p-6 lg:p-8">
+        <div>
+          <div className="text-sm font-black uppercase tracking-wider text-blue-600">
+            👨‍🏫 GIÁO VIÊN
+          </div>
+          <h1 className="mt-1 text-3xl font-black text-slate-900">
+            💰 Lương giáo viên
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Thiết lập lương mỗi buổi theo từng lớp. Mức lương được chụp lại
+            khi một buổi dạy mới được xác nhận.
+          </p>
+        </div>
+
+        <PayrollTabs active={activeTab} onChange={setActiveTab} />
+        <ClassSalaryPanel />
+      </main>
+    );
+  }
+
   return (
     <main className="space-y-6 p-6 lg:p-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -771,11 +879,22 @@ export default function TeacherPayrollPage() {
               >
                 🔄 Duyệt dạy thay
               </a>
+
+              {role === "admin" && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("class-salaries")}
+                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-black text-emerald-700 hover:bg-emerald-100"
+                >
+                  ⚙️ Lương theo lớp
+                </button>
+              )}
             </div>
           </h1>
 
           <p className="mt-1 text-sm text-slate-500">
-            Tính theo buổi dạy thực tế, thời lượng lớp và mức lương theo giờ.
+            Buổi dạy mới tính theo mức lương/buổi của lớp tại thời điểm xác
+            nhận; dữ liệu lịch sử vẫn giữ nguyên.
           </p>
         </div>
 
@@ -787,6 +906,16 @@ export default function TeacherPayrollPage() {
             className="rounded-2xl border border-slate-200 bg-white px-4 py-3 font-black outline-none"
           />
         </div>
+      </div>
+
+      {role === "admin" && (
+        <PayrollTabs active={activeTab} onChange={setActiveTab} />
+      )}
+
+      <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+        Buổi mới dùng lương theo lớp đã được chụp tại lúc xác nhận. Buổi cũ
+        chưa có snapshot tiếp tục dùng cách tính cũ; bảng lương đã chốt hoặc
+        đã chi không bị tính lại.
       </div>
 
       <section className="grid gap-4 md:grid-cols-4">
@@ -862,6 +991,21 @@ export default function TeacherPayrollPage() {
               const isExpanded =
                 expanded === item.teacher.id;
 
+              const hasClassSnapshot = item.sessions.some(
+                (session) => session.rateSource === "class-snapshot"
+              );
+              const hasLegacySession = item.sessions.some(
+                (session) => session.rateSource === "legacy"
+              );
+
+              const rateSummary = locked
+                ? "Giữ nguyên theo bảng lương đã chốt"
+                : hasClassSnapshot && hasLegacySession
+                  ? "Lương lớp cho buổi mới · buổi cũ giữ cách tính cũ"
+                  : hasClassSnapshot
+                    ? "Tính theo lương từng lớp"
+                    : "Dữ liệu trước chuyển đổi · giữ cách tính cũ";
+
               return (
                 <div key={item.teacher.id} className="p-5">
                   <div className="flex flex-wrap items-center justify-between gap-4">
@@ -885,8 +1029,7 @@ export default function TeacherPayrollPage() {
                       </div>
 
                       <div className="mt-1 text-sm text-slate-400">
-                        {money(Number(item.teacher.salary_rate || 0))}
-                        {" / giờ"}
+                        {rateSummary}
                       </div>
                     </div>
 
@@ -1003,18 +1146,39 @@ export default function TeacherPayrollPage() {
                               </div>
 
                               <div className="text-sm text-slate-500">
-                                <div>
-                                  Rate:{" "}
-                                  <b>
-                                    {money(session.hourlyRate)}
-                                  </b>
-                                  /giờ
-                                </div>
-
-                                <div>
-                                  Hệ số:{" "}
-                                  <b>{session.multiplier}x</b>
-                                </div>
+                                {session.rateSource === "class-snapshot" ? (
+                                  <>
+                                    <div>
+                                      Lương lớp:{" "}
+                                      <b>
+                                        {money(
+                                          session.classSalarySnapshot ?? 0
+                                        )}
+                                      </b>
+                                      /buổi
+                                    </div>
+                                    <div className="text-xs font-semibold text-emerald-600">
+                                      ✓ Đã chụp khi xác nhận buổi dạy
+                                    </div>
+                                  </>
+                                ) : session.rateSource === "legacy" ? (
+                                  <>
+                                    <div>
+                                      Mức cũ:{" "}
+                                      <b>{money(session.hourlyRate)}</b>/giờ
+                                    </div>
+                                    <div>
+                                      Hệ số: <b>{session.multiplier}x</b>
+                                    </div>
+                                    <div className="text-xs font-semibold text-amber-600">
+                                      Dữ liệu trước khi chuyển sang lương lớp
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="text-xs font-semibold text-slate-500">
+                                    Mức đã lưu khi chốt bảng lương
+                                  </div>
+                                )}
 
                                 <div>
                                   Mặc định:{" "}

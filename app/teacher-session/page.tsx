@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamScheduleDayKey, vietnamToday } from "@/lib/vietnam-date";
+import { scheduleIncludesDay } from "@/lib/class-schedule";
 
 type ClassItem = {
   id: string;
@@ -67,6 +68,42 @@ function getTodayDate() {
   return vietnamToday();
 }
 
+function getScheduleDayKeyForDate(date: string) {
+  // date có dạng YYYY-MM-DD. Dùng UTC để lấy đúng thứ trong tuần
+  // mà không phụ thuộc timezone của trình duyệt.
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+
+  return day === 0 ? "0" : String(day + 1);
+}
+
+function getRequestedSessionContext() {
+  const fallbackDate = getTodayDate();
+
+  if (typeof window === "undefined") {
+    return {
+      date: fallbackDate,
+      classId: "",
+      dayKey: getScheduleDayKeyForDate(fallbackDate),
+    };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const requestedDate = params.get("date");
+  const requestedClassId = params.get("classId") ?? "";
+
+  // Chỉ nhận date dạng YYYY-MM-DD; nếu URL không hợp lệ thì dùng ngày VN hiện tại.
+  const date =
+    requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
+      ? requestedDate
+      : fallbackDate;
+
+  return {
+    date,
+    classId: requestedClassId,
+    dayKey: getScheduleDayKeyForDate(date),
+  };
+}
+
 export default function TeacherSessionPage() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -76,14 +113,21 @@ export default function TeacherSessionPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
+  const [sessionDate, setSessionDate] = useState(getTodayDate());
+  const [sessionDayKey, setSessionDayKey] = useState(getTodayKey());
 
-  const todayLabel = getTodayLabel();
+  const sessionDayLabel = DAY_LABELS[sessionDayKey] ?? "";
+  const isToday = sessionDate === getTodayDate();
 
   const loadData = useCallback(async () => {
-    // Lấy ngày hiện tại ngay lúc load, không giữ ngày cũ nếu trang mở qua 0 giờ.
-    const date = getTodayDate();
-    const todayKey = getTodayKey();
+    const {
+      date,
+      classId: requestedClassId,
+      dayKey: todayKey,
+    } = getRequestedSessionContext();
 
+    setSessionDate(date);
+    setSessionDayKey(todayKey);
     setLoading(true);
     setError("");
 
@@ -145,8 +189,7 @@ export default function TeacherSessionPage() {
           item.teacher_id === currentTeacherId &&
           item.classes &&
           item.classes.status === "active" &&
-          Array.isArray(item.classes.schedule_days) &&
-          item.classes.schedule_days.includes(todayKey)
+          scheduleIncludesDay(item.classes.schedule_days, todayKey)
       )
       .map((item) => ({
         id: `regular-${item.class_id}`,
@@ -212,12 +255,18 @@ export default function TeacherSessionPage() {
 
     const finalSessions = Array.from(merged.values());
 
-    setSessions(finalSessions);
+    // Nếu đi từ trang điểm danh học viên sang thì chỉ mở đúng lớp vừa lưu.
+    // Nếu mở /teacher-session trực tiếp thì vẫn giữ hành vi cũ: hiện tất cả lớp hợp lệ.
+    const sessionsToShow = requestedClassId
+      ? finalSessions.filter((item) => item.classId === requestedClassId)
+      : finalSessions;
 
-    // 3. Lấy các buổi đã chấm công.
-    const regularClassIds = regularSessions.map((item) => {
-      return item.id.replace("regular-", "");
-    });
+    setSessions(sessionsToShow);
+
+    // 3. Lấy các buổi đã chấm công của đúng các lớp đang hiển thị.
+    const regularClassIds = sessionsToShow
+      .filter((item) => item.teachingType === "regular")
+      .map((item) => item.classId);
 
     const { data: attendanceData, error: attendanceError } =
       regularClassIds.length > 0
@@ -254,7 +303,11 @@ export default function TeacherSessionPage() {
     } else {
       const workRows = workStatusData ?? [];
 
-      for (const item of substituteSessions) {
+      const shownSubstituteSessions = sessionsToShow.filter(
+        (item) => item.teachingType === "substitute"
+      );
+
+      for (const item of shownSubstituteSessions) {
         const alreadyRecorded = workRows.some(
           (row: {
             class_id: string;
@@ -290,8 +343,9 @@ export default function TeacherSessionPage() {
       return;
     }
 
-    // Dùng ngày Việt Nam tại đúng thời điểm giáo viên bấm chấm công.
-    const sessionDate = getTodayDate();
+    // Dùng đúng ngày đang mở trên trang.
+    // Khi đi từ Điểm danh học viên sang, đây chính là ngày vừa điểm danh.
+    const attendanceDate = sessionDate;
 
     setSavingId(session.id);
 
@@ -309,7 +363,7 @@ export default function TeacherSessionPage() {
         "create_teacher_work_session",
         {
           p_class_id: session.classId,
-          p_session_date: sessionDate,
+          p_session_date: attendanceDate,
           p_standing_teacher_id: session.standingTeacherId,
           p_actual_teacher_id: teacherId,
           p_teaching_type: "substitute",
@@ -344,7 +398,7 @@ export default function TeacherSessionPage() {
       "confirm_teacher_work_session",
       {
         p_class_id: classId,
-        p_session_date: sessionDate,
+        p_session_date: attendanceDate,
       }
     );
 
@@ -393,21 +447,21 @@ export default function TeacherSessionPage() {
 
         <p className="mt-1 text-sm text-slate-500">
           Chấm công các lớp bạn được phân công và các buổi dạy thay đã được
-          Admin duyệt hôm nay.
+          Admin duyệt cho ngày đang chọn.
         </p>
       </section>
 
       <section className="rounded-2xl border bg-white p-4 shadow-sm sm:p-5">
         <div className="text-sm font-bold text-slate-700">
-          📅 Hôm nay
+          {isToday ? "📅 Hôm nay" : "📅 Ngày điểm danh"}
         </div>
 
         <div className="mt-2 text-xl font-black text-slate-900">
-          {todayLabel}
+          {sessionDayLabel} · {sessionDate.split("-").reverse().join("/")}
         </div>
 
         <div className="mt-1 text-sm text-slate-500">
-          Chỉ có thể chấm công buổi dạy của ngày hôm nay.
+          Chấm công đúng lớp và ngày vừa điểm danh. Hệ thống vẫn kiểm tra quyền và kỳ lương ở database.
         </div>
       </section>
 
@@ -423,7 +477,7 @@ export default function TeacherSessionPage() {
         </div>
       ) : sessions.length === 0 ? (
         <div className="rounded-2xl border bg-white p-6 text-slate-500">
-          Hôm nay bạn không có lớp nào cần chấm công.
+          Không có lớp phù hợp để chấm công cho ngày này.
         </div>
       ) : (
         <section className="space-y-3">
@@ -441,7 +495,7 @@ export default function TeacherSessionPage() {
                   </div>
 
                   <div className="mt-1 text-sm text-slate-500">
-                    {todayLabel}
+                    {sessionDayLabel}
                     {item.schedule_start && item.schedule_end
                       ? ` · ${String(item.schedule_start).slice(
                           0,

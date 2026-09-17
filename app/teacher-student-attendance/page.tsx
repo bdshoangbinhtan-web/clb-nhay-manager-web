@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
@@ -35,6 +36,8 @@ const STATUS = {
 export default function TeacherStudentAttendancePage() {
 
   const supabase = useMemo(() => createClient(), []);
+
+  const router = useRouter();
 
   const [classes, setClasses] = useState<ClassItem[]>([]);
 
@@ -376,7 +379,11 @@ useEffect(() => {
 
     }
 
-    alert("✅ Đã lưu điểm danh.");
+    // Lưu điểm danh thành công -> chuyển thẳng sang chấm công giáo viên.
+    // Mang theo đúng lớp + ngày vừa điểm danh để tránh chọn nhầm lớp.
+    router.push(
+      `/teacher-session?classId=${encodeURIComponent(classId)}&date=${encodeURIComponent(date)}`
+    );
 
   }
 
