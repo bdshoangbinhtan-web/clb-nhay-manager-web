@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday, vietnamTodayLabel } from "@/lib/vietnam-date";
 
@@ -47,6 +47,7 @@ function todayLabel() {
 
 export default function TeacherSubstitutionPage() {
   const supabase = useMemo(() => createClient(), []);
+  const sendingRef = useRef(false);
 
   const [teacher, setTeacher] = useState<Teacher | null>(null);
   const [assignments, setAssignments] = useState<ClassTeacherRow[]>([]);
@@ -77,6 +78,7 @@ export default function TeacherSubstitutionPage() {
         `
       )
       .eq("substitute_teacher_id", teacherId)
+      .is("duplicate_of_id", null)
       .order("created_at", { ascending: false });
 
     if (!error) {
@@ -218,44 +220,72 @@ export default function TeacherSubstitutionPage() {
   }, [selectedClassId, standingTeachers, selectedStandingTeacherId]);
 
   async function sendRequest() {
-    if (!teacher) return;
+    if (!teacher || sendingRef.current) return;
 
     if (!selectedClassId || !selectedStandingTeacherId) {
       setError("Vui lòng chọn lớp và giáo viên đứng lớp.");
       return;
     }
 
+    const existingRequest = requests.find(
+      (request) =>
+        request.class_id === selectedClassId &&
+        request.session_date === todayDate()
+    );
+
+    if (existingRequest) {
+      setError("Bạn đã gửi yêu cầu dạy thay cho lớp này hôm nay.");
+      return;
+    }
+
+    sendingRef.current = true;
     setSending(true);
     setError("");
     setMessage("");
 
-    const { error: insertError } = await supabase
-      .from("teacher_substitution_requests")
-      .insert({
-        class_id: selectedClassId,
-        standing_teacher_id: selectedStandingTeacherId,
-        substitute_teacher_id: teacher.id,
-        session_date: todayDate(),
-        status: "pending",
-        note: "Giáo viên đăng ký dạy thay hôm nay.",
-      });
+    try {
+      const { error: insertError } = await supabase
+        .from("teacher_substitution_requests")
+        .insert({
+          class_id: selectedClassId,
+          standing_teacher_id: selectedStandingTeacherId,
+          substitute_teacher_id: teacher.id,
+          session_date: todayDate(),
+          status: "pending",
+          note: "Giáo viên đăng ký dạy thay hôm nay.",
+        });
 
-    if (insertError) {
-      setError(insertError.message);
+      if (insertError) {
+        if (
+          insertError.code === "23505" ||
+          insertError.message.includes(
+            "teacher_substitution_requests_one_per_class_day"
+          )
+        ) {
+          setError("Bạn đã gửi yêu cầu dạy thay cho lớp này hôm nay.");
+        } else {
+          setError(insertError.message);
+        }
+        return;
+      }
+
+      setMessage("Đã gửi yêu cầu dạy thay. Chờ Admin duyệt.");
+      await loadRequests(teacher.id);
+    } finally {
+      sendingRef.current = false;
       setSending(false);
-      return;
     }
-
-    setMessage("Đã gửi yêu cầu dạy thay. Chờ Admin duyệt.");
-
-    await loadRequests(teacher.id);
-
-    setSending(false);
   }
 
   const selectedClass = eligibleClasses.find(
     (row) => row.class_id === selectedClassId
   )?.classes;
+
+  const selectedExistingRequest = requests.find(
+    (request) =>
+      request.class_id === selectedClassId &&
+      request.session_date === todayDate()
+  );
 
   if (loading) {
     return (
@@ -341,6 +371,13 @@ export default function TeacherSubstitutionPage() {
           </div>
         )}
 
+        {selectedExistingRequest && (
+          <div className="mt-4 rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">
+            Bạn đã gửi yêu cầu dạy thay cho lớp này hôm nay. Mỗi giáo viên
+            chỉ được gửi một lần cho một lớp.
+          </div>
+        )}
+
         {error && (
           <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
             {error}
@@ -356,10 +393,19 @@ export default function TeacherSubstitutionPage() {
         <button
           type="button"
           onClick={sendRequest}
-          disabled={sending || !selectedClassId || !selectedStandingTeacherId}
+          disabled={
+            sending ||
+            !selectedClassId ||
+            !selectedStandingTeacherId ||
+            Boolean(selectedExistingRequest)
+          }
           className="mt-5 rounded-lg bg-black px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {sending ? "Đang gửi..." : "Gửi yêu cầu dạy thay"}
+          {sending
+            ? "Đang gửi..."
+            : selectedExistingRequest
+              ? "Đã gửi yêu cầu cho lớp này"
+              : "Gửi yêu cầu dạy thay"}
         </button>
 
         {eligibleClasses.length === 0 && (

@@ -60,6 +60,7 @@ export default function AdminSubstitutionPage() {
         substitute_teacher:teachers!teacher_substitution_requests_substitute_teacher_id_fkey(full_name)
         `
       )
+      .is("duplicate_of_id", null)
       .order("session_date", { ascending: false })
       .order("created_at", { ascending: false });
 
