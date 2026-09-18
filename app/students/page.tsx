@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 
 type Student = {
   id: string;
+  student_code: string;
   full_name: string;
   phone?: string;
   email?: string;
@@ -140,7 +141,7 @@ export default function StudentsPage() {
       supabase
         .from("students")
         .select(
-          "id,full_name,status,created_at,branch_id"
+          "id,student_code,full_name,status,created_at,branch_id"
         )
         .order("full_name"),
       supabase
@@ -199,7 +200,7 @@ export default function StudentsPage() {
       const matchesSearch =
         !keyword ||
         student.full_name.toLowerCase().includes(keyword) ||
-        student.full_name.toLowerCase().includes(keyword);
+        student.student_code.toLowerCase().includes(keyword);
 
       const matchesBranch =
         branchFilter === "all" ||
@@ -310,7 +311,7 @@ export default function StudentsPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Tìm theo tên, số điện thoại, email..."
+              placeholder="Tìm theo mã học viên hoặc họ tên..."
               className="ui-input pr-14"
             />
 
@@ -399,6 +400,10 @@ export default function StudentsPage() {
                       <h3 className="truncate text-[17px] font-black text-slate-900">
                         {student.full_name}
                       </h3>
+
+                      <div className="mt-1 text-xs font-black tracking-wide text-blue-600">
+                        {student.student_code}
+                      </div>
 
                       <div className="mt-1 truncate text-sm text-slate-500">
                         🏢{" "}

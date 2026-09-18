@@ -58,7 +58,7 @@ test("RPC lưu chỉ nhận học viên active thuộc đúng lớp", () => {
 });
 
 test("màn hình giáo viên không còn đọc trực tiếp roster và attendance", () => {
-  assert.match(page, /get_teacher_student_attendance_roster/);
+  assert.match(page, /get_teacher_student_attendance_roster_v2/);
   assert.match(page, /save_teacher_student_attendance/);
   assert.doesNotMatch(page, /\.from\("class_students"\)/);
   assert.doesNotMatch(page, /\.from\("attendance"\)/);

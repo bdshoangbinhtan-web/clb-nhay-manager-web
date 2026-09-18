@@ -85,7 +85,7 @@ export default function ReceiptPage() {
 
       const [{ data: student }, { data: cls }, { data: branch }] =
         await Promise.all([
-          supabase.from("students").select("full_name").eq("id", tuition.student_id).single(),
+          supabase.from("students").select("student_code,full_name").eq("id", tuition.student_id).single(),
           supabase.from("classes").select("name").eq("id", tuition.class_id).single(),
           tuition.branch_id
             ? supabase.from("branches").select("name,address").eq("id", tuition.branch_id).single()
@@ -108,7 +108,9 @@ export default function ReceiptPage() {
 
       setData({
         receiptNo: payment.receipt_no || payment.id,
-        student: student?.full_name || "—",
+        student: student
+          ? `${student.full_name} · ${student.student_code}`
+          : "—",
         className: cls?.name || "—",
         branch: branch?.name || "Chưa gán cơ sở",
         address: branch?.address || "—",

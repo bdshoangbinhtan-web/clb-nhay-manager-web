@@ -52,6 +52,8 @@ type Student = {
 
   id: string;
 
+  student_code: string;
+
   full_name: string;
 
 };
@@ -69,6 +71,8 @@ type SubstitutionSession = {
 type AttendanceRosterRow = {
 
   student_id: string;
+
+  student_code: string;
 
   full_name: string;
 
@@ -225,7 +229,7 @@ useEffect(() => {
 
       const { data: rosterData, error: rosterError } = await supabase.rpc(
 
-        "get_teacher_student_attendance_roster",
+        "get_teacher_student_attendance_roster_v2",
 
         {
 
@@ -286,6 +290,8 @@ useEffect(() => {
         roster.map((item) => ({
 
           id: item.student_id,
+
+          student_code: item.student_code,
 
           full_name: item.full_name,
 
@@ -666,6 +672,9 @@ useEffect(() => {
                       <div className="font-semibold text-slate-900">
 
                         {student.full_name}
+                        <span className="ml-2 text-xs font-black text-blue-600">
+                          {student.student_code}
+                        </span>
 
                       </div>
 

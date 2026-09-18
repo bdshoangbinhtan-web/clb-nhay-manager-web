@@ -7,6 +7,7 @@ import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 
 type Student = {
   id: string;
+  student_code: string;
   full_name: string;
   branch_id: string | null;
   join_date: string | null;
@@ -198,13 +199,15 @@ export default function TuitionPage() {
     ] = await Promise.all([
       supabase
         .from("tuition")
-        .select("*")
+        .select(
+          "id,student_id,class_id,branch_id,billing_month,description,amount_due,amount_paid,payment_date,note,status"
+        )
         .eq("billing_month", billingDate)
         .order("billing_month", { ascending: false }),
 
       supabase
         .from("students")
-        .select("id,full_name,branch_id,join_date,status")
+        .select("id,student_code,full_name,branch_id,join_date,status")
         .order("full_name"),
 
       supabase.from("branches").select("id,name").order("name"),
@@ -378,17 +381,15 @@ export default function TuitionPage() {
     return result;
   }, [payments]);
 
-  const selectedTuitionClass = classes.find(
-    (c) => c.id === selectedTuitionClassId
-  );
+  const selectedTuitionClass = selectedTuitionClassId
+    ? classById.get(selectedTuitionClassId)
+    : undefined;
 
   const selectedClassStudents = useMemo(() => {
     if (!selectedTuitionClassId) return [];
 
     const ids = new Set(
-      activeMemberships
-        .filter((m) => m.class_id === selectedTuitionClassId)
-        .map((m) => m.student_id)
+      activeStudentIdsByClass.get(selectedTuitionClassId) ?? []
     );
 
     const q = classStudentSearch
@@ -403,16 +404,17 @@ export default function TuitionPage() {
 
         if (!q) return true;
 
-        return student.full_name
+        const searchable = `${student.student_code} ${student.full_name}`
           .toLowerCase()
           .normalize("NFD")
-          .replace(/\p{Diacritic}/gu, "")
-          .includes(q);
+          .replace(/\p{Diacritic}/gu, "");
+
+        return searchable.includes(q);
       })
       .sort((a, b) => a.full_name.localeCompare(b.full_name, "vi"));
   }, [
     selectedTuitionClassId,
-    activeMemberships,
+    activeStudentIdsByClass,
     students,
     classStudentSearch,
   ]);
@@ -421,34 +423,58 @@ export default function TuitionPage() {
     return tuitionByStudentClass.get(`${studentId}__${classId}`);
   }
 
+  const classStatsById = useMemo(() => {
+    const result = new Map<
+      string,
+      { total: number; paid: number; debt: number; debtAmount: number }
+    >();
+
+    for (const classItem of activeClasses) {
+      const studentIds = activeStudentIdsByClass.get(classItem.id) ?? [];
+      let paid = 0;
+      let debt = 0;
+      let debtAmount = 0;
+
+      for (const studentId of studentIds) {
+        const item = tuitionByStudentClass.get(
+          `${studentId}__${classItem.id}`
+        );
+
+        if (!item) continue;
+
+        const amountDue = Number(item.amount_due);
+        const amountPaid = Number(item.amount_paid);
+
+        if (amountDue > 0 && amountPaid >= amountDue) {
+          paid++;
+        }
+
+        if (amountDue > amountPaid) {
+          debt++;
+          debtAmount += Math.max(amountDue - amountPaid, 0);
+        }
+      }
+
+      result.set(classItem.id, {
+        total: studentIds.length,
+        paid,
+        debt,
+        debtAmount,
+      });
+    }
+
+    return result;
+  }, [activeClasses, activeStudentIdsByClass, tuitionByStudentClass]);
+
   function classStats(classId: string) {
-    const studentIds = activeStudentIdsByClass.get(classId) ?? [];
-
-    const records = studentIds
-      .map((studentId) => tuitionForStudentClass(studentId, classId))
-      .filter(Boolean) as Tuition[];
-
-    const paid = records.filter(
-      (item) => Number(item.amount_due) > 0 &&
-        Number(item.amount_paid) >= Number(item.amount_due)
-    ).length;
-
-    const debt = records.filter(
-      (item) => Number(item.amount_due) > Number(item.amount_paid)
-    ).length;
-
-    const debtAmount = records.reduce(
-      (sum, item) =>
-        sum + Math.max(Number(item.amount_due) - Number(item.amount_paid), 0),
-      0
+    return (
+      classStatsById.get(classId) ?? {
+        total: 0,
+        paid: 0,
+        debt: 0,
+        debtAmount: 0,
+      }
     );
-
-    return {
-      total: studentIds.length,
-      paid,
-      debt,
-      debtAmount,
-    };
   }
 
   function startVoiceSearch() {
@@ -839,12 +865,17 @@ export default function TuitionPage() {
       let skipped = 0;
 
       for (const membership of memberships || []) {
-        const student = students.find((x) => x.id === membership.student_id);
-        const classItem = classes.find(
-          (x) => x.id === membership.class_id && x.status === "active"
-        );
+        const student = studentById.get(membership.student_id);
+        const classItem = classById.get(membership.class_id);
 
-        if (!student || student.status !== "active" || !classItem) continue;
+        if (
+          !student ||
+          student.status !== "active" ||
+          !classItem ||
+          classItem.status !== "active"
+        ) {
+          continue;
+        }
 
         const key = `${student.id}__${classItem.id}__${billingDate}`;
 
@@ -1226,7 +1257,10 @@ export default function TuitionPage() {
   }
 
   function studentName(id: string) {
-    return studentById.get(id)?.full_name ?? "Không rõ";
+    const student = studentById.get(id);
+    return student
+      ? `${student.full_name} · ${student.student_code}`
+      : "Không rõ";
   }
 
   function className(id: string | null) {
@@ -1241,49 +1275,93 @@ export default function TuitionPage() {
     return paymentsByTuition.get(tuitionId) ?? [];
   }
 
-  const filteredTuition = tuition.filter((item) => {
-    // Chỉ tính học phí của tháng đang xem.
-    if (item.billing_month !== `${billingMonth.slice(0, 7)}-01`) {
-      return false;
-    }
-
+  const filteredTuition = useMemo(() => {
+    const billingDate = `${billingMonth.slice(0, 7)}-01`;
     const q = search.trim().toLowerCase();
 
-    if (!q) return true;
+    return tuition.filter((item) => {
+      // Giữ nguyên quy tắc hiện tại: chỉ tính học phí của tháng đang xem.
+      if (item.billing_month !== billingDate) return false;
 
-    return (
-      studentName(item.student_id).toLowerCase().includes(q) ||
-      className(item.class_id).toLowerCase().includes(q) ||
-      branchName(item.branch_id).toLowerCase().includes(q)
+      if (!q) return true;
+
+      const student = studentById.get(item.student_id);
+      const studentLabel = student
+        ? `${student.student_code} ${student.full_name}`
+        : "Không rõ";
+      const classLabel = item.class_id
+        ? classById.get(item.class_id)?.name ?? "Chưa chọn lớp"
+        : "Chưa chọn lớp";
+      const branchLabel = item.branch_id
+        ? branchById.get(item.branch_id)?.name ?? "Chưa gán cơ sở"
+        : "Chưa gán cơ sở";
+
+      return (
+        studentLabel.toLowerCase().includes(q) ||
+        classLabel.toLowerCase().includes(q) ||
+        branchLabel.toLowerCase().includes(q)
+      );
+    });
+  }, [
+    tuition,
+    billingMonth,
+    search,
+    studentById,
+    classById,
+    branchById,
+  ]);
+
+  // Giữ nguyên cách tính Tổng phải thu / Đã thu / Còn nợ.
+  const { totalDue, totalPaid, totalRemain } = useMemo(() => {
+    const due = filteredTuition.reduce(
+      (sum, item) => sum + Number(item.amount_due),
+      0
     );
-  });
 
-  // filteredTuition đã được giới hạn theo đúng tháng đang xem.
-  const totalDue = filteredTuition.reduce(
-    (sum, item) => sum + Number(item.amount_due),
-    0
-  );
+    const paid = filteredTuition.reduce(
+      (sum, item) => sum + Number(item.amount_paid),
+      0
+    );
 
-  const totalPaid = filteredTuition.reduce(
-    (sum, item) => sum + Number(item.amount_paid),
-    0
-  );
-
-  const totalRemain = Math.max(totalDue - totalPaid, 0);
+    return {
+      totalDue: due,
+      totalPaid: paid,
+      totalRemain: Math.max(due - paid, 0),
+    };
+  }, [filteredTuition]);
 
   useEffect(() => {
     setVisibleTuitionCount(TUITION_PER_BATCH);
   }, [billingMonth, search]);
 
-  const visibleTuition = filteredTuition.slice(0, visibleTuitionCount);
+  const visibleTuition = useMemo(
+    () => filteredTuition.slice(0, visibleTuitionCount),
+    [filteredTuition, visibleTuitionCount]
+  );
 
-  const filteredStudents = students
-    .filter((student) =>
-      student.full_name
-        .toLowerCase()
-        .includes(studentSearch.trim().toLowerCase())
-    )
-    .slice(0, 12);
+  const filteredStudents = useMemo(() => {
+    const q = studentSearch.trim().toLowerCase();
+
+    return students
+      .filter((student) =>
+        `${student.student_code} ${student.full_name}`
+          .toLowerCase()
+          .includes(q)
+      )
+      .slice(0, 12);
+  }, [students, studentSearch]);
+
+  const activeClassesByBranch = useMemo(() => {
+    const result = new Map<string, ClassItem[]>();
+
+    for (const item of activeClasses) {
+      const items = result.get(item.branch_id) ?? [];
+      items.push(item);
+      result.set(item.branch_id, items);
+    }
+
+    return result;
+  }, [activeClasses]);
 
   return (
     <div className="space-y-6">
@@ -1374,7 +1452,7 @@ export default function TuitionPage() {
               <div className="relative">
                 <input
                   className="ui-input"
-                  placeholder="🔎 Gõ tên học viên..."
+                  placeholder="🔎 Gõ mã hoặc tên học viên..."
                   value={studentSearch}
                   onChange={(e) => {
                     setStudentSearch(e.target.value);
@@ -1417,7 +1495,7 @@ export default function TuitionPage() {
                           }}
                         >
                           <div className="font-semibold">
-                            {student.full_name}
+                            {student.full_name} · {student.student_code}
                           </div>
                         </button>
                       ))
@@ -1559,9 +1637,7 @@ export default function TuitionPage() {
 
         <div className="mt-6 space-y-6">
           {branches.map((branch) => {
-            const branchClasses = activeClasses.filter(
-              (item) => item.branch_id === branch.id
-            );
+            const branchClasses = activeClassesByBranch.get(branch.id) ?? [];
 
             if (!branchClasses.length) return null;
 
@@ -1808,6 +1884,9 @@ export default function TuitionPage() {
                     <div className="min-w-0">
                       <div className="font-black text-slate-800">
                         {student.full_name}
+                        <span className="ml-2 text-xs font-black text-blue-600">
+                          {student.student_code}
+                        </span>
                       </div>
                       <div className="mt-1 text-xs text-slate-400">
                         {item

@@ -23,6 +23,7 @@ type Profile = {
 
 type SimpleEntity = {
   id: string;
+  student_code?: string | null;
   full_name?: string | null;
   name?: string | null;
 };
@@ -51,6 +52,7 @@ const entityNames: Record<string, string> = {
 
 const fieldNames: Record<string, string> = {
   full_name: "Họ và tên",
+  student_code: "Mã học viên",
   parent_phone: "SĐT phụ huynh",
   phone: "Số điện thoại",
   email: "Email",
@@ -277,7 +279,7 @@ export default function ActivityLogPage() {
           studentIds.size
             ? supabase
                 .from("students")
-                .select("id,full_name")
+                .select("id,student_code,full_name")
                 .in("id", Array.from(studentIds))
             : Promise.resolve({ data: [], error: null }),
           teacherIds.size
@@ -338,7 +340,15 @@ export default function ActivityLogPage() {
   );
 
   const studentMap = useMemo(
-    () => new Map(students.map((item) => [item.id, item.full_name])),
+    () =>
+      new Map(
+        students.map((item) => [
+          item.id,
+          item.student_code
+            ? `${item.full_name} · ${item.student_code}`
+            : item.full_name,
+        ])
+      ),
     [students]
   );
 

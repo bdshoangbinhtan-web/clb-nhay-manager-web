@@ -30,6 +30,8 @@ export default function NewStudentPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [name, setName] = useState("");
+  const [parentPhone, setParentPhone] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [joinDate, setJoinDate] = useState("");
   const [branchId, setBranchId] = useState("");
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
@@ -138,6 +140,40 @@ export default function NewStudentPage() {
 
     setSaving(true);
 
+    if (parentPhone.trim() && birthDate) {
+      const { data: possibleDuplicates, error: duplicateError } = await supabase
+        .from("students")
+        .select("id,student_code,full_name,parent_phone,birth_date")
+        .ilike("full_name", name.trim())
+        .eq("birth_date", birthDate)
+        .limit(20);
+
+      if (duplicateError) {
+        setSaving(false);
+        alert("Không thể kiểm tra hồ sơ trùng: " + duplicateError.message);
+        return;
+      }
+
+      const normalizePhone = (value: string | null) =>
+        (value ?? "").replace(/\D/g, "");
+      const duplicate = (possibleDuplicates ?? []).find(
+        (student) =>
+          normalizePhone(student.parent_phone) === normalizePhone(parentPhone)
+      );
+
+      if (
+        duplicate &&
+        !confirm(
+          `⚠️ Có thể trùng học viên ${duplicate.student_code}\n\n` +
+            `${duplicate.full_name} có cùng ngày sinh và SĐT phụ huynh.\n` +
+            "Đây chỉ là cảnh báo; bạn vẫn có thể tiếp tục tạo hồ sơ mới."
+        )
+      ) {
+        setSaving(false);
+        return;
+      }
+    }
+
     const localToday = vietnamToday();
     const effectiveJoinDate = joinDate || localToday;
 
@@ -145,12 +181,13 @@ export default function NewStudentPage() {
       .from("students")
       .insert({
         full_name: name.trim(),
-        parent_phone: null,
+        parent_phone: parentPhone.trim() || null,
+        birth_date: birthDate || null,
         join_date: effectiveJoinDate,
         branch_id: branchId || null,
         status,
       })
-      .select("id")
+      .select("id,student_code")
       .single();
 
     if (error) {
@@ -248,6 +285,34 @@ export default function NewStudentPage() {
                 {listening === "name" ? "🔴" : "🎙️"}
               </button>
             </div>          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-bold text-slate-700">
+              SĐT phụ huynh
+            </div>
+            <input
+              type="tel"
+              value={parentPhone}
+              onChange={(e) => setParentPhone(e.target.value)}
+              className="ui-input"
+              placeholder="0901 234 567"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-bold text-slate-700">
+              Ngày sinh
+            </div>
+            <input
+              type="date"
+              value={birthDate}
+              onChange={(e) => setBirthDate(e.target.value)}
+              className="ui-input"
+            />
+            <div className="mt-1.5 text-xs text-slate-400">
+              Dùng cùng họ tên và SĐT phụ huynh để cảnh báo hồ sơ có thể bị trùng.
+            </div>
+          </label>
 
           <label className="block">
             <div className="mb-2 text-sm font-bold text-slate-700">

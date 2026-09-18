@@ -23,6 +23,7 @@ type Branch = {
 
 type Student = {
   id: string;
+  student_code: string;
   full_name: string;
 };
 
@@ -129,7 +130,7 @@ export default function ClassDetailPage() {
 
         supabase
           .from("class_students")
-          .select("student_id, students!inner(id,full_name,status)")
+          .select("student_id, students!inner(id,student_code,full_name,status)")
           .eq("class_id", classId)
           .eq("status", "active")
           .eq("students.status", "active"),
@@ -377,6 +378,9 @@ export default function ClassDetailPage() {
                   className="rounded-2xl bg-slate-50 px-4 py-3 font-bold text-slate-800"
                 >
                   {student.full_name}
+                  <span className="ml-2 text-xs font-black text-blue-600">
+                    {student.student_code}
+                  </span>
                 </div>
               ))}
             </div>

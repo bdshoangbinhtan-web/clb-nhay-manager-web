@@ -6,7 +6,7 @@ import { vietnamMonthStart, vietnamToday } from "@/lib/vietnam-date";
 
 type Branch = { id: string; name: string };
 type ClassItem = { id: string; name: string; branch_id: string };
-type Student = { id: string; full_name: string };
+type Student = { id: string; student_code: string; full_name: string };
 
 type AttendanceRow = {
   id: string;
@@ -71,7 +71,7 @@ export default function AttendanceHistoryPage() {
         .order("name"),
       supabase
         .from("students")
-        .select("id,full_name")
+        .select("id,student_code,full_name")
         .eq("status", "active")
         .order("full_name"),
     ]);
@@ -152,7 +152,13 @@ export default function AttendanceHistoryPage() {
   );
 
   const studentMap = useMemo(
-    () => new Map(students.map((item) => [item.id, item.full_name])),
+    () =>
+      new Map(
+        students.map((item) => [
+          item.id,
+          `${item.full_name} · ${item.student_code}`,
+        ])
+      ),
     [students]
   );
 
@@ -268,7 +274,7 @@ export default function AttendanceHistoryPage() {
               <option value="">-- Tất cả học viên --</option>
               {students.map((student) => (
                 <option key={student.id} value={student.id}>
-                  {student.full_name}
+                  {student.full_name} · {student.student_code}
                 </option>
               ))}
             </select>

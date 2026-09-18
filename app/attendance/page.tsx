@@ -11,7 +11,7 @@ type ClassItem = {
   branch_id: string;
   schedule_days: string[] | null;
 };
-type Student = { id: string; full_name: string };
+type Student = { id: string; student_code: string; full_name: string };
 export default function AttendancePage() {
   const supabase = useMemo(() => createClient(), []);
   const studentLoadRequestRef = useRef(0);
@@ -125,7 +125,7 @@ export default function AttendancePage() {
       await Promise.all([
         supabase
           .from("students")
-          .select("id,full_name")
+          .select("id,student_code,full_name")
           .in("id", ids)
           .order("full_name"),
 
@@ -383,6 +383,9 @@ export default function AttendancePage() {
 
                         <div className="font-bold">
                           {student.full_name}
+                          <span className="ml-2 text-xs font-black text-blue-600">
+                            {student.student_code}
+                          </span>
                         </div>
                       </div>
 

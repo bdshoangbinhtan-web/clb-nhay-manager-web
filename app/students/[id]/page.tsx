@@ -8,11 +8,13 @@ import { vietnamToday } from "@/lib/vietnam-date";
 
 type Student = {
   id: string;
+  student_code: string;
   full_name: string;
   status: string | null;
   created_at: string;
   branch_id: string | null;
   parent_phone: string | null;
+  birth_date: string | null;
   join_date: string | null;
 };
 
@@ -76,6 +78,7 @@ export default function StudentDetailPage() {
 
   const [name, setName] = useState("");
   const [parentPhone, setParentPhone] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [joinDate, setJoinDate] = useState("");
   const [branchId, setBranchId] = useState("");
   const [status, setStatus] = useState("active");
@@ -97,7 +100,7 @@ export default function StudentDetailPage() {
       await Promise.all([
         supabase
           .from("students")
-          .select("id,full_name,status,created_at,branch_id,parent_phone,join_date")
+          .select("id,student_code,full_name,status,created_at,branch_id,parent_phone,birth_date,join_date")
           .eq("id", id)
           .single(),
 
@@ -139,6 +142,7 @@ export default function StudentDetailPage() {
 
     setName(studentRes.data.full_name ?? "");
     setParentPhone(studentRes.data.parent_phone ?? "");
+    setBirthDate(studentRes.data.birth_date ?? "");
     setJoinDate(studentRes.data.join_date ?? "");
     setBranchId(studentRes.data.branch_id ?? "");
     setStatus(studentRes.data.status ?? "active");
@@ -287,6 +291,7 @@ export default function StudentDetailPage() {
         branch_id: branchId || null,
         status,
         parent_phone: parentPhone.trim() || null,
+        birth_date: birthDate || null,
         join_date: joinDate || null,
       })
       .eq("id", id);
@@ -456,6 +461,7 @@ export default function StudentDetailPage() {
         branch_id: branchId || null,
         status,
         parent_phone: parentPhone.trim() || null,
+        birth_date: birthDate || null,
         join_date: joinDate || null,
       })
       .eq("id", id);
@@ -691,12 +697,24 @@ export default function StudentDetailPage() {
               <h1 className="mt-1 text-3xl font-black tracking-tight">
                 {student.full_name}
               </h1>
+              <div className="mt-1 text-sm font-black tracking-wide text-blue-600">
+                {student.student_code}
+              </div>
             </div>
           </div>
         </div>
 
         {!editMode && (
-        <section className="grid gap-4 md:grid-cols-2">
+        <section className="grid gap-4 md:grid-cols-3">
+          <div className="ui-card p-5">
+            <div className="text-sm font-bold text-slate-400">🎂 Ngày sinh</div>
+            <div className="mt-2 text-xl font-black">
+              {student.birth_date
+                ? new Date(student.birth_date + "T00:00:00").toLocaleDateString("vi-VN")
+                : "Chưa cập nhật"}
+            </div>
+          </div>
+
           <div className="ui-card p-5">
             <div className="text-sm font-bold text-slate-400">📞 SĐT phụ huynh</div>
             <div className="mt-2 text-xl font-black">
@@ -750,29 +768,44 @@ export default function StudentDetailPage() {
 
             <label className="block">
               <div className="mb-2 text-sm font-bold text-slate-700">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-              <div>
-                <label className="block text-sm font-semibold">📞 SĐT phụ huynh</label>
-                <input
-                  value={parentPhone}
-                  onChange={(e) => setParentPhone(e.target.value)}
-                  placeholder="0901 234 567"
-                  className="mt-2 w-full rounded-2xl border px-4 py-3"
-                />
+                SĐT phụ huynh
               </div>
+              <input
+                type="tel"
+                value={parentPhone}
+                onChange={(e) => setParentPhone(e.target.value)}
+                placeholder="0901 234 567"
+                className="ui-input"
+              />
+            </label>
 
-              <div>
-                <label className="block text-sm font-semibold">📅 Ngày vào học</label>
-                <input
-                  type="date"
-                  value={joinDate}
-                  onChange={(e) => setJoinDate(e.target.value)}
-                  className="mt-2 w-full rounded-2xl border px-4 py-3"
-                />
+            <label className="block">
+              <div className="mb-2 text-sm font-bold text-slate-700">
+                Ngày sinh
               </div>
-            </div>
+              <input
+                type="date"
+                value={birthDate}
+                onChange={(e) => setBirthDate(e.target.value)}
+                className="ui-input"
+              />
+            </label>
 
-            Cơ sở
+            <label className="block">
+              <div className="mb-2 text-sm font-bold text-slate-700">
+                Ngày vào học
+              </div>
+              <input
+                type="date"
+                value={joinDate}
+                onChange={(e) => setJoinDate(e.target.value)}
+                className="ui-input"
+              />
+            </label>
+
+            <label className="block">
+              <div className="mb-2 text-sm font-bold text-slate-700">
+                Cơ sở
               </div>
               <select
                 value={branchId}

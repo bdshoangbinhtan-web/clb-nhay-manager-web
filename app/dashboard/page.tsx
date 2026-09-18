@@ -11,6 +11,7 @@ import {
 
 type Student = {
   id: string;
+  student_code: string;
   full_name: string;
   status: string | null;
   created_at: string;
@@ -193,7 +194,7 @@ export default function DashboardPage() {
     ] = await Promise.all([
         supabase
           .from("students")
-          .select("id,full_name,status,created_at")
+          .select("id,student_code,full_name,status,created_at")
           .order("created_at", { ascending: false }),
         supabase
           .from("classes")
@@ -305,11 +306,14 @@ export default function DashboardPage() {
     }> = [];
 
     students.forEach((student) => {
-      if (student.full_name.toLowerCase().includes(q)) {
+      if (
+        student.full_name.toLowerCase().includes(q) ||
+        student.student_code.toLowerCase().includes(q)
+      ) {
         results.push({
           id: `student-${student.id}`,
           title: student.full_name,
-          subtitle: "🧑‍🎓 Học viên",
+          subtitle: `🧑‍🎓 Học viên · ${student.student_code}`,
           href: `/students/${student.id}`,
         });
       }
