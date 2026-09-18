@@ -15,7 +15,10 @@ const ADMIN_MANAGER_ROUTES = [
   "/reports",
   "/settings",
   "/activity-log",
+  "/system-integrity",
 ];
+
+const ADMIN_ONLY_ROUTES = ["/activity-log", "/system-integrity"];
 
 const TEACHER_ROUTES = [
   "/teacher-classes",
@@ -125,6 +128,10 @@ export async function middleware(request: NextRequest) {
   // ADMIN / MANAGER
   // =====================================================
   if (role === "admin" || role === "manager") {
+    if (role === "manager" && matchesRoute(pathname, ADMIN_ONLY_ROUTES)) {
+      return NextResponse.redirect(new URL("/dashboard", request.url));
+    }
+
     // Không cho Admin/Manager đi nhầm vào khu Teacher
     if (matchesRoute(pathname, TEACHER_ROUTES)) {
       return NextResponse.redirect(new URL("/dashboard", request.url));

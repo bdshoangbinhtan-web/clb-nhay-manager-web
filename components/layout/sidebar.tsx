@@ -173,6 +173,19 @@ export default function Sidebar({
                 <span className="text-lg">🕵️</span>
                 <span>Lịch sử hoạt động</span>
               </Link>
+
+              <Link
+                href="/system-integrity"
+                onClick={onClose}
+                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition ${
+                  pathname === "/system-integrity"
+                    ? "bg-blue-600 !text-white shadow-[0_8px_18px_rgba(37,99,235,.20)]"
+                    : "text-slate-600 hover:bg-white hover:text-slate-900"
+                }`}
+              >
+                <span className="text-lg">🛡️</span>
+                <span>Sức khỏe dữ liệu</span>
+              </Link>
             </>
           )}
         </nav>
