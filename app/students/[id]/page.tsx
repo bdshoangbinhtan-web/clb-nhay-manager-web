@@ -5,6 +5,9 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
+import { StudentAvatar } from "@/components/students/student-avatar";
+import { StudentAvatarEditor } from "@/components/students/student-avatar-editor";
+import { getStudentAvatarUrl, uploadStudentAvatar } from "@/lib/student-avatar-storage";
 
 type Student = {
   id: string;
@@ -102,6 +105,27 @@ export default function StudentDetailPage() {
   const [adjustmentMonth, setAdjustmentMonth] = useState("");
   const [adjustmentNote, setAdjustmentNote] = useState("");
   const [processingAdjustment, setProcessingAdjustment] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [canEditAvatar, setCanEditAvatar] = useState(false);
+
+  const loadAvatarAccess = useCallback(async () => {
+    const [{ data: auth }, signedUrl] = await Promise.all([supabase.auth.getUser(), getStudentAvatarUrl(supabase, id)]);
+    setAvatarUrl(signedUrl);
+    if (!auth.user) { setCanEditAvatar(false); return; }
+    const { data: profile } = await supabase.from("profiles").select("role,is_active").eq("id", auth.user.id).maybeSingle();
+    if (!profile?.is_active) { setCanEditAvatar(false); return; }
+    if (profile.role === "admin" || profile.role === "manager") { setCanEditAvatar(true); return; }
+    if (profile.role !== "teacher") { setCanEditAvatar(false); return; }
+    const { data: teacher } = await supabase.from("teachers").select("id").eq("profile_id", auth.user.id).eq("status", "active").maybeSingle();
+    if (!teacher) { setCanEditAvatar(false); return; }
+    const [{ data: assignments }, { data: memberships }] = await Promise.all([
+      supabase.from("class_teachers").select("class_id").eq("teacher_id", teacher.id),
+      supabase.from("class_students").select("class_id").eq("student_id", id).eq("status", "active"),
+    ]);
+    const assigned = new Set((assignments ?? []).map((row) => row.class_id));
+    setCanEditAvatar((memberships ?? []).some((row) => assigned.has(row.class_id)));
+  }, [id, supabase]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -179,6 +203,15 @@ export default function StudentDetailPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => { void loadAvatarAccess(); }, [loadAvatarAccess]);
+
+  async function saveAvatar(blob: Blob) {
+    const freshUrl = await uploadStudentAvatar(supabase, id, blob);
+    if (!freshUrl) throw new Error("Không tạo được liên kết ảnh mới.");
+    setAvatarUrl(freshUrl);
+    setAvatarFile(null);
+  }
 
   // THÊM LỚP: mọi cơ sở, không giới hạn theo students.branch_id.
   const availableClassesForAdd = useMemo(() => {
@@ -716,6 +749,7 @@ export default function StudentDetailPage() {
 
   return (
     <div className="min-w-0 space-y-4 sm:space-y-6">
+      {avatarFile ? <StudentAvatarEditor file={avatarFile} onCancel={() => setAvatarFile(null)} onRetake={setAvatarFile} onSave={saveAvatar} /> : null}
       <section className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <Link
@@ -725,10 +759,8 @@ export default function StudentDetailPage() {
             ← Học viên
           </Link>
 
-          <div className="mt-2 grid min-w-0 grid-cols-[56px_minmax(0,1fr)] items-center gap-3 sm:mt-3 sm:grid-cols-[64px_minmax(0,1fr)] sm:gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-[20px] bg-gradient-to-br from-blue-100 via-white to-indigo-100 text-3xl shadow-[inset_0_1px_0_white,0_8px_18px_rgba(50,80,130,.10)] sm:h-16 sm:w-16 sm:rounded-[22px]">
-              👤
-            </div>
+          <div className="mt-2 grid min-w-0 grid-cols-[96px_minmax(0,1fr)] items-center gap-3 sm:mt-3 sm:grid-cols-[112px_minmax(0,1fr)] sm:gap-4">
+            <StudentAvatar name={student.full_name} url={avatarUrl} size="detail" editable={canEditAvatar} onPhotoSelected={setAvatarFile} />
 
             <div className="min-w-0">
               <div className="text-xs font-bold uppercase tracking-wider text-blue-600">

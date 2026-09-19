@@ -4,7 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState, InlineState, Skeleton } from "@/components/ui/mobile-ui";
+import { StudentAvatar } from "@/components/students/student-avatar";
 import { createClient } from "@/lib/supabase/client";
+import { getStudentAvatarUrls } from "@/lib/student-avatar-storage";
 
 type Student = { id: string; student_code: string; full_name: string; status: string | null; created_at: string; join_date: string | null; branch_id: string | null };
 type Branch = { id: string; name: string };
@@ -30,6 +32,7 @@ export default function StudentsPage() {
   const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") ?? "active");
   const [visibleCount, setVisibleCount] = useState(STUDENTS_PER_BATCH);
   const [voiceSearching, setVoiceSearching] = useState(false);
+  const [avatarUrls, setAvatarUrls] = useState<Map<string, string>>(new Map());
   const restoredScroll = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
@@ -112,6 +115,15 @@ export default function StudentsPage() {
   }, [branchFilter, search, statusFilter, students]);
   useEffect(() => { setVisibleCount(STUDENTS_PER_BATCH); }, [branchFilter, search, statusFilter]);
   const visibleStudents = filteredStudents.slice(0, visibleCount);
+  const visibleStudentIds = useMemo(() => filteredStudents.slice(0, visibleCount).map((item) => item.id), [filteredStudents, visibleCount]);
+  useEffect(() => {
+    if (loading || !visibleStudentIds.length) return;
+    let active = true;
+    void getStudentAvatarUrls(supabase, visibleStudentIds).then((urls) => {
+      if (active) setAvatarUrls((current) => new Map([...current, ...urls]));
+    });
+    return () => { active = false; };
+  }, [loading, supabase, visibleStudentIds]);
   const activeCount = students.filter((item) => item.status === "active").length;
   const hasFilters = Boolean(search.trim()) || branchFilter !== "all" || statusFilter !== "active";
   const contextParams = new URLSearchParams();
@@ -146,7 +158,7 @@ export default function StudentsPage() {
 
       <section className="min-w-0"><div className="mb-3"><h2 className="text-lg font-black sm:text-xl">Danh sách học viên</h2></div>
         {loading ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} className="h-32 sm:h-56 lg:h-44" />)}</div> : error ? <div className="ui-card p-4"><InlineState type="error" title="Không tải được học viên"><button type="button" onClick={() => void loadData()} className="mt-2 min-h-11 font-black underline">Thử lại</button></InlineState></div> : filteredStudents.length === 0 ? <div className="ui-card"><EmptyState icon="⌕" title={students.length === 0 && !hasFilters ? "Chưa có học viên" : "Không tìm thấy học viên"} description={hasFilters ? "Thử từ khóa khác hoặc xóa bộ lọc hiện tại." : "Học viên mới sẽ xuất hiện tại đây."} action={hasFilters ? <button type="button" onClick={clearFilters} className="abk-secondary-button mt-4">Xóa bộ lọc</button> : undefined} /></div> : <div className="grid min-w-0 gap-3 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {visibleStudents.map((student) => { const classes = classMap.get(student.id) ?? []; const active = student.status === "active"; const joinDate = student.join_date || student.created_at; return <article key={student.id} className="ui-card min-w-0 overflow-hidden transition hover:shadow-lg"><Link href={detailHref(student.id)} onClick={() => sessionStorage.setItem(SCROLL_KEY, String(window.scrollY))} className="block min-w-0 p-4 sm:p-5 lg:p-4 lg:pb-3"><div className="grid min-w-0 grid-cols-[48px_minmax(0,1fr)_auto] items-start gap-3 sm:grid-cols-[64px_minmax(0,1fr)] lg:grid-cols-[48px_minmax(0,1fr)]"><span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-2xl sm:h-16 sm:w-16 lg:h-12 lg:w-12">👤</span><div className="min-w-0"><h3 className="break-words text-base font-black text-slate-950 [overflow-wrap:anywhere] sm:text-[17px]">{student.full_name}</h3><p className="mt-1 break-all text-xs font-black tracking-wide text-blue-600">{student.student_code}</p><p className="mt-1 line-clamp-2 break-words text-sm text-slate-500 [overflow-wrap:anywhere]">{student.branch_id ? branchMap.get(student.branch_id) || "Chưa xác định" : "Chưa gán cơ sở"}</p></div><span className="text-2xl text-slate-300 sm:hidden">›</span></div><div className="mt-3 min-w-0 rounded-2xl bg-slate-50 p-3 lg:mt-2 lg:px-3 lg:py-2"><p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Lớp đang học</p><p className="mt-1 line-clamp-2 break-words text-sm font-bold text-slate-700 [overflow-wrap:anywhere] lg:line-clamp-1">{classes.length ? classes.join(" · ") : "Chưa tham gia lớp"}</p></div><div className="mt-3 flex min-w-0 items-center justify-between gap-2 lg:mt-2"><span className={`ui-pill shrink-0 ${active ? "ui-pill-active" : ""}`}>{active ? "🟢 Đang học" : "⚪ Tạm ngưng"}</span><span className="hidden text-xs text-slate-400 sm:block">Vào học {new Date(joinDate.includes("T") ? joinDate : `${joinDate}T00:00:00`).toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}</span></div></Link><div className="hidden justify-end border-t border-slate-100 px-3 py-2 sm:flex"><Link href={detailHref(student.id, true)} className="inline-flex min-h-10 items-center rounded-xl px-3 text-sm font-bold text-blue-700 hover:bg-blue-50">✏️ Sửa</Link></div></article>; })}
+          {visibleStudents.map((student) => { const classes = classMap.get(student.id) ?? []; const active = student.status === "active"; const joinDate = student.join_date || student.created_at; return <article key={student.id} className="ui-card min-w-0 overflow-hidden transition hover:shadow-lg"><Link href={detailHref(student.id)} onClick={() => sessionStorage.setItem(SCROLL_KEY, String(window.scrollY))} className="block min-w-0 p-4 sm:p-5 lg:p-4 lg:pb-3"><div className="grid min-w-0 grid-cols-[48px_minmax(0,1fr)_auto] items-start gap-3 sm:grid-cols-[64px_minmax(0,1fr)] lg:grid-cols-[48px_minmax(0,1fr)]"><StudentAvatar name={student.full_name} url={avatarUrls.get(student.id)} /><div className="min-w-0"><h3 className="break-words text-base font-black text-slate-950 [overflow-wrap:anywhere] sm:text-[17px]">{student.full_name}</h3><p className="mt-1 break-all text-xs font-black tracking-wide text-blue-600">{student.student_code}</p><p className="mt-1 line-clamp-2 break-words text-sm text-slate-500 [overflow-wrap:anywhere]">{student.branch_id ? branchMap.get(student.branch_id) || "Chưa xác định" : "Chưa gán cơ sở"}</p></div><span className="text-2xl text-slate-300 sm:hidden">›</span></div><div className="mt-3 min-w-0 rounded-2xl bg-slate-50 p-3 lg:mt-2 lg:px-3 lg:py-2"><p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Lớp đang học</p><p className="mt-1 line-clamp-2 break-words text-sm font-bold text-slate-700 [overflow-wrap:anywhere] lg:line-clamp-1">{classes.length ? classes.join(" · ") : "Chưa tham gia lớp"}</p></div><div className="mt-3 flex min-w-0 items-center justify-between gap-2 lg:mt-2"><span className={`ui-pill shrink-0 ${active ? "ui-pill-active" : ""}`}>{active ? "🟢 Đang học" : "⚪ Tạm ngưng"}</span><span className="hidden text-xs text-slate-400 sm:block">Vào học {new Date(joinDate.includes("T") ? joinDate : `${joinDate}T00:00:00`).toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}</span></div></Link><div className="hidden justify-end border-t border-slate-100 px-3 py-2 sm:flex"><Link href={detailHref(student.id, true)} className="inline-flex min-h-10 items-center rounded-xl px-3 text-sm font-bold text-blue-700 hover:bg-blue-50">✏️ Sửa</Link></div></article>; })}
           {visibleStudents.length < filteredStudents.length ? <button type="button" onClick={() => setVisibleCount((count) => Math.min(count + STUDENTS_PER_BATCH, filteredStudents.length))} className="ui-card min-h-14 p-4 font-black text-blue-600 sm:min-h-40">Hiển thị thêm</button> : null}
         </div>}
       </section>
