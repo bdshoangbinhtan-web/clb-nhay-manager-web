@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { StudentAvatar } from "@/components/students/student-avatar";
@@ -57,7 +57,7 @@ type AdjustmentAction =
   | "cancel"
   | "none";
 
-export default function StudentDetailPage() {
+function StudentDetailContent() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1319,5 +1319,20 @@ export default function StudentDetailPage() {
       )}
 
     </div>
+  );
+}
+
+
+export default function StudentDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="ui-card p-6 text-slate-500">
+          Đang tải hồ sơ học viên...
+        </div>
+      }
+    >
+      <StudentDetailContent />
+    </Suspense>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState, InlineState, Skeleton } from "@/components/ui/mobile-ui";
 import { StudentAvatar } from "@/components/students/student-avatar";
 import { createClient } from "@/lib/supabase/client";
@@ -17,7 +17,7 @@ type SpeechRecognitionWindow = Window & { SpeechRecognition?: new () => SpeechRe
 const STUDENTS_PER_BATCH = 60;
 const SCROLL_KEY = "abk-students-scroll";
 
-export default function StudentsPage() {
+function StudentsContent() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const pathname = usePathname();
@@ -163,5 +163,20 @@ export default function StudentsPage() {
         </div>}
       </section>
     </div>
+  );
+}
+
+
+export default function StudentsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="ui-card p-6 text-slate-500">
+          Đang tải học viên...
+        </div>
+      }
+    >
+      <StudentsContent />
+    </Suspense>
   );
 }

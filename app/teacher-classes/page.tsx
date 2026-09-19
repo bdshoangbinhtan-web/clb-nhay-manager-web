@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { scheduleIncludesDay } from "@/lib/class-schedule";
 import { vietnamScheduleDayKey, vietnamToday, vietnamTodayLabel } from "@/lib/vietnam-date";
@@ -20,7 +20,7 @@ type Assignment = { teacher_id: string; classes: ClassItem | null };
 type Membership = { class_id: string };
 type Attendance = { class_id: string };
 
-export default function TeacherClassesPage() {
+function TeacherClassesContent() {
   const supabase = useMemo(() => createClient(), []);
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [studentCounts, setStudentCounts] = useState<Record<string, number>>({});
@@ -95,5 +95,22 @@ export default function TeacherClassesPage() {
       {!loading && !error && displayedClasses.length === 0 ? <div className="abk-mobile-card abk-empty-state"><div className="text-2xl">☀️</div><h3>{showAll ? "Bạn chưa được phân công lớp." : "Hôm nay bạn không có lớp."}</h3><p>{showAll ? "Danh sách sẽ cập nhật khi có phân công mới." : "Bạn có thể xem lịch đầy đủ trong Tất cả lớp."}</p></div> : null}
       {!loading && !error && displayedClasses.length > 0 ? <div className="grid w-full max-w-full min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">{displayedClasses.map((item) => <Link key={item.id} href={`/teacher-student-attendance?classId=${item.id}&date=${today}`} className={`abk-mobile-card grid min-h-[116px] w-full max-w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 p-4 transition hover:border-blue-200 ${!showAll && item.id === nextClassId ? "ring-2 ring-blue-100" : ""}`}><div className="w-14 shrink-0 text-center"><strong className="block text-lg font-black text-slate-950">{item.schedule_start?.slice(0, 5) ?? "--:--"}</strong>{item.schedule_end ? <span className="text-[11px] font-bold text-slate-400">– {item.schedule_end.slice(0, 5)}</span> : null}</div><div className="w-full max-w-full min-w-0"><h2 className="line-clamp-2 break-words text-base font-black text-slate-950 [overflow-wrap:anywhere]">{item.name}</h2><p className="mt-1 text-sm text-slate-500">{studentCounts[item.id] ?? 0} học viên</p><p className={`mt-2 text-xs font-extrabold ${attendedIds.has(item.id) ? "text-emerald-700" : "text-blue-700"}`}>{showAll ? scheduleLabel(item) : status(item)}</p></div><span className="shrink-0 text-2xl text-slate-300" aria-hidden="true">›</span></Link>)}</div> : null}
     </div>
+  );
+}
+
+
+export default function TeacherClassesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="abk-mobile-page">
+          <div className="abk-mobile-card p-6 text-slate-500">
+            Đang tải lịch dạy...
+          </div>
+        </div>
+      }
+    >
+      <TeacherClassesContent />
+    </Suspense>
   );
 }
