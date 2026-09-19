@@ -130,11 +130,11 @@ export default function Header({ onMenu }: { onMenu: () => void }) {
   const currentMonth = Number(vietnamCurrentMonth().slice(5, 7));
 
   return (
-    <header className="sticky top-0 z-30 flex min-h-[82px] items-center justify-between gap-2 border-b border-white/80 bg-white/70 px-3 py-2 backdrop-blur-xl sm:px-5 lg:px-8">
+    <header className="sticky top-0 z-30 hidden min-h-[82px] items-center justify-between gap-2 border-b border-white/80 bg-white/70 px-3 py-2 backdrop-blur-xl sm:px-5 lg:flex lg:px-8">
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <button
           onClick={onMenu}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-xl shadow-[0_6px_18px_rgba(35,50,75,.08)] lg:hidden"
+          className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-xl shadow-[0_6px_18px_rgba(35,50,75,.08)]"
           aria-label="Mở menu"
         >
           ☰

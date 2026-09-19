@@ -25,7 +25,7 @@ export default function AppShell({
       <div className="app-main ml-0 min-h-screen lg:ml-[264px]">
         <Header onMenu={() => setMenuOpen(true)} />
 
-        <main className="px-4 py-5 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:py-7">
+        <main className="px-4 py-5 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:py-7 lg:pb-7">
           {children}
         </main>
         <MobileBottomNav />

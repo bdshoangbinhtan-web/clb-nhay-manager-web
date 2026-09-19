@@ -8,7 +8,6 @@ import {
   MobileListRow,
   MobilePageHeader,
   MobilePageShell,
-  Skeleton,
 } from "@/components/ui/mobile-ui";
 import {
   toVietnamDateKey,
@@ -171,6 +170,7 @@ export default function DashboardPage() {
   const [teachersAlerts, setTeachersAlerts] = useState<TeacherForAlert[]>([]);
   const [payrollAlerts, setPayrollAlerts] = useState<PayrollForAlert[]>([]);
   const [pendingSubstitutionCount, setPendingSubstitutionCount] = useState(0);
+  const [attendedClassIds, setAttendedClassIds] = useState<Set<string>>(new Set());
 
   const [classStudents, setClassStudents] = useState<ClassStudent[]>([]);
 
@@ -198,6 +198,7 @@ export default function DashboardPage() {
       payrollAlertsRes,
       substitutionRequestsRes,
       otherRevenuesRes,
+      todayAttendanceRes,
     ] = await Promise.all([
         supabase
           .from("students")
@@ -262,6 +263,10 @@ export default function DashboardPage() {
           .gte("revenue_date", previousMonthStart)
           .lt("revenue_date", nextMonthStart)
           .order("revenue_date", { ascending: false }),
+        supabase
+          .from("attendance")
+          .select("class_id")
+          .eq("attendance_date", vietnamToday()),
       ]);
 
     if (studentsRes.error) console.error(studentsRes.error);
@@ -278,8 +283,10 @@ export default function DashboardPage() {
       console.error(substitutionRequestsRes.error);
     }
     if (otherRevenuesRes.error) console.error(otherRevenuesRes.error);
+    if (todayAttendanceRes.error) console.error(todayAttendanceRes.error);
 
     setPendingSubstitutionCount(substitutionRequestsRes.count ?? 0);
+    setAttendedClassIds(new Set((todayAttendanceRes.data ?? []).map((row) => row.class_id)));
 
     setStudents(studentsRes.data ?? []);
     setClasses(classesRes.data ?? []);
@@ -756,56 +763,54 @@ export default function DashboardPage() {
   ).length;
 
   const mobileSearchResults = getGlobalSearchResults();
+  const greeting = now.getHours() < 12
+    ? "Chào buổi sáng"
+    : now.getHours() < 18
+      ? "Chào buổi chiều"
+      : "Chào buổi tối";
+  const attendedTodayCount = todayClasses.filter((item) => attendedClassIds.has(item.id)).length;
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  function mobileClassStatus(classId: string, start: string | null) {
+    if (attendedClassIds.has(classId)) return "Đã điểm danh";
+    if (!start) return "Chưa điểm danh";
+    const [hours, minutes] = start.split(":").map(Number);
+    return currentMinutes < hours * 60 + minutes ? "Sắp bắt đầu" : "Chưa điểm danh";
+  }
 
   return (
     <>
       <MobilePageShell>
         <MobilePageHeader
-          eyebrow="Angel BK Manager"
+          eyebrow={`${greeting} 👋`}
           title="Hôm nay"
-          description={`${todayKey.split("-").reverse().join("/")} · ${todayClasses.length} lớp đang chờ`}
+          description={todayKey.split("-").reverse().join("/")}
         />
 
-        <section aria-label="Tổng quan hôm nay" className="grid grid-cols-2 gap-2">
-          <Link href="/branches" className="abk-mobile-card min-h-[112px] p-4">
-            <span className="text-xs font-bold text-slate-500">Lớp hôm nay</span>
-            <strong className="mt-2 block text-2xl font-black text-slate-950">{loading ? "—" : todayClasses.length}</strong>
-            <span className="mt-1 block text-xs font-semibold text-blue-600">Xem lịch ›</span>
-          </Link>
-          <Link href="/tuition" className="abk-mobile-card min-h-[112px] p-4">
-            <span className="text-xs font-bold text-slate-500">Thu hôm nay</span>
-            <strong className="mt-2 block truncate text-lg font-black text-emerald-700">{loading ? "—" : money(todayRevenue)}</strong>
-            <span className="mt-1 block text-xs font-semibold text-slate-500">{todayPaymentCount} lượt thu</span>
-          </Link>
+        <section aria-label="Tổng quan hôm nay" className="abk-mobile-card overflow-hidden">
+          <div className="grid grid-cols-2 divide-x divide-slate-100 border-b border-slate-100">
+            <Link href="/branches" className="p-4"><strong className="block text-xl font-black text-slate-950">{loading ? "—" : todayClasses.length}</strong><span className="mt-1 block text-xs font-bold text-slate-500">lớp hôm nay</span></Link>
+            <Link href="/students" className="p-4"><strong className="block text-xl font-black text-slate-950">{loading ? "—" : activeStudents}</strong><span className="mt-1 block text-xs font-bold text-slate-500">học viên hoạt động</span></Link>
+          </div>
+          <div className="grid grid-cols-2 gap-2 px-4 py-3 text-sm font-bold"><span className="text-emerald-700">✓ {attendedTodayCount} lớp đã điểm danh</span><span className="text-slate-500">○ {Math.max(0, todayClasses.length - attendedTodayCount)} lớp chưa điểm danh</span></div>
+          <Link href="/tuition" className="flex items-end justify-between gap-3 border-t border-slate-100 px-4 py-3"><span className="text-sm font-extrabold text-slate-600">💰 Thu hôm nay</span><strong className="text-lg font-black text-emerald-700">{loading ? "—" : money(todayRevenue)}</strong></Link>
+          {smartAlerts.unpaidStudents > 0 ? <Link href="/tuition" className="block border-t border-amber-100 bg-amber-50 px-4 py-3 text-sm font-extrabold text-amber-800">⚠️ {smartAlerts.unpaidStudents} học viên cần xử lý học phí <span aria-hidden="true">›</span></Link> : null}
+        </section>
+
+        <section className="abk-section" aria-labelledby="mobile-attention-title">
+          <h2 id="mobile-attention-title" className="abk-section-title text-lg">Việc cần làm</h2>
+          <div className="abk-mobile-card overflow-hidden">
+            {todayClasses.map((item) => <MobileListRow key={item.id} href="/attendance" leading={item.schedule_start?.slice(0, 5) ?? "♪"} title={item.name} subtitle={`${item.studentCount} học viên · ${mobileClassStatus(item.id, item.schedule_start)}`} />)}
+            {pendingSubstitutionCount > 0 ? <MobileListRow href="/teacher-payroll/substitution" leading="🔄" title={`${pendingSubstitutionCount} yêu cầu dạy thay`} subtitle="Đang chờ duyệt" /> : null}
+            {smartAlerts.payrollPendingCount > 0 ? <MobileListRow href="/teacher-payroll" leading="◷" title={`${smartAlerts.payrollPendingCount} giáo viên chưa chốt lương`} subtitle={`Đã chốt ${smartAlerts.payrollCompletedCount}/${smartAlerts.activeTeachersCount}`} /> : null}
+            {!loading && todayClasses.length === 0 && pendingSubstitutionCount === 0 && smartAlerts.payrollPendingCount === 0 ? <EmptyState icon="✓" title="Hôm nay chưa có việc cần xử lý" description="Các đầu việc mới sẽ xuất hiện tại đây." /> : null}
+          </div>
         </section>
 
         <section className="abk-section" aria-labelledby="mobile-search-title">
           <h2 id="mobile-search-title" className="sr-only">Tìm nhanh</h2>
-          <label className="relative block">
-            <span className="sr-only">Tìm học viên, lớp học hoặc cơ sở</span>
-            <input value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="Tìm học viên, lớp học, cơ sở…" className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 pr-12 text-base font-semibold shadow-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" />
-            {globalSearch ? <button type="button" onClick={() => setGlobalSearch("")} className="absolute right-1 top-0 flex h-12 w-11 items-center justify-center text-xl text-slate-400" aria-label="Xóa tìm kiếm">×</button> : null}
-          </label>
+          <label className="relative block"><span className="sr-only">Tìm học viên, lớp học hoặc cơ sở</span><input value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="Tìm học viên, lớp học, cơ sở…" className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 pr-12 text-base font-semibold shadow-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" />{globalSearch ? <button type="button" onClick={() => setGlobalSearch("")} className="absolute right-1 top-0 flex h-12 w-11 items-center justify-center text-xl text-slate-400" aria-label="Xóa tìm kiếm">×</button> : null}</label>
           {globalSearch.trim() ? <div className="abk-mobile-card mt-2 overflow-hidden">{mobileSearchResults.length ? mobileSearchResults.map((item) => <MobileListRow key={item.id} href={item.href} title={item.title} subtitle={item.subtitle} />) : <EmptyState icon="⌕" title="Không tìm thấy kết quả" description="Thử tên, mã học viên, lớp hoặc cơ sở khác." />}</div> : null}
-        </section>
-
-        {(pendingSubstitutionCount > 0 || smartAlerts.unpaidStudents > 0 || smartAlerts.payrollPendingCount > 0) && <section className="abk-section" aria-labelledby="mobile-attention-title">
-          <h2 id="mobile-attention-title" className="abk-section-title">Cần chú ý</h2>
-          <div className="abk-mobile-card overflow-hidden">
-            {pendingSubstitutionCount > 0 ? <MobileListRow href="/teacher-payroll/substitution" leading="🔄" title={`${pendingSubstitutionCount} yêu cầu dạy thay`} subtitle="Đang chờ duyệt" /> : null}
-            {smartAlerts.unpaidStudents > 0 ? <MobileListRow href="/tuition" leading="₫" title={`${smartAlerts.unpaidStudents} học viên cần xử lý học phí`} subtitle="Học phí tháng này chưa hoàn tất" /> : null}
-            {smartAlerts.payrollPendingCount > 0 ? <MobileListRow href="/teacher-payroll" leading="◷" title={`${smartAlerts.payrollPendingCount} giáo viên chưa chốt lương`} subtitle={`Đã chốt ${smartAlerts.payrollCompletedCount}/${smartAlerts.activeTeachersCount}`} /> : null}
-          </div>
-        </section>}
-
-        <section className="abk-section" aria-labelledby="mobile-classes-title">
-          <div className="flex items-center justify-between gap-3">
-            <h2 id="mobile-classes-title" className="abk-section-title">Lớp hôm nay</h2>
-            <Link href="/attendance" className="mb-2 flex min-h-11 items-center text-sm font-extrabold text-blue-600">Điểm danh ›</Link>
-          </div>
-          <div className="abk-mobile-card overflow-hidden">
-            {loading ? <div className="space-y-2 p-3"><Skeleton /><Skeleton /></div> : todayClasses.length === 0 ? <EmptyState icon="✓" title="Hôm nay không có lớp" description="Không có lịch lớp cần xử lý trong ngày." /> : todayClasses.map((item) => <MobileListRow key={item.id} href={`/branches/${item.id}`} leading="♪" title={item.name} subtitle={`${item.branchName} · ${item.studentCount} học viên`} meta={<><strong className="block text-sm text-slate-900">{item.schedule_start?.slice(0, 5) ?? "--:--"}</strong><span className="mt-1 block text-[11px] font-bold text-slate-400">Xem lớp</span></>} />)}
-          </div>
         </section>
 
         <section className="abk-section" aria-labelledby="mobile-summary-title">
