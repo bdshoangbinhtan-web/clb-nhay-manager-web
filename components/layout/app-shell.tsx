@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import Sidebar from "./sidebar";
 import Header from "./header";
+import MobileBottomNav from "./mobile-bottom-nav";
 
 export default function AppShell({
   children,
@@ -24,9 +25,10 @@ export default function AppShell({
       <div className="app-main ml-0 min-h-screen lg:ml-[264px]">
         <Header onMenu={() => setMenuOpen(true)} />
 
-        <main className="px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+        <main className="px-4 py-5 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:py-7">
           {children}
         </main>
+        <MobileBottomNav />
       </div>
     </div>
   );

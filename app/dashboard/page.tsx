@@ -4,6 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import {
+  EmptyState,
+  MobileListRow,
+  MobilePageHeader,
+  MobilePageShell,
+  Skeleton,
+} from "@/components/ui/mobile-ui";
+import {
   toVietnamDateKey,
   vietnamCurrentMonth,
   vietnamToday,
@@ -292,6 +299,15 @@ export default function DashboardPage() {
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    const savedSearch = window.sessionStorage.getItem("abk-dashboard-search");
+    if (savedSearch) setGlobalSearch(savedSearch);
+  }, []);
+
+  useEffect(() => {
+    window.sessionStorage.setItem("abk-dashboard-search", globalSearch);
+  }, [globalSearch]);
 
 
   function getGlobalSearchResults() {
@@ -739,8 +755,68 @@ export default function DashboardPage() {
       String(item.payment_date ?? "").slice(0, 10) === todayKey
   ).length;
 
+  const mobileSearchResults = getGlobalSearchResults();
+
   return (
-    <div className="space-y-7">
+    <>
+      <MobilePageShell>
+        <MobilePageHeader
+          eyebrow="Angel BK Manager"
+          title="Hôm nay"
+          description={`${todayKey.split("-").reverse().join("/")} · ${todayClasses.length} lớp đang chờ`}
+        />
+
+        <section aria-label="Tổng quan hôm nay" className="grid grid-cols-2 gap-2">
+          <Link href="/branches" className="abk-mobile-card min-h-[112px] p-4">
+            <span className="text-xs font-bold text-slate-500">Lớp hôm nay</span>
+            <strong className="mt-2 block text-2xl font-black text-slate-950">{loading ? "—" : todayClasses.length}</strong>
+            <span className="mt-1 block text-xs font-semibold text-blue-600">Xem lịch ›</span>
+          </Link>
+          <Link href="/tuition" className="abk-mobile-card min-h-[112px] p-4">
+            <span className="text-xs font-bold text-slate-500">Thu hôm nay</span>
+            <strong className="mt-2 block truncate text-lg font-black text-emerald-700">{loading ? "—" : money(todayRevenue)}</strong>
+            <span className="mt-1 block text-xs font-semibold text-slate-500">{todayPaymentCount} lượt thu</span>
+          </Link>
+        </section>
+
+        <section className="abk-section" aria-labelledby="mobile-search-title">
+          <h2 id="mobile-search-title" className="sr-only">Tìm nhanh</h2>
+          <label className="relative block">
+            <span className="sr-only">Tìm học viên, lớp học hoặc cơ sở</span>
+            <input value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="Tìm học viên, lớp học, cơ sở…" className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 pr-12 text-base font-semibold shadow-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" />
+            {globalSearch ? <button type="button" onClick={() => setGlobalSearch("")} className="absolute right-1 top-0 flex h-12 w-11 items-center justify-center text-xl text-slate-400" aria-label="Xóa tìm kiếm">×</button> : null}
+          </label>
+          {globalSearch.trim() ? <div className="abk-mobile-card mt-2 overflow-hidden">{mobileSearchResults.length ? mobileSearchResults.map((item) => <MobileListRow key={item.id} href={item.href} title={item.title} subtitle={item.subtitle} />) : <EmptyState icon="⌕" title="Không tìm thấy kết quả" description="Thử tên, mã học viên, lớp hoặc cơ sở khác." />}</div> : null}
+        </section>
+
+        {(pendingSubstitutionCount > 0 || smartAlerts.unpaidStudents > 0 || smartAlerts.payrollPendingCount > 0) && <section className="abk-section" aria-labelledby="mobile-attention-title">
+          <h2 id="mobile-attention-title" className="abk-section-title">Cần chú ý</h2>
+          <div className="abk-mobile-card overflow-hidden">
+            {pendingSubstitutionCount > 0 ? <MobileListRow href="/teacher-payroll/substitution" leading="🔄" title={`${pendingSubstitutionCount} yêu cầu dạy thay`} subtitle="Đang chờ duyệt" /> : null}
+            {smartAlerts.unpaidStudents > 0 ? <MobileListRow href="/tuition" leading="₫" title={`${smartAlerts.unpaidStudents} học viên cần xử lý học phí`} subtitle="Học phí tháng này chưa hoàn tất" /> : null}
+            {smartAlerts.payrollPendingCount > 0 ? <MobileListRow href="/teacher-payroll" leading="◷" title={`${smartAlerts.payrollPendingCount} giáo viên chưa chốt lương`} subtitle={`Đã chốt ${smartAlerts.payrollCompletedCount}/${smartAlerts.activeTeachersCount}`} /> : null}
+          </div>
+        </section>}
+
+        <section className="abk-section" aria-labelledby="mobile-classes-title">
+          <div className="flex items-center justify-between gap-3">
+            <h2 id="mobile-classes-title" className="abk-section-title">Lớp hôm nay</h2>
+            <Link href="/attendance" className="mb-2 flex min-h-11 items-center text-sm font-extrabold text-blue-600">Điểm danh ›</Link>
+          </div>
+          <div className="abk-mobile-card overflow-hidden">
+            {loading ? <div className="space-y-2 p-3"><Skeleton /><Skeleton /></div> : todayClasses.length === 0 ? <EmptyState icon="✓" title="Hôm nay không có lớp" description="Không có lịch lớp cần xử lý trong ngày." /> : todayClasses.map((item) => <MobileListRow key={item.id} href={`/branches/${item.id}`} leading="♪" title={item.name} subtitle={`${item.branchName} · ${item.studentCount} học viên`} meta={<><strong className="block text-sm text-slate-900">{item.schedule_start?.slice(0, 5) ?? "--:--"}</strong><span className="mt-1 block text-[11px] font-bold text-slate-400">Xem lớp</span></>} />)}
+          </div>
+        </section>
+
+        <section className="abk-section" aria-labelledby="mobile-summary-title">
+          <h2 id="mobile-summary-title" className="abk-section-title">Tóm tắt hoạt động</h2>
+          <div className="abk-mobile-card grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden">
+            {[{ label: "Học viên", value: `${activeStudents}`, href: "/students" }, { label: "Lớp hoạt động", value: `${activeClasses}`, href: "/branches" }, { label: "Học viên mới", value: `${todayNewStudents}`, href: "/students" }, { label: "Chi hôm nay", value: money(todayExpenseTotal), href: "/expenses" }].map((item) => <Link key={item.label} href={item.href} className="min-h-[88px] p-4"><span className="block text-xs font-bold text-slate-500">{item.label}</span><strong className="mt-2 block truncate text-base font-black text-slate-900">{loading ? "—" : item.value}</strong></Link>)}
+          </div>
+        </section>
+      </MobilePageShell>
+
+      <div className="hidden space-y-7 lg:block">
       {/* HERO */}
       <section className="relative overflow-hidden rounded-[30px] bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-6 py-7 text-white shadow-[0_12px_0_rgba(15,23,42,.14),0_25px_45px_rgba(15,23,42,.14)] sm:px-8">
         <div className="relative z-10">
@@ -1472,6 +1548,7 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
-    </div>
+      </div>
+    </>
   );
 }
