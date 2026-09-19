@@ -15,9 +15,7 @@ const adminManagerMenus = [
   ["✨", "Đăng ký học thử", "/dashboard/trial-leads"],
   ["👨‍🏫", "Giáo viên", "/teachers"],
   ["📋", "Điểm danh", "/attendance"],
-  ["🕘", "Lịch sử điểm danh", "/attendance-history"],
   ["🎟️", "Quản lý học thử", "/trial-students"],
-  ["📋", "Điểm danh GV", "/teacher-attendance"],
   ["💰", "Học phí", "/tuition"],
   ["💵", "Thu khác", "/other-revenue"],
   ["💵", "Lương giáo viên", "/teacher-payroll"],
@@ -123,6 +121,10 @@ export default function Sidebar({
           {menus.map(([icon, label, href]) => {
             const active =
               pathname === href ||
+              (href === "/attendance" &&
+                pathname === "/attendance-history") ||
+              (href === "/teachers" &&
+                pathname === "/teacher-attendance") ||
               (href === "/branches" &&
                 pathname.startsWith("/branches/"));
 
@@ -131,10 +133,10 @@ export default function Sidebar({
                 key={href}
                 href={href}
                 onClick={onClose}
-                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition ${
+                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-[0_2px_0_rgba(148,163,184,0.18),0_4px_8px_rgba(15,23,42,0.05)] ${
                   active
-                    ? "bg-slate-900 !text-white shadow-[0_8px_18px_rgba(15,23,42,.14)]"
-                    : "text-slate-600 hover:bg-white hover:text-slate-900"
+                    ? "bg-white text-slate-900 ring-1 ring-slate-200/70 shadow-[0_7px_0_rgba(148,163,184,0.30),0_12px_22px_rgba(15,23,42,0.08)] active:translate-y-[3px]"
+                    : "bg-transparent text-slate-800 hover:bg-white hover:text-slate-900 hover:shadow-[0_5px_0_rgba(148,163,184,0.20),0_9px_18px_rgba(15,23,42,0.06)]"
                 }`}
               >
                 <span className="text-lg">{icon}</span>
@@ -145,7 +147,7 @@ export default function Sidebar({
                     <span
                       className={`ml-auto min-w-5 rounded-full px-1.5 py-0.5 text-center text-[11px] font-black ${
                         active
-                          ? "bg-white/20 text-white"
+                          ? "bg-violet-100 text-violet-700"
                           : "bg-violet-100 text-violet-700"
                       }`}
                     >
@@ -164,10 +166,10 @@ export default function Sidebar({
               <Link
                 href="/activity-log"
                 onClick={onClose}
-                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition ${
+                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-[0_2px_0_rgba(148,163,184,0.18),0_4px_8px_rgba(15,23,42,0.05)] ${
                   pathname === "/activity-log"
-                    ? "bg-blue-600 !text-white shadow-[0_8px_18px_rgba(37,99,235,.20)]"
-                    : "text-slate-600 hover:bg-white hover:text-slate-900"
+                    ? "bg-white text-slate-900 ring-1 ring-slate-200/70 shadow-[0_7px_0_rgba(148,163,184,0.30),0_12px_22px_rgba(15,23,42,0.08)] active:translate-y-[3px]"
+                    : "bg-transparent text-slate-800 hover:bg-white hover:text-slate-900 hover:shadow-[0_5px_0_rgba(148,163,184,0.20),0_9px_18px_rgba(15,23,42,0.06)]"
                 }`}
               >
                 <span className="text-lg">🕵️</span>
@@ -177,10 +179,10 @@ export default function Sidebar({
               <Link
                 href="/system-integrity"
                 onClick={onClose}
-                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition ${
+                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-[0_2px_0_rgba(148,163,184,0.18),0_4px_8px_rgba(15,23,42,0.05)] ${
                   pathname === "/system-integrity"
-                    ? "bg-blue-600 !text-white shadow-[0_8px_18px_rgba(37,99,235,.20)]"
-                    : "text-slate-600 hover:bg-white hover:text-slate-900"
+                    ? "bg-white text-slate-900 ring-1 ring-slate-200/70 shadow-[0_7px_0_rgba(148,163,184,0.30),0_12px_22px_rgba(15,23,42,0.08)] active:translate-y-[3px]"
+                    : "bg-transparent text-slate-800 hover:bg-white hover:text-slate-900 hover:shadow-[0_5px_0_rgba(148,163,184,0.20),0_9px_18px_rgba(15,23,42,0.06)]"
                 }`}
               >
                 <span className="text-lg">🛡️</span>

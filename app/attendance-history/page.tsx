@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamMonthStart, vietnamToday } from "@/lib/vietnam-date";
@@ -14,7 +15,11 @@ type AttendanceRow = {
   class_id: string;
   attendance_date: string;
   status: string;
+  recorded_at: string | null;
+  class_session_id: string | null;
 };
+
+const viCollator = new Intl.Collator("vi-VN");
 
 const STATUS_LABEL: Record<string, string> = {
   present: "Có mặt",
@@ -98,7 +103,9 @@ export default function AttendanceHistoryPage() {
 
     let query = supabase
       .from("attendance")
-      .select("id,student_id,class_id,attendance_date,status")
+      .select(
+        "id,student_id,class_id,attendance_date,status,recorded_at,class_session_id"
+      )
       .order("attendance_date", { ascending: false });
 
     if (fromDate) query = query.gte("attendance_date", fromDate);
@@ -136,19 +143,14 @@ export default function AttendanceHistoryPage() {
     [classes, branchId]
   );
 
-  const visibleRows = useMemo(() => {
-    if (!branchId) return rows;
-
-    const allowedClassIds = new Set(
-      filteredClasses.map((item) => item.id)
-    );
-
-    return rows.filter((row) => allowedClassIds.has(row.class_id));
-  }, [rows, branchId, filteredClasses]);
-
   const classMap = useMemo(
     () => new Map(classes.map((item) => [item.id, item.name])),
     [classes]
+  );
+
+  const studentDetailsMap = useMemo(
+    () => new Map(students.map((item) => [item.id, item])),
+    [students]
   );
 
   const studentMap = useMemo(
@@ -161,6 +163,101 @@ export default function AttendanceHistoryPage() {
       ),
     [students]
   );
+
+  const visibleRows = useMemo(() => {
+    const allowedClassIds = branchId
+      ? new Set(filteredClasses.map((item) => item.id))
+      : null;
+    const filteredRows = allowedClassIds
+      ? rows.filter((row) => allowedClassIds.has(row.class_id))
+      : rows;
+    const groups = new Map<string, AttendanceRow[]>();
+
+    for (const row of filteredRows) {
+      const groupKey = row.class_session_id
+        ? `session:${row.class_session_id}`
+        : `legacy:${row.attendance_date}|${row.class_id}`;
+      const groupRows = groups.get(groupKey);
+
+      if (groupRows) {
+        groupRows.push(row);
+      } else {
+        groups.set(groupKey, [row]);
+      }
+    }
+
+    const sortedGroups = Array.from(groups, ([key, groupRows]) => {
+      const attendanceDate = groupRows.reduce(
+        (latest, row) =>
+          row.attendance_date > latest ? row.attendance_date : latest,
+        ""
+      );
+      const classId = groupRows.reduce(
+        (smallest, row) =>
+          !smallest || row.class_id < smallest ? row.class_id : smallest,
+        ""
+      );
+      const recordedTimes = groupRows
+        .map((row) =>
+          row.recorded_at ? Date.parse(row.recorded_at) : Number.NaN
+        )
+        .filter(Number.isFinite);
+      const groupRecordedAt = recordedTimes.length
+        ? Math.min(...recordedTimes)
+        : null;
+
+      return {
+        key,
+        rows: groupRows,
+        attendanceDate,
+        classId,
+        className: classMap.get(classId) ?? "",
+        groupRecordedAt,
+      };
+    });
+
+    sortedGroups.sort((a, b) => {
+      const dateComparison = b.attendanceDate.localeCompare(a.attendanceDate);
+      if (dateComparison !== 0) return dateComparison;
+
+      if (a.groupRecordedAt !== b.groupRecordedAt) {
+        if (a.groupRecordedAt === null) return 1;
+        if (b.groupRecordedAt === null) return -1;
+        return b.groupRecordedAt - a.groupRecordedAt;
+      }
+
+      const classNameComparison = viCollator.compare(a.className, b.className);
+      if (classNameComparison !== 0) return classNameComparison;
+
+      const classIdComparison = a.classId.localeCompare(b.classId);
+      if (classIdComparison !== 0) return classIdComparison;
+
+      return a.key.localeCompare(b.key);
+    });
+
+    return sortedGroups.flatMap((group) =>
+      group.rows.sort((a, b) => {
+        const studentA = studentDetailsMap.get(a.student_id);
+        const studentB = studentDetailsMap.get(b.student_id);
+        const nameComparison = viCollator.compare(
+          studentA?.full_name ?? "",
+          studentB?.full_name ?? ""
+        );
+        if (nameComparison !== 0) return nameComparison;
+
+        const codeComparison = viCollator.compare(
+          studentA?.student_code ?? "",
+          studentB?.student_code ?? ""
+        );
+        if (codeComparison !== 0) return codeComparison;
+
+        const studentIdComparison = a.student_id.localeCompare(b.student_id);
+        if (studentIdComparison !== 0) return studentIdComparison;
+
+        return a.id.localeCompare(b.id);
+      })
+    );
+  }, [branchId, classMap, filteredClasses, rows, studentDetailsMap]);
 
   const stats = useMemo(() => {
     return {
@@ -184,6 +281,21 @@ export default function AttendanceHistoryPage() {
     return (
       <div className="space-y-6">
         <h1 className="text-4xl font-black">📋 Lịch sử điểm danh</h1>
+        <nav className="grid w-full grid-cols-2 gap-2 sm:w-fit" aria-label="Điểm danh">
+          <Link
+            href="/attendance"
+            className="rounded-2xl border border-slate-200/80 bg-slate-50/90 px-5 py-3 text-center text-sm font-black text-slate-600 shadow-[0_4px_0_rgba(148,163,184,0.20),0_8px_16px_rgba(15,23,42,0.05)] transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-white hover:text-slate-900 hover:shadow-[0_6px_0_rgba(148,163,184,0.26),0_11px_20px_rgba(15,23,42,0.08)] active:translate-y-[2px] active:shadow-[0_2px_0_rgba(148,163,184,0.18),0_4px_8px_rgba(15,23,42,0.05)]"
+          >
+            Điểm danh
+          </Link>
+          <Link
+            href="/attendance-history"
+            aria-current="page"
+            className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-center text-sm font-black text-slate-900 shadow-[0_7px_0_rgba(148,163,184,0.34),0_12px_24px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.95)] transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 active:translate-y-[3px] active:shadow-[0_2px_0_rgba(148,163,184,0.22),0_5px_10px_rgba(15,23,42,0.06)]"
+          >
+            Lịch sử
+          </Link>
+        </nav>
         <div className="ui-card p-6 text-slate-500">Đang tải dữ liệu...</div>
       </div>
     );
@@ -200,6 +312,22 @@ export default function AttendanceHistoryPage() {
           Xem lại toàn bộ lịch sử học viên có mặt, vắng và có phép.
         </p>
       </section>
+
+      <nav className="grid w-full grid-cols-2 gap-2 sm:w-fit" aria-label="Điểm danh">
+        <Link
+          href="/attendance"
+          className="rounded-2xl border border-slate-200/80 bg-slate-50/90 px-5 py-3 text-center text-sm font-black text-slate-600 shadow-[0_4px_0_rgba(148,163,184,0.20),0_8px_16px_rgba(15,23,42,0.05)] transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-white hover:text-slate-900 hover:shadow-[0_6px_0_rgba(148,163,184,0.26),0_11px_20px_rgba(15,23,42,0.08)] active:translate-y-[2px] active:shadow-[0_2px_0_rgba(148,163,184,0.18),0_4px_8px_rgba(15,23,42,0.05)]"
+        >
+          Điểm danh
+        </Link>
+        <Link
+          href="/attendance-history"
+          aria-current="page"
+          className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-center text-sm font-black text-slate-900 shadow-[0_7px_0_rgba(148,163,184,0.34),0_12px_24px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.95)] transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 active:translate-y-[3px] active:shadow-[0_2px_0_rgba(148,163,184,0.22),0_5px_10px_rgba(15,23,42,0.06)]"
+        >
+          Lịch sử
+        </Link>
+      </nav>
 
       {error && (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">

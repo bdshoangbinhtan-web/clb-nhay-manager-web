@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
@@ -467,6 +468,22 @@ export default function TeachersPage() {
           + Thêm giáo viên
         </button>
       </section>
+
+      <nav className="grid w-full grid-cols-2 gap-2 sm:w-fit" aria-label="Giáo viên">
+        <Link
+          href="/teachers"
+          aria-current="page"
+          className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-center text-sm font-black text-slate-900 shadow-[0_7px_0_rgba(148,163,184,0.34),0_12px_24px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.95)] transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 active:translate-y-[3px] active:shadow-[0_2px_0_rgba(148,163,184,0.22),0_5px_10px_rgba(15,23,42,0.06)]"
+        >
+          Danh sách GV
+        </Link>
+        <Link
+          href="/teacher-attendance"
+          className="rounded-2xl border border-slate-200/80 bg-slate-50/90 px-5 py-3 text-center text-sm font-black text-slate-600 shadow-[0_4px_0_rgba(148,163,184,0.20),0_8px_16px_rgba(15,23,42,0.05)] transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-white hover:text-slate-900 hover:shadow-[0_6px_0_rgba(148,163,184,0.26),0_11px_20px_rgba(15,23,42,0.08)] active:translate-y-[2px] active:shadow-[0_2px_0_rgba(148,163,184,0.18),0_4px_8px_rgba(15,23,42,0.05)]"
+        >
+          Điểm danh GV
+        </Link>
+      </nav>
 
       <section className="grid gap-4 md:grid-cols-3">
         <div className="ui-card p-6">

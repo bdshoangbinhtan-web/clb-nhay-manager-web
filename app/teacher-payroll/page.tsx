@@ -108,6 +108,27 @@ function formatDate(value: string) {
   return `${day}/${month}/${year}`;
 }
 
+function sortSessionsForDisplay(
+  sessions: DisplaySession[],
+  classMap: Map<string, string>
+) {
+  return [...sessions].sort((a, b) => {
+    const dateComparison = b.date.localeCompare(a.date);
+    if (dateComparison !== 0) return dateComparison;
+
+    const classNameComparison = (classMap.get(a.classId) ?? "").localeCompare(
+      classMap.get(b.classId) ?? "",
+      "vi-VN"
+    );
+    if (classNameComparison !== 0) return classNameComparison;
+
+    const classIdComparison = a.classId.localeCompare(b.classId);
+    if (classIdComparison !== 0) return classIdComparison;
+
+    return a.id.localeCompare(b.id);
+  });
+}
+
 function PayrollTabs({
   active,
   onChange,
@@ -1114,7 +1135,7 @@ export default function TeacherPayrollPage() {
                       </div>
 
                       <div className="space-y-3">
-                        {item.sessions.map((session) => (
+                        {sortSessionsForDisplay(item.sessions, classMap).map((session) => (
                           <div
                             key={session.id}
                             className="rounded-2xl bg-white p-4"

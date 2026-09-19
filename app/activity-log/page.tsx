@@ -67,8 +67,11 @@ const groupInfo: Record<BusinessGroup, { label: string; icon: string }> = {
 const fieldNames: Record<string, string> = {
   full_name: "Họ và tên", student_code: "Mã học viên", parent_phone: "SĐT phụ huynh",
   phone: "Số điện thoại", email: "Email", branch_id: "Cơ sở", class_id: "Lớp",
-  student_id: "Học viên", teacher_id: "Giáo viên", status: "Trạng thái",
+  student_id: "Học viên", teacher_id: "Giáo viên", teacher: "Giáo viên",
+  actual_teacher_id: "Giáo viên thực tế", standing_teacher_id: "Giáo viên chính",
+  substitute_teacher_id: "Giáo viên dạy thay", status: "Trạng thái",
   join_date: "Ngày vào học", start_date: "Ngày bắt đầu", end_date: "Ngày kết thúc",
+  attendance_date: "Ngày học", recorded_at: "Thời gian ghi nhận", recorded_by: "Người thực hiện",
   monthly_fee: "Học phí tháng", amount: "Số tiền", amount_due: "Phải thu",
   amount_paid: "Đã thu", category: "Danh mục", description: "Nội dung", note: "Ghi chú",
   salary_rate: "Mức lương", total_amount: "Tổng tiền", total_sessions: "Số buổi",
@@ -87,6 +90,34 @@ function formatValue(value: unknown) {
     return `${new Intl.NumberFormat("vi-VN").format(value)} đ`;
   }
   return String(value);
+}
+
+function formatVietnamDateTime(value: unknown) {
+  if (typeof value !== "string" || !value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const parts = new Intl.DateTimeFormat("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || "";
+  return `${part("hour")}:${part("minute")}:${part("second")} · ${part("day")}/${part("month")}/${part("year")}`;
+}
+
+function formatDateOnly(value: unknown) {
+  if (typeof value !== "string" || !value) return "—";
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : formatValue(value);
+}
+
+function looksLikeUuid(value: unknown) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function actionInfo(action: ActivityLog["action"]) {
@@ -181,6 +212,7 @@ export default function ActivityLogPage() {
       for (const data of [log.old_data, log.new_data]) {
         if (!data) continue;
         addId(studentIds, data.student_id);
+        addId(teacherIds, data.teacher);
         addId(teacherIds, data.teacher_id);
         addId(teacherIds, data.actual_teacher_id);
         addId(teacherIds, data.standing_teacher_id);
@@ -250,6 +282,38 @@ export default function ActivityLogPage() {
   const teacherMap = useMemo(() => new Map(teachers.map((item) => [item.id, item.full_name])), [teachers]);
   const classMap = useMemo(() => new Map(classes.map((item) => [item.id, item.name])), [classes]);
   const tuitionMap = useMemo(() => new Map(tuition.map((item) => [item.id, item])), [tuition]);
+  const branchMap = useMemo(() => new Map(branchOptions.map((item) => [item.id, item.name])), [branchOptions]);
+
+  function activityValue(key: string, value: unknown) {
+    const id = typeof value === "string" ? value : "";
+    if (["teacher", "teacher_id", "actual_teacher_id", "standing_teacher_id", "substitute_teacher_id"].includes(key)) {
+      return teacherMap.get(id) || "Không xác định";
+    }
+    if (key === "student_id") return studentMap.get(id) || "Không xác định";
+    if (key === "class_id") return classMap.get(id) || "Không xác định";
+    if (key === "branch_id") return branchMap.get(id) || "Không xác định";
+    if (["recorded_by", "user_id", "created_by", "updated_by"].includes(key)) {
+      return profileMap.get(id)?.full_name || "Không xác định";
+    }
+    if (key === "recorded_at" || key.endsWith("_at")) return formatVietnamDateTime(value);
+    if (key.endsWith("_date")) return formatDateOnly(value);
+    return formatValue(value);
+  }
+
+  function isUserFacingField(key: string, value: unknown) {
+    if (["id", "created_at", "updated_at", "recorded_at", "recorded_by", "user_id", "class_session_id"].includes(key)) return false;
+    if (key.endsWith("_id") && !["teacher_id", "actual_teacher_id", "standing_teacher_id", "substitute_teacher_id", "student_id", "class_id", "branch_id"].includes(key)) return false;
+    if (typeof value === "object" && value !== null) return false;
+    return !looksLikeUuid(value) || ["teacher", "teacher_id", "actual_teacher_id", "standing_teacher_id", "substitute_teacher_id", "student_id", "class_id", "branch_id"].includes(key);
+  }
+
+  function actorName(log: ActivityLog) {
+    const data = log.new_data || log.old_data || {};
+    const actorId = String(data.recorded_by ?? log.user_id ?? "");
+    if (log.actor_name) return log.actor_name;
+    if (actorId) return profileMap.get(actorId)?.full_name || "Không xác định";
+    return "Hệ thống";
+  }
 
   function getEntityLabel(log: ActivityLog) {
     const data = log.new_data || log.old_data || {};
@@ -343,10 +407,11 @@ export default function ActivityLogPage() {
       </section>
 
       {selectedLog && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm"><div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-[28px] bg-white shadow-2xl">
-        <div className="flex items-start justify-between border-b border-slate-100 p-6"><div><div className="text-xs font-bold uppercase tracking-wider text-blue-600">CHI TIẾT HOẠT ĐỘNG</div><h2 className="mt-1 text-2xl font-black">{getEntityLabel(selectedLog)}</h2><p className="mt-1 text-sm text-slate-400">{new Date(selectedLog.created_at).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}</p></div><button type="button" onClick={() => setSelectedLog(null)} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-lg hover:bg-slate-200">✕</button></div>
-        <div className="max-h-[65vh] overflow-y-auto p-6"><div className="mb-5 grid gap-3 sm:grid-cols-3"><div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold uppercase text-slate-400">Người thực hiện</div><div className="mt-1 font-black">{selectedLog.actor_name || "Hệ thống"}</div><div className="mt-1 text-xs text-slate-400">{roleLabel(selectedLog.actor_role)}</div></div><div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold uppercase text-slate-400">Hành động</div><div className="mt-1 font-black">{actionInfo(selectedLog.action).icon} {actionInfo(selectedLog.action).label}</div></div><div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold uppercase text-slate-400">Cơ sở</div><div className="mt-1 font-black">{selectedLog.branch_name || "Toàn CLB / chưa xác định"}</div></div></div>
-          {selectedLog.action === "UPDATE" ? <div className="overflow-hidden rounded-2xl border border-slate-200"><div className="grid grid-cols-[1fr_1fr_1fr] border-b bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-400"><div>Trường</div><div>Trước</div><div>Sau</div></div>{changedFields(selectedLog).map((change) => <div key={change.key} className="grid grid-cols-[1fr_1fr_1fr] border-b border-slate-100 px-4 py-4 text-sm last:border-0"><div className="font-black">{fieldLabel(change.key)}</div><div className="break-words text-rose-600">{formatValue(change.oldValue)}</div><div className="break-words font-bold text-emerald-700">{formatValue(change.newValue)}</div></div>)}</div>
-          : <div className="space-y-3">{Object.entries(selectedLog.action === "DELETE" ? selectedLog.old_data || {} : selectedLog.new_data || {}).filter(([key]) => !["id", "created_at", "updated_at"].includes(key)).map(([key, value]) => <div key={key} className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold uppercase text-slate-400">{fieldLabel(key)}</div><div className="mt-1 break-words font-semibold">{formatValue(value)}</div></div>)}</div>}
+        <div className="flex items-start justify-between border-b border-slate-100 p-6"><div><div className="text-xs font-bold uppercase tracking-wider text-blue-600">CHI TIẾT HOẠT ĐỘNG</div><h2 className="mt-1 text-2xl font-black">{getEntityLabel(selectedLog)}</h2><p className="mt-1 text-sm text-slate-400">{formatVietnamDateTime(selectedLog.created_at)}</p></div><button type="button" onClick={() => setSelectedLog(null)} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-lg hover:bg-slate-200">✕</button></div>
+        <div className="max-h-[65vh] overflow-y-auto p-6"><div className="mb-5 grid gap-3 sm:grid-cols-2"><div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold uppercase text-slate-400">👤 Người thực hiện</div><div className="mt-1 text-lg font-black">{actorName(selectedLog)}</div><div className="mt-1 text-xs text-slate-400">{roleLabel(selectedLog.actor_role || profileMap.get(selectedLog.user_id || "")?.role || null)}</div></div><div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold uppercase text-slate-400">🕘 Thời gian ghi nhận</div><div className="mt-1 text-lg font-black">{formatVietnamDateTime((selectedLog.new_data || selectedLog.old_data || {}).recorded_at || selectedLog.created_at)}</div></div><div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold uppercase text-slate-400">Hành động</div><div className="mt-1 text-lg font-black">{actionInfo(selectedLog.action).icon} {actionInfo(selectedLog.action).label}</div></div><div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold uppercase text-slate-400">🏢 Cơ sở</div><div className="mt-1 text-lg font-black">{selectedLog.branch_name || branchMap.get(selectedLog.branch_id || "") || "Toàn CLB / chưa xác định"}</div></div></div>
+          {selectedLog.action === "UPDATE" ? (() => { const changes = changedFields(selectedLog).filter((change) => isUserFacingField(change.key, change.newValue ?? change.oldValue)); return changes.length > 0 ? <div className="overflow-hidden rounded-2xl border border-slate-200"><div className="grid grid-cols-[1fr_1fr_1fr] border-b bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-400"><div>Thông tin</div><div>Trước</div><div>Sau</div></div>{changes.map((change) => <div key={change.key} className="grid grid-cols-[1fr_1fr_1fr] border-b border-slate-100 px-4 py-4 text-sm last:border-0"><div className="font-black">{fieldLabel(change.key)}</div><div className="break-words text-rose-600">{activityValue(change.key, change.oldValue)}</div><div className="break-words font-bold text-emerald-700">{activityValue(change.key, change.newValue)}</div></div>)}</div> : <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Hoạt động này chỉ thay đổi thông tin kỹ thuật.</div>; })()
+          : <div className="grid gap-3 sm:grid-cols-2">{Object.entries(selectedLog.action === "DELETE" ? selectedLog.old_data || {} : selectedLog.new_data || {}).filter(([key, value]) => isUserFacingField(key, value)).map(([key, value]) => <div key={key} className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-bold uppercase text-slate-400">{fieldLabel(key)}</div><div className="mt-1 break-words text-lg font-semibold">{activityValue(key, value)}</div></div>)}</div>}
+          <details className="mt-5 rounded-2xl border border-slate-200 bg-slate-50"><summary className="cursor-pointer px-4 py-3 text-sm font-bold text-slate-600">Chi tiết kỹ thuật</summary><pre className="max-h-72 overflow-auto border-t border-slate-200 p-4 text-xs text-slate-600">{JSON.stringify(selectedLog, null, 2)}</pre></details>
         </div><div className="flex justify-end border-t border-slate-100 p-5"><button type="button" onClick={() => setSelectedLog(null)} className="ui-btn ui-btn-light">Đóng</button></div>
       </div></div>}
     </div>

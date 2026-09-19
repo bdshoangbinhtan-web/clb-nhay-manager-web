@@ -128,6 +128,40 @@ function formatContextValue(value: unknown) {
   return String(value);
 }
 
+function formatMoney(value: unknown) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "—";
+  return `${new Intl.NumberFormat("vi-VN").format(amount)}đ`;
+}
+
+function formatMonth(value: unknown) {
+  if (!value) return "—";
+  const raw = String(value).slice(0, 10);
+  const [year, month] = raw.split("-");
+  if (!year || !month) return String(value);
+  return `Tháng ${Number(month)}/${year}`;
+}
+
+function paymentMethodLabel(value: unknown) {
+  const method = String(value || "").toLowerCase();
+  if (method === "cash") return "Tiền mặt";
+  if (method === "transfer" || method === "bank_transfer") return "Chuyển khoản";
+  return value ? String(value) : "—";
+}
+
+function getContextRecord(issue: IntegrityIssue) {
+  return (issue.context || {}) as Record<string, unknown>;
+}
+
+function isTuitionPaymentMismatch(issue: IntegrityIssue) {
+  const context = getContextRecord(issue);
+  return (
+    issue.category === "tuition" &&
+    (issue.fingerprint.includes("PAYMENT_TOTAL_MISMATCH") ||
+      (context.payment_total !== undefined && context.amount_paid !== undefined))
+  );
+}
+
 function durationLabel(value: number | null) {
   if (value === null) return "—";
   if (value < 1000) return `${value} ms`;
@@ -561,57 +595,148 @@ export default function SystemIntegrityPage() {
         </div>
       </section>
 
-      {selectedIssue && (
-        <div className="ui-modal-backdrop" onClick={() => setSelectedIssue(null)}>
-          <div className="ui-modal max-w-3xl" onClick={(event) => event.stopPropagation()}>
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white p-6">
-              <div>
-                <div className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black uppercase ${severityInfo[selectedIssue.severity].badge}`}>
-                  {severityInfo[selectedIssue.severity].label}
-                </div>
-                <h2 className="mt-3 text-2xl font-black text-slate-900">{selectedIssue.title}</h2>
-              </div>
-              <button type="button" onClick={() => setSelectedIssue(null)} className="rounded-full bg-slate-100 px-3 py-2 font-black text-slate-600">Đóng</button>
-            </div>
+      {selectedIssue && (() => {
+        const context = getContextRecord(selectedIssue);
+        const paymentMismatch = isTuitionPaymentMismatch(selectedIssue);
+        const paymentTotal = Number(context.payment_total);
+        const amountPaid = Number(context.amount_paid);
+        const difference =
+          Number.isFinite(paymentTotal) && Number.isFinite(amountPaid)
+            ? paymentTotal - amountPaid
+            : null;
+        const payments = Array.isArray(context.payments)
+          ? (context.payments as Record<string, unknown>[])
+          : [];
 
-            <div className="space-y-6 p-6">
-              <div>
-                <div className="text-xs font-black uppercase tracking-wide text-slate-400">Check</div>
-                <code className="mt-2 block break-all rounded-xl bg-slate-100 p-3 text-sm text-slate-700">{selectedIssue.check_key}</code>
-              </div>
-
-              <p className="text-sm leading-6 text-slate-600">{selectedIssue.description}</p>
-
-              <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <div><span className="font-black text-slate-500">Record:</span> {selectedIssue.entity_type}</div>
-                <div className="break-all"><span className="font-black text-slate-500">Record ID:</span> {selectedIssue.entity_id || "—"}</div>
-                <div><span className="font-black text-slate-500">Liên quan:</span> {selectedIssue.related_entity_type || "—"}</div>
-                <div className="break-all"><span className="font-black text-slate-500">Related ID:</span> {selectedIssue.related_entity_id || "—"}</div>
-                <div><span className="font-black text-slate-500">Phát hiện đầu:</span> {formatDateTime(selectedIssue.first_detected_at)}</div>
-                <div><span className="font-black text-slate-500">Thấy gần nhất:</span> {formatDateTime(selectedIssue.last_detected_at)}</div>
-                <div><span className="font-black text-slate-500">Đã xử lý:</span> {formatDateTime(selectedIssue.resolved_at)}</div>
-                <div><span className="font-black text-slate-500">Số lần:</span> {selectedIssue.occurrence_count}</div>
-              </div>
-
-              <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <summary className="cursor-pointer font-black text-slate-700">Xem dữ liệu kỹ thuật</summary>
-                <div className="mt-4 space-y-3">
-                  {Object.entries(selectedIssue.context || {}).map(([key, value]) => (
-                    <div key={key} className="grid gap-1 border-b border-slate-200 pb-3 sm:grid-cols-[180px_1fr]">
-                      <code className="text-xs font-bold text-slate-500">{key}</code>
-                      <pre className="whitespace-pre-wrap break-all text-xs text-slate-700">{formatContextValue(value)}</pre>
-                    </div>
-                  ))}
-                  <div className="grid gap-1 sm:grid-cols-[180px_1fr]">
-                    <code className="text-xs font-bold text-slate-500">fingerprint</code>
-                    <pre className="whitespace-pre-wrap break-all text-xs text-slate-700">{selectedIssue.fingerprint}</pre>
+        return (
+          <div className="ui-modal-backdrop" onClick={() => setSelectedIssue(null)}>
+            <div className="ui-modal max-w-3xl" onClick={(event) => event.stopPropagation()}>
+              <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white p-6">
+                <div>
+                  <div className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black uppercase ${severityInfo[selectedIssue.severity].badge}`}>
+                    {severityInfo[selectedIssue.severity].label}
                   </div>
+                  <h2 className="mt-3 text-2xl font-black text-slate-900">{selectedIssue.title}</h2>
                 </div>
-              </details>
+                <button type="button" onClick={() => setSelectedIssue(null)} className="rounded-full bg-slate-100 px-4 py-2 font-black text-slate-600">Đóng</button>
+              </div>
+
+              <div className="space-y-6 p-6">
+                {paymentMismatch ? (
+                  <>
+                    <div>
+                      <div className="text-xl font-black text-slate-900">
+                        {String(context.student_name || "Học viên chưa xác định")}
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-slate-500">
+                        {[
+                          context.class_name ? String(context.class_name) : null,
+                          selectedIssue.branch_name || null,
+                          context.billing_month ? formatMonth(context.billing_month) : null,
+                        ].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <div className="text-xs font-black uppercase tracking-wide text-slate-400">Học phí phải thu</div>
+                        <div className="mt-2 text-2xl font-black text-slate-900">{formatMoney(context.amount_due)}</div>
+                      </div>
+                      <div className="rounded-2xl bg-emerald-50 p-4">
+                        <div className="text-xs font-black uppercase tracking-wide text-emerald-600">Đã ghi nhận thu</div>
+                        <div className="mt-2 text-2xl font-black text-emerald-700">{formatMoney(context.amount_paid)}</div>
+                      </div>
+                      <div className="rounded-2xl bg-blue-50 p-4">
+                        <div className="text-xs font-black uppercase tracking-wide text-blue-600">Tổng các phiếu thu</div>
+                        <div className="mt-2 text-2xl font-black text-blue-700">{formatMoney(context.payment_total)}</div>
+                        <div className="mt-1 text-xs font-bold text-blue-600">{Number(context.payment_count || payments.length || 0)} phiếu</div>
+                      </div>
+                      <div className={`rounded-2xl p-4 ${difference && difference !== 0 ? "bg-rose-50" : "bg-slate-50"}`}>
+                        <div className={`text-xs font-black uppercase tracking-wide ${difference && difference !== 0 ? "text-rose-600" : "text-slate-400"}`}>Chênh lệch</div>
+                        <div className={`mt-2 text-2xl font-black ${difference && difference !== 0 ? "text-rose-700" : "text-slate-900"}`}>
+                          {difference === null ? "—" : `${difference > 0 ? "+" : ""}${formatMoney(difference)}`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {difference !== null && difference !== 0 && (
+                      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold leading-6 text-rose-700">
+                        Tổng các phiếu thu đang {difference > 0 ? "cao hơn" : "thấp hơn"} số tiền hệ thống ghi nhận đã thu {formatMoney(Math.abs(difference))}.
+                      </div>
+                    )}
+
+                    {payments.length > 0 && (
+                      <div>
+                        <div className="mb-3 text-sm font-black text-slate-900">🧾 Các phiếu thu ({payments.length})</div>
+                        <div className="space-y-2">
+                          {payments.map((payment, index) => (
+                            <div key={String(payment.payment_id || payment.id || index)} className="rounded-2xl border border-slate-200 p-4">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <div className="font-black text-slate-900">{formatMoney(payment.amount)}</div>
+                                  <div className="mt-1 text-sm text-slate-500">
+                                    {[
+                                      payment.payment_date ? formatDate(String(payment.payment_date)) : null,
+                                      payment.payment_method ? paymentMethodLabel(payment.payment_method) : null,
+                                    ].filter(Boolean).join(" · ")}
+                                  </div>
+                                </div>
+                                <div className="text-sm font-bold text-slate-600">
+                                  {String(payment.receipt_no || "Chưa có số phiếu")}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm leading-6 text-slate-600">{selectedIssue.description}</p>
+                    <div className="grid gap-3 text-sm sm:grid-cols-2">
+                      <div><span className="font-black text-slate-500">Nhóm:</span> {categoryLabels[selectedIssue.category] || selectedIssue.category}</div>
+                      <div><span className="font-black text-slate-500">Cơ sở:</span> {selectedIssue.branch_name || "—"}</div>
+                      <div><span className="font-black text-slate-500">Ngày:</span> {formatDate(selectedIssue.related_date)}</div>
+                      <div><span className="font-black text-slate-500">Số lần gặp:</span> {selectedIssue.occurrence_count}</div>
+                      <div><span className="font-black text-slate-500">Phát hiện đầu:</span> {formatDateTime(selectedIssue.first_detected_at)}</div>
+                      <div><span className="font-black text-slate-500">Thấy gần nhất:</span> {formatDateTime(selectedIssue.last_detected_at)}</div>
+                    </div>
+                  </>
+                )}
+
+                <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <summary className="cursor-pointer font-black text-slate-700">Chi tiết kỹ thuật</summary>
+                  <div className="mt-4 space-y-3">
+                    <div className="grid gap-1 border-b border-slate-200 pb-3 sm:grid-cols-[180px_1fr]">
+                      <code className="text-xs font-bold text-slate-500">check_key</code>
+                      <pre className="whitespace-pre-wrap break-all text-xs text-slate-700">{selectedIssue.check_key}</pre>
+                    </div>
+                    <div className="grid gap-1 border-b border-slate-200 pb-3 sm:grid-cols-[180px_1fr]">
+                      <code className="text-xs font-bold text-slate-500">entity</code>
+                      <pre className="whitespace-pre-wrap break-all text-xs text-slate-700">{selectedIssue.entity_type}: {selectedIssue.entity_id || "—"}</pre>
+                    </div>
+                    <div className="grid gap-1 border-b border-slate-200 pb-3 sm:grid-cols-[180px_1fr]">
+                      <code className="text-xs font-bold text-slate-500">related_entity</code>
+                      <pre className="whitespace-pre-wrap break-all text-xs text-slate-700">{selectedIssue.related_entity_type || "—"}: {selectedIssue.related_entity_id || "—"}</pre>
+                    </div>
+                    {Object.entries(selectedIssue.context || {}).map(([key, value]) => (
+                      <div key={key} className="grid gap-1 border-b border-slate-200 pb-3 sm:grid-cols-[180px_1fr]">
+                        <code className="text-xs font-bold text-slate-500">{key}</code>
+                        <pre className="whitespace-pre-wrap break-all text-xs text-slate-700">{formatContextValue(value)}</pre>
+                      </div>
+                    ))}
+                    <div className="grid gap-1 sm:grid-cols-[180px_1fr]">
+                      <code className="text-xs font-bold text-slate-500">fingerprint</code>
+                      <pre className="whitespace-pre-wrap break-all text-xs text-slate-700">{selectedIssue.fingerprint}</pre>
+                    </div>
+                  </div>
+                </details>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {selectedRun && (
         <div className="ui-modal-backdrop" onClick={() => setSelectedRun(null)}>
