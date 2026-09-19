@@ -4,6 +4,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { StudentAvatar } from "@/components/students/student-avatar";
+import { StudentAvatarEditor } from "@/components/students/student-avatar-editor";
+import {
+  getStudentAvatarUrls,
+  uploadStudentAvatar,
+} from "@/lib/student-avatar-storage";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
 
@@ -109,6 +115,13 @@ export default function TeacherStudentAttendancePage() {
   );
 
   const [statusMap, setStatusMap] = useState<Record<string, string>>({});
+
+  const [avatarUrls, setAvatarUrls] = useState<Map<string, string>>(new Map());
+
+  const [avatarEditor, setAvatarEditor] = useState<{
+    studentId: string;
+    file: File;
+  } | null>(null);
 
   const [loadingClasses, setLoadingClasses] = useState(true);
 
@@ -312,6 +325,36 @@ useEffect(() => {
     };
 
   }, [classId, date, supabase]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const studentIds = students.map((student) => student.id);
+
+    setAvatarUrls(new Map());
+    if (!studentIds.length) return;
+
+    // This effect runs only after the roster has committed, so names and
+    // attendance controls render before the single batched Storage request.
+    void getStudentAvatarUrls(supabase, studentIds).then((urls) => {
+      if (!cancelled) setAvatarUrls(urls);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [students, supabase]);
+
+  async function saveAvatar(studentId: string, blob: Blob) {
+    const freshUrl = await uploadStudentAvatar(supabase, studentId, blob);
+    if (!freshUrl) throw new Error("Không tạo được liên kết ảnh mới.");
+
+    setAvatarUrls((previous) => {
+      const next = new Map(previous);
+      next.set(studentId, freshUrl);
+      return next;
+    });
+    setAvatarEditor(null);
+  }
 
   function setStudentStatus(studentId: string, status: string) {
 
@@ -669,6 +712,22 @@ useEffect(() => {
 
                       </div>
 
+                      <div
+                        className="shrink-0"
+                        onClick={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                      >
+                        <StudentAvatar
+                          name={student.full_name}
+                          url={avatarUrls.get(student.id)}
+                          size="attendance"
+                          editable
+                          onPhotoSelected={(file) =>
+                            setAvatarEditor({ studentId: student.id, file })
+                          }
+                        />
+                      </div>
+
                       <div className="font-semibold text-slate-900">
 
                         {student.full_name}
@@ -753,6 +812,19 @@ useEffect(() => {
         </>
 
       )}
+
+      {avatarEditor ? (
+        <StudentAvatarEditor
+          file={avatarEditor.file}
+          onCancel={() => setAvatarEditor(null)}
+          onRetake={(file) =>
+            setAvatarEditor((current) =>
+              current ? { ...current, file } : current
+            )
+          }
+          onSave={(blob) => saveAvatar(avatarEditor.studentId, blob)}
+        />
+      ) : null}
 
     </div>
 

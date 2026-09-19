@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 type Props = {
   name: string;
   url?: string | null;
-  size?: "list" | "detail";
+  size?: "list" | "detail" | "attendance";
   editable?: boolean;
   onPhotoSelected?: (file: File) => void;
 };
@@ -17,7 +17,7 @@ export function StudentAvatar({ name, url, size = "list", editable = false, onPh
   const galleryRef = useRef<HTMLInputElement>(null);
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [url]);
-  const dimensions = size === "detail" ? "h-20 w-20 sm:h-24 sm:w-24" : "h-12 w-12 sm:h-16 sm:w-16 lg:h-12 lg:w-12";
+  const dimensions = size === "detail" ? "h-20 w-20 sm:h-24 sm:w-24" : size === "attendance" ? "h-12 w-12" : "h-12 w-12 sm:h-16 sm:w-16 lg:h-12 lg:w-12";
 
   function selected(file?: File) {
     if (file) onPhotoSelected?.(file);
