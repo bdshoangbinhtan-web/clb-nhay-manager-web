@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { vietnamToday } from "@/lib/vietnam-date";
+import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
+import { StudentAvatar } from "@/components/students/student-avatar";
+import { StudentAvatarEditor } from "@/components/students/student-avatar-editor";
+import { getStudentAvatarUrl, uploadStudentAvatar } from "@/lib/student-avatar-storage";
 
 type Student = {
   id: string;
@@ -58,10 +61,18 @@ export default function StudentDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const id = params.id;
   const editMode = searchParams.get("edit") === "1";
+  const requestedReturnPath = searchParams.get("from");
+  const returnPath = requestedReturnPath?.startsWith("/students")
+    ? requestedReturnPath
+    : "/students";
+  const detailParams = new URLSearchParams({ from: returnPath });
+  const detailPath = `/students/${id}?${detailParams.toString()}`;
+  const editParams = new URLSearchParams({ edit: "1", from: returnPath });
+  const editPath = `/students/${id}?${editParams.toString()}`;
 
   const [student, setStudent] = useState<Student | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -85,6 +96,8 @@ export default function StudentDetailPage() {
   const [suspendModal, setSuspendModal] = useState(false);
   const [tuitionLoading, setTuitionLoading] = useState(false);
   const [tuitionList, setTuitionList] = useState<Tuition[]>([]);
+  const [currentTuition, setCurrentTuition] = useState<Tuition[]>([]);
+  const [currentTuitionLoading, setCurrentTuitionLoading] = useState(true);
   const [adjustments, setAdjustments] = useState<TuitionAdjustment[]>([]);
   const [adjustmentAction, setAdjustmentAction] =
     useState<AdjustmentAction>("none");
@@ -92,11 +105,34 @@ export default function StudentDetailPage() {
   const [adjustmentMonth, setAdjustmentMonth] = useState("");
   const [adjustmentNote, setAdjustmentNote] = useState("");
   const [processingAdjustment, setProcessingAdjustment] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [canEditAvatar, setCanEditAvatar] = useState(false);
+
+  const loadAvatarAccess = useCallback(async () => {
+    const [{ data: auth }, signedUrl] = await Promise.all([supabase.auth.getUser(), getStudentAvatarUrl(supabase, id)]);
+    setAvatarUrl(signedUrl);
+    if (!auth.user) { setCanEditAvatar(false); return; }
+    const { data: profile } = await supabase.from("profiles").select("role,is_active").eq("id", auth.user.id).maybeSingle();
+    if (!profile?.is_active) { setCanEditAvatar(false); return; }
+    if (profile.role === "admin" || profile.role === "manager") { setCanEditAvatar(true); return; }
+    if (profile.role !== "teacher") { setCanEditAvatar(false); return; }
+    const { data: teacher } = await supabase.from("teachers").select("id").eq("profile_id", auth.user.id).eq("status", "active").maybeSingle();
+    if (!teacher) { setCanEditAvatar(false); return; }
+    const [{ data: assignments }, { data: memberships }] = await Promise.all([
+      supabase.from("class_teachers").select("class_id").eq("teacher_id", teacher.id),
+      supabase.from("class_students").select("class_id").eq("student_id", id).eq("status", "active"),
+    ]);
+    const assigned = new Set((assignments ?? []).map((row) => row.class_id));
+    setCanEditAvatar((memberships ?? []).some((row) => assigned.has(row.class_id)));
+  }, [id, supabase]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setCurrentTuitionLoading(true);
 
-    const [studentRes, branchesRes, classesRes, membershipRes] =
+    const currentMonth = vietnamCurrentMonth();
+    const [studentRes, branchesRes, classesRes, membershipRes, currentTuitionRes] =
       await Promise.all([
         supabase
           .from("students")
@@ -119,11 +155,18 @@ export default function StudentDetailPage() {
           .select("class_id")
           .eq("student_id", id)
           .eq("status", "active"),
+
+        supabase
+          .from("tuition")
+          .select("id,billing_month,amount_due,amount_paid,status")
+          .eq("student_id", id)
+          .eq("billing_month", `${currentMonth}-01`),
       ]);
 
     if (studentRes.error) {
       console.error(studentRes.error);
       setStudent(null);
+      setCurrentTuitionLoading(false);
       setLoading(false);
       return;
     }
@@ -146,13 +189,29 @@ export default function StudentDetailPage() {
     setJoinDate(studentRes.data.join_date ?? "");
     setBranchId(studentRes.data.branch_id ?? "");
     setStatus(studentRes.data.status ?? "active");
+    if (currentTuitionRes.error) {
+      console.error(currentTuitionRes.error);
+      setCurrentTuition([]);
+    } else {
+      setCurrentTuition(currentTuitionRes.data ?? []);
+    }
 
+    setCurrentTuitionLoading(false);
     setLoading(false);
   }, [id, supabase]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => { void loadAvatarAccess(); }, [loadAvatarAccess]);
+
+  async function saveAvatar(blob: Blob) {
+    const freshUrl = await uploadStudentAvatar(supabase, id, blob);
+    if (!freshUrl) throw new Error("Không tạo được liên kết ảnh mới.");
+    setAvatarUrl(freshUrl);
+    setAvatarFile(null);
+  }
 
   // THÊM LỚP: mọi cơ sở, không giới hạn theo students.branch_id.
   const availableClassesForAdd = useMemo(() => {
@@ -305,7 +364,7 @@ export default function StudentDetailPage() {
 
     setSuspendModal(false);
     await loadData();
-    router.replace(`/students/${id}`);
+    router.replace(detailPath);
     return true;
   }
 
@@ -474,7 +533,7 @@ export default function StudentDetailPage() {
     }
 
     await loadData();
-    router.replace(`/students/${id}`);
+    router.replace(detailPath);
   }
 
   async function addClass() {
@@ -648,8 +707,10 @@ export default function StudentDetailPage() {
 
   if (loading) {
     return (
-      <div className="ui-card p-12 text-center text-slate-400">
-        Đang tải hồ sơ học viên...
+      <div className="min-w-0 space-y-3" aria-label="Đang tải hồ sơ học viên">
+        <div className="abk-skeleton h-24" />
+        <div className="abk-skeleton h-36" />
+        <div className="abk-skeleton h-52" />
       </div>
     );
   }
@@ -662,7 +723,7 @@ export default function StudentDetailPage() {
           Không tìm thấy học viên
         </h1>
         <Link
-          href="/students"
+          href={returnPath}
           className="ui-btn ui-btn-primary mt-5 inline-flex"
         >
           ← Quay lại danh sách
@@ -673,70 +734,52 @@ export default function StudentDetailPage() {
 
   const branch = branches.find((item) => item.id === student.branch_id);
   const active = student.status === "active";
+  const currentMonth = vietnamCurrentMonth();
+  const currentMonthDue = currentTuition.reduce(
+    (sum, item) => sum + Number(item.amount_due || 0),
+    0
+  );
+  const currentMonthPaid = currentTuition.reduce(
+    (sum, item) => sum + Number(item.amount_paid || 0),
+    0
+  );
+  const currentMonthRemaining = Math.max(currentMonthDue - currentMonthPaid, 0);
+  const currentMonthLabel = `Tháng ${Number(currentMonth.split("-")[1])}/${currentMonth.split("-")[0]}`;
+  const tuitionHref = `/tuition?${new URLSearchParams({ studentId: id, month: currentMonth })}`;
 
   return (
-    <div className="space-y-6">
-      <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+    <div className="min-w-0 space-y-4 sm:space-y-6">
+      {avatarFile ? <StudentAvatarEditor file={avatarFile} onCancel={() => setAvatarFile(null)} onRetake={setAvatarFile} onSave={saveAvatar} /> : null}
+      <section className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
           <Link
-            href="/students"
-            className="text-sm font-bold text-blue-600 hover:underline"
+            href={returnPath}
+            className="inline-flex min-h-11 items-center text-sm font-bold text-blue-600 hover:underline"
           >
             ← Học viên
           </Link>
 
-          <div className="mt-3 flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-[22px] bg-gradient-to-br from-blue-100 via-white to-indigo-100 text-3xl shadow-[inset_0_1px_0_white,0_8px_18px_rgba(50,80,130,.10)]">
-              👤
-            </div>
+          <div className="mt-2 grid min-w-0 grid-cols-[96px_minmax(0,1fr)] items-center gap-3 sm:mt-3 sm:grid-cols-[112px_minmax(0,1fr)] sm:gap-4">
+            <StudentAvatar name={student.full_name} url={avatarUrl} size="detail" editable={canEditAvatar} onPhotoSelected={setAvatarFile} />
 
-            <div>
+            <div className="min-w-0">
               <div className="text-xs font-bold uppercase tracking-wider text-blue-600">
                 HỒ SƠ HỌC VIÊN
               </div>
-              <h1 className="mt-1 text-3xl font-black tracking-tight">
+              <h1 className="mt-1 break-words text-2xl font-black tracking-tight [overflow-wrap:anywhere] sm:text-3xl">
                 {student.full_name}
               </h1>
-              <div className="mt-1 text-sm font-black tracking-wide text-blue-600">
+              <div className="mt-1 break-all text-sm font-black tracking-wide text-blue-600">
                 {student.student_code}
               </div>
             </div>
           </div>
         </div>
 
-        {!editMode && (
-        <section className="grid gap-4 md:grid-cols-3">
-          <div className="ui-card p-5">
-            <div className="text-sm font-bold text-slate-400">🎂 Ngày sinh</div>
-            <div className="mt-2 text-xl font-black">
-              {student.birth_date
-                ? new Date(student.birth_date + "T00:00:00").toLocaleDateString("vi-VN")
-                : "Chưa cập nhật"}
-            </div>
-          </div>
-
-          <div className="ui-card p-5">
-            <div className="text-sm font-bold text-slate-400">📞 SĐT phụ huynh</div>
-            <div className="mt-2 text-xl font-black">
-              {student.parent_phone || "Chưa cập nhật"}
-            </div>
-          </div>
-
-          <div className="ui-card p-5">
-            <div className="text-sm font-bold text-slate-400">📅 Ngày vào học</div>
-            <div className="mt-2 text-xl font-black">
-              {student.join_date
-                ? new Date(student.join_date + "T00:00:00").toLocaleDateString("vi-VN")
-                : "Chưa cập nhật"}
-            </div>
-          </div>
-        </section>
-      )}
-
       {!editMode && (
           <Link
-            href={`/students/${id}?edit=1`}
-            className="ui-btn ui-btn-blue flex w-fit items-center gap-2"
+            href={editPath}
+            className="ui-btn ui-btn-blue flex min-h-12 w-full items-center justify-center gap-2 sm:w-fit"
           >
             ✏️ Sửa hồ sơ
           </Link>
@@ -750,7 +793,7 @@ export default function StudentDetailPage() {
               CẬP NHẬT
             </div>
             <h2 className="mt-1 text-2xl font-black">
-              Sửa thông tin học viên
+              Thông tin học viên
             </h2>
           </div>
 
@@ -838,7 +881,7 @@ export default function StudentDetailPage() {
 
           <div className="mt-7 flex justify-end gap-3 border-t border-slate-100 pt-5">
             <Link
-              href={`/students/${id}`}
+              href={detailPath}
               className="ui-btn ui-btn-light"
             >
               Hủy
@@ -854,45 +897,50 @@ export default function StudentDetailPage() {
           </div>
         </section>
       ) : (
-        <>
-          <section className="grid gap-5 lg:grid-cols-3">
-            <div className="ui-card p-6">
-              <div className="text-sm font-semibold text-slate-400">
-                Trạng thái
-              </div>
-              <div className="mt-3">
-                <span className={`ui-pill ${active ? "ui-pill-active" : ""}`}>
-                  {active ? "🟢 Đang học" : "⚪ Tạm ngưng"}
-                </span>
-              </div>
-            </div>
-
-            <div className="ui-card p-6">
-              <div className="text-sm font-semibold text-slate-400">
-                Cơ sở
-              </div>
-              <div className="mt-2 text-lg font-black">
-                🏢 {branch?.name || "Chưa gán cơ sở"}
-              </div>
-              {branch?.address && (
-                <div className="mt-1 text-sm text-slate-400">
-                  {branch.address}
+          <section className="ui-card min-w-0 p-4 sm:p-6">
+            <h2 className="text-xl font-black">Thông tin học viên</h2>
+            <dl className="mt-4 grid min-w-0 grid-cols-1 gap-x-6 gap-y-4 min-[390px]:grid-cols-2 lg:grid-cols-3">
+              {[
+                ["Mã học viên", student.student_code],
+                ["Trạng thái", active ? "🟢 Đang học" : "⚪ Tạm ngưng"],
+                ["Ngày sinh", student.birth_date ? new Date(student.birth_date + "T00:00:00").toLocaleDateString("vi-VN") : "Chưa cập nhật"],
+                ["SĐT phụ huynh", student.parent_phone || "Chưa cập nhật"],
+                ["Cơ sở", branch?.name || "Chưa gán cơ sở"],
+                ["Ngày vào học", student.join_date ? new Date(student.join_date + "T00:00:00").toLocaleDateString("vi-VN") : "Chưa cập nhật"],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0 border-b border-slate-100 pb-3 last:border-b-0 min-[390px]:last:border-b">
+                  <dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{label}</dt>
+                  <dd className="mt-1 break-words font-black text-slate-800 [overflow-wrap:anywhere]">{value}</dd>
                 </div>
-              )}
-            </div>
-
-            <div className="ui-card p-6">
-              <div className="text-sm font-semibold text-slate-400">
-                Ngày tham gia
-              </div>
-              <div className="mt-2 text-lg font-black">
-                📅{" "}
-                {student.join_date ? new Date(student.join_date + "T00:00:00").toLocaleDateString("vi-VN") : "Chưa cập nhật"}
-              </div>
-            </div>
+              ))}
+            </dl>
           </section>
+      )}
 
-          <section className="ui-card p-6">
+      <section className="ui-card min-w-0 p-4 sm:p-6">
+            <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h2 className="text-xl font-black">💰 Học phí tháng này</h2>
+                <p className="mt-1 text-sm font-bold text-slate-500">{currentMonthLabel}</p>
+              </div>
+              <Link href={tuitionHref} className="ui-btn ui-btn-blue flex min-h-11 shrink-0 items-center justify-center">Xem học phí →</Link>
+            </div>
+
+            {currentTuitionLoading ? (
+              <div className="mt-4 text-sm text-slate-400">Đang tải học phí...</div>
+            ) : currentTuition.length === 0 ? (
+              <div className="mt-4 rounded-2xl bg-slate-50 p-4 font-bold text-slate-500">Chưa có học phí tháng này</div>
+            ) : (
+              <div className="mt-4 grid min-w-0 grid-cols-2 gap-3 lg:grid-cols-4">
+                <div className="min-w-0 rounded-2xl bg-slate-50 p-3"><div className="text-xs font-bold text-slate-400">Phải thu</div><div className="mt-1 break-words font-black">{new Intl.NumberFormat("vi-VN").format(currentMonthDue)} đ</div></div>
+                <div className="min-w-0 rounded-2xl bg-emerald-50 p-3"><div className="text-xs font-bold text-slate-400">Đã đóng</div><div className="mt-1 break-words font-black text-emerald-700">{new Intl.NumberFormat("vi-VN").format(currentMonthPaid)} đ</div></div>
+                <div className="min-w-0 rounded-2xl bg-rose-50 p-3"><div className="text-xs font-bold text-slate-400">Còn lại</div><div className="mt-1 break-words font-black text-rose-600">{new Intl.NumberFormat("vi-VN").format(currentMonthRemaining)} đ</div></div>
+                <div className="col-span-2 min-w-0 rounded-2xl bg-blue-50 p-3 lg:col-span-1"><div className="text-xs font-bold text-slate-400">Trạng thái</div><div className={`mt-1 font-black ${currentMonthRemaining === 0 ? "text-emerald-700" : "text-amber-700"}`}>{currentMonthRemaining === 0 ? "Đã đóng đủ" : "Chưa đóng đủ"}</div></div>
+              </div>
+            )}
+      </section>
+
+      <section className="ui-card min-w-0 p-4 sm:p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-xl font-black">
@@ -908,11 +956,11 @@ export default function StudentDetailPage() {
               </span>
             </div>
 
-            <div className="mt-5 flex flex-col gap-3 rounded-[22px] bg-slate-50/80 p-4 sm:flex-row">
+            <div className="mt-5 flex min-w-0 flex-col gap-3 rounded-[22px] bg-slate-50/80 p-3 sm:flex-row sm:p-4">
               <select
                 value={selectedClass}
                 onChange={(e) => setSelectedClass(e.target.value)}
-                className="ui-input flex-1"
+                className="ui-input min-w-0 flex-1"
               >
                 <option value="">＋ Chọn lớp để thêm...</option>
                 {availableClassesForAdd.map((item) => (
@@ -929,7 +977,7 @@ export default function StudentDetailPage() {
               <button
                 onClick={addClass}
                 disabled={addingClass || !selectedClass}
-                className="ui-btn ui-btn-primary whitespace-nowrap"
+                className="ui-btn ui-btn-primary min-h-12 whitespace-nowrap"
               >
                 {addingClass ? "Đang thêm..." : "＋ Thêm vào lớp"}
               </button>
@@ -944,9 +992,9 @@ export default function StudentDetailPage() {
                 {classes.map((item) => (
                   <div
                     key={item.id}
-                    className="group rounded-[22px] bg-white p-4 shadow-[0_7px_18px_rgba(35,50,75,.07)] transition hover:-translate-y-1 hover:shadow-[0_13px_25px_rgba(35,50,75,.11)]"
+                    className="group min-w-0 rounded-[22px] bg-white p-4 shadow-[0_7px_18px_rgba(35,50,75,.07)] transition hover:-translate-y-1 hover:shadow-[0_13px_25px_rgba(35,50,75,.11)]"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 sm:gap-3">
                       <Link
                         href={`/branches/${item.id}`}
                         className="flex min-w-0 flex-1 items-center gap-3"
@@ -956,7 +1004,7 @@ export default function StudentDetailPage() {
                         </div>
 
                         <div className="min-w-0">
-                          <div className="truncate font-black">
+                          <div className="break-words font-black [overflow-wrap:anywhere]">
                             {item.name}
                           </div>
                           <div className="mt-1 text-xs text-slate-400">
@@ -974,7 +1022,7 @@ export default function StudentDetailPage() {
                           setTransferFromClass(item.id);
                           setTransferToClass("");
                         }}
-                        className="flex h-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 px-3 text-xs font-black text-blue-700 shadow-none transition hover:bg-blue-100"
+                        className="flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 px-2 text-xs font-black text-blue-700 shadow-none transition hover:bg-blue-100 sm:px-3"
                         title="Chuyển sang lớp khác"
                       >
                         🔄 Chuyển
@@ -982,7 +1030,8 @@ export default function StudentDetailPage() {
 
                       <button
                         onClick={() => removeClass(item.id)}
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-50 text-sm shadow-none transition hover:bg-rose-100"
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose-50 text-sm shadow-none transition hover:bg-rose-100"
+                        aria-label={`Xóa ${item.name} khỏi danh sách lớp đang học`}
                         title="Xóa khỏi lớp"
                       >
                         ✕
@@ -1034,9 +1083,7 @@ export default function StudentDetailPage() {
                 </div>
               </div>
             )}
-          </section>
-        </>
-      )}
+      </section>
       {suspendModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl sm:p-7">

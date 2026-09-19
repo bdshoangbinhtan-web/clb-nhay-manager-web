@@ -130,6 +130,7 @@ export default function TuitionPage() {
   const supabase = useMemo(() => createClient(), []);
   const loadRequestRef = useRef(0);
   const newStudentPrefillRef = useRef(false);
+  const urlContextAppliedRef = useRef(false);
 
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -145,6 +146,7 @@ export default function TuitionPage() {
   const [newStudentClassQueue, setNewStudentClassQueue] = useState<string[]>([]);
 
   const [search, setSearch] = useState("");
+  const [focusedStudentId, setFocusedStudentId] = useState("");
   const [visibleTuitionCount, setVisibleTuitionCount] = useState(
     TUITION_PER_BATCH
   );
@@ -308,6 +310,20 @@ export default function TuitionPage() {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (urlContextAppliedRef.current) return;
+    urlContextAppliedRef.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const requestedStudentId = params.get("studentId") ?? "";
+    const requestedMonth = params.get("month") ?? "";
+
+    if (requestedStudentId) setFocusedStudentId(requestedStudentId);
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) {
+      setBillingMonth(requestedMonth);
+    }
+  }, []);
+
   const studentById = useMemo(
     () => new Map(students.map((student) => [student.id, student])),
     [students]
@@ -324,6 +340,19 @@ export default function TuitionPage() {
   );
 
   const selectedStudent = studentById.get(studentId);
+  const focusedStudent = focusedStudentId
+    ? studentById.get(focusedStudentId)
+    : undefined;
+
+  useEffect(() => {
+    if (loading || !focusedStudent) return;
+    window.setTimeout(() => {
+      document.getElementById("tuition-list")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 100);
+  }, [focusedStudent, loading]);
 
   const studentClasses = useMemo(() => {
     if (!studentId) return [];
@@ -1282,6 +1311,7 @@ export default function TuitionPage() {
     return tuition.filter((item) => {
       // Giữ nguyên quy tắc hiện tại: chỉ tính học phí của tháng đang xem.
       if (item.billing_month !== billingDate) return false;
+      if (focusedStudent && item.student_id !== focusedStudent.id) return false;
 
       if (!q) return true;
 
@@ -1309,6 +1339,7 @@ export default function TuitionPage() {
     studentById,
     classById,
     branchById,
+    focusedStudent,
   ]);
 
   // Giữ nguyên cách tính Tổng phải thu / Đã thu / Còn nợ.
@@ -1332,7 +1363,7 @@ export default function TuitionPage() {
 
   useEffect(() => {
     setVisibleTuitionCount(TUITION_PER_BATCH);
-  }, [billingMonth, search]);
+  }, [billingMonth, focusedStudentId, search]);
 
   const visibleTuition = useMemo(
     () => filteredTuition.slice(0, visibleTuitionCount),
@@ -1400,6 +1431,26 @@ export default function TuitionPage() {
           </button>
         </div>
       </section>
+
+      {focusedStudent && (
+        <section className="flex min-w-0 flex-col gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 break-words text-sm font-bold text-blue-900 [overflow-wrap:anywhere]">
+            Đang xem: {focusedStudent.full_name} · {monthLabel(billingMonth)}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setFocusedStudentId("");
+              setSearch("");
+              window.history.replaceState({}, "", "/tuition");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            className="min-h-11 shrink-0 rounded-xl px-3 text-sm font-black text-blue-700 hover:bg-blue-100"
+          >
+            Xem tất cả học viên
+          </button>
+        </section>
+      )}
 
       <section className="grid gap-4 md:grid-cols-3">
         <div className="ui-card p-6">
@@ -1973,13 +2024,15 @@ export default function TuitionPage() {
         </section>
       )}
 
-      <section className="ui-card overflow-hidden">
+      <section id="tuition-list" className="ui-card scroll-mt-6 overflow-hidden">
         <div className="border-b border-slate-100 p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-2xl font-black">📋 Danh sách học phí</h2>
               <p className="mt-1 text-sm text-slate-400">
-                Đang hiển thị {visibleTuition.length}/{filteredTuition.length} khoản học phí
+                {focusedStudent
+                  ? `${focusedStudent.full_name} · ${monthLabel(billingMonth)}`
+                  : `Đang hiển thị ${visibleTuition.length}/${filteredTuition.length} khoản học phí`}
               </p>
             </div>
 
@@ -1998,7 +2051,9 @@ export default function TuitionPage() {
           </div>
         ) : filteredTuition.length === 0 ? (
           <div className="p-12 text-center text-slate-400">
-            Chưa có học phí.
+            {focusedStudent
+              ? `${focusedStudent.full_name} chưa có học phí ${monthLabel(billingMonth)}.`
+              : "Chưa có học phí."}
           </div>
         ) : (
           <div className="overflow-x-auto">

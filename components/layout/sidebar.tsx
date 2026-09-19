@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -12,7 +13,6 @@ const adminManagerMenus = [
 
   ["🏢", "Cơ sở & Lớp", "/branches"],
   ["🏆", "Học viên", "/students"],
-  ["✨", "Đăng ký học thử", "/dashboard/trial-leads"],
   ["👨‍🏫", "Giáo viên", "/teachers"],
   ["📋", "Điểm danh", "/attendance"],
   ["🎟️", "Quản lý học thử", "/trial-students"],
@@ -45,7 +45,6 @@ export default function Sidebar({
   const supabase = createClient();
 
   const [role, setRole] = useState<Role>("");
-  const [newLeadCount, setNewLeadCount] = useState(0);
 
   useEffect(() => {
     async function loadRole() {
@@ -65,14 +64,6 @@ export default function Sidebar({
 
       setRole((profile.role ?? "") as Role);
 
-      if (profile.role === "admin") {
-        const { count } = await supabase
-          .from("trial_class_leads")
-          .select("id", { count: "exact", head: true })
-          .eq("status", "new");
-
-        setNewLeadCount(count ?? 0);
-      }
     }
 
     loadRole();
@@ -102,13 +93,20 @@ export default function Sidebar({
       >
         <div className="mb-5 rounded-[24px] bg-white/85 px-5 py-5 shadow-[0_8px_25px_rgba(35,50,75,.07)]">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-800 to-slate-950 text-2xl shadow-[0_6px_0_rgba(15,23,42,.16)]">
-              💃
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-[0_6px_0_rgba(15,23,42,.16)]">
+              <Image
+                src="/angelbk-logo.jpg"
+                alt="Logo CLB ANGEL BK"
+                width={48}
+                height={48}
+                unoptimized
+                className="h-full w-full object-contain"
+              />
             </div>
 
             <div>
               <div className="text-[17px] font-extrabold tracking-tight">
-                CLB NHẢY
+                CLB ANGEL BK
               </div>
               <div className="text-xs font-semibold text-slate-400">
                 MANAGER V2
@@ -142,18 +140,6 @@ export default function Sidebar({
                 <span className="text-lg">{icon}</span>
                 <span>{label}</span>
 
-                {href === "/dashboard/trial-leads" &&
-                  newLeadCount > 0 && (
-                    <span
-                      className={`ml-auto min-w-5 rounded-full px-1.5 py-0.5 text-center text-[11px] font-black ${
-                        active
-                          ? "bg-violet-100 text-violet-700"
-                          : "bg-violet-100 text-violet-700"
-                      }`}
-                    >
-                      {newLeadCount}
-                    </span>
-                  )}
               </Link>
             );
           })}
