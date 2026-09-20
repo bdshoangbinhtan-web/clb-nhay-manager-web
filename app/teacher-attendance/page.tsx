@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
 import { scheduleIncludesDay } from "@/lib/class-schedule";
+import { activeStaffRole, type ActiveStaffRole } from "@/lib/active-staff-role";
 import {
   PAYROLL_LOCKED_DETAIL,
   teacherAttendanceErrorMessage,
@@ -27,9 +28,11 @@ type ClassItem = {
 type Teacher = {
   id: string;
   full_name: string;
-  salary_rate: number | null;
+  salary_rate?: number | null;
   status: string;
 };
+
+type Role = ActiveStaffRole;
 
 type Row = {
   teacher: Teacher;
@@ -51,6 +54,7 @@ export default function TeacherAttendancePage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
+  const [role, setRole] = useState<Role>("");
 
   const [branchId, setBranchId] = useState("");
   const [classId, setClassId] = useState("");
@@ -72,6 +76,21 @@ export default function TeacherAttendancePage() {
 
   const loadBase = useCallback(async () => {
     setLoading(true);
+    setRole("");
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: profile, error: profileError } = user
+      ? await supabase.from("profiles").select("role,is_active").eq("id", user.id).single()
+      : { data: null, error: null };
+    const currentRole = activeStaffRole(profileError ? null : profile);
+    setRole(currentRole);
+    if (!currentRole) {
+      setBranches([]);
+      setClasses([]);
+      setRows([]);
+      setLoading(false);
+      return;
+    }
 
     const [{ data: branchData }, { data: classData }] = await Promise.all([
       supabase
@@ -96,6 +115,10 @@ export default function TeacherAttendancePage() {
   }, [supabase]);
 
   const loadTeachers = useCallback(async () => {
+    if (!role) {
+      setRows([]);
+      return;
+    }
     if (
       classId !== selectionRef.current.classId ||
       date !== selectionRef.current.date
@@ -112,15 +135,15 @@ export default function TeacherAttendancePage() {
 
     setLoadingTeachers(true);
 
+    const teacherFields = role === "admin"
+      ? "id,full_name,salary_rate,status"
+      : "id,full_name,status";
     const { data: teacherLinks, error: teacherError } = await supabase
       .from("class_teachers")
       .select(`
         teacher_id,
         teachers (
-          id,
-          full_name,
-          salary_rate,
-          status
+          ${teacherFields}
         )
       `)
       .eq("class_id", classId);
@@ -245,7 +268,7 @@ export default function TeacherAttendancePage() {
     );
 
     setLoadingTeachers(false);
-  }, [classId, date, supabase]);
+  }, [classId, date, role, supabase]);
 
   useEffect(() => {
     void loadBase();
@@ -294,6 +317,7 @@ export default function TeacherAttendancePage() {
   }
 
   async function save() {
+    if (!role) return;
     if (!classId || !date || rows.length === 0) {
       alert("Chưa có giáo viên để lưu.");
       return;
@@ -407,6 +431,10 @@ export default function TeacherAttendancePage() {
     );
   }
 
+  if (!role) {
+    return <main className="p-6 text-slate-600">Không xác định được quyền truy cập. Vui lòng tải lại trang.</main>;
+  }
+
   return (
     <main className="space-y-6 p-6">
       <div>
@@ -415,7 +443,7 @@ export default function TeacherAttendancePage() {
           📋 Điểm danh giáo viên
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Mỗi buổi dạy được tính vào lương theo mức lương/buổi.
+          {role === "admin" ? "Mỗi buổi dạy được tính vào lương theo mức lương/buổi." : "Ghi nhận trạng thái dạy của giáo viên theo từng buổi."}
         </p>
       </div>
 
@@ -561,12 +589,12 @@ export default function TeacherAttendancePage() {
                   >
                     <div>
                       <div className="font-black">{row.teacher.full_name}</div>
-                      <div className="mt-1 text-sm text-slate-400">
+                      {role === "admin" && <div className="mt-1 text-sm text-slate-400">
                         {Number(row.teacher.salary_rate || 0).toLocaleString(
                           "vi-VN"
                         )}{" "}
                         đ / buổi
-                      </div>
+                      </div>}
                     </div>
 
                     <div className="flex gap-2">

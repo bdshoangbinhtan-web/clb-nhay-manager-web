@@ -47,7 +47,9 @@ export default function MobileBottomNav() {
   }, [supabase]);
   if (!role) return null;
   const isTeacher = role === "teacher";
-  const visibleMoreItems = role === "admin" ? moreItems : moreItems.filter((item) => item[3] !== "/system-integrity");
+  const visibleMoreItems = role === "admin"
+    ? moreItems
+    : moreItems.filter((item) => item[3] !== "/system-integrity" && item[3] !== "/teacher-payroll");
   const isMoreActive = !isTeacher && visibleMoreItems.some((item) => pathname.startsWith(item[3]));
   async function logout() {
     closeMore();

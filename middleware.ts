@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { managerPayrollRouteBlocked } from "@/lib/teacher-payroll-access";
 
 const ADMIN_MANAGER_ROUTES = [
   "/dashboard",
@@ -128,7 +129,10 @@ export async function middleware(request: NextRequest) {
   // ADMIN / MANAGER
   // =====================================================
   if (role === "admin" || role === "manager") {
-    if (role === "manager" && matchesRoute(pathname, ADMIN_ONLY_ROUTES)) {
+    if (
+      role === "manager" &&
+      (matchesRoute(pathname, ADMIN_ONLY_ROUTES) || managerPayrollRouteBlocked(pathname))
+    ) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
 

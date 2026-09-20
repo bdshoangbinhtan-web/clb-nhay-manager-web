@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { activeStaffRole } from "@/lib/active-staff-role";
 
 type ClassItem = {
   id: string;
@@ -74,6 +75,7 @@ export default function ClassDetailPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [availableTeachers, setAvailableTeachers] = useState<Teacher[]>([]);
+  const [role, setRole] = useState<"admin" | "manager" | "">("");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -120,6 +122,26 @@ export default function ClassDetailPage() {
 
     setClassItem(classData);
 
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: profile, error: profileError } = user
+      ? await supabase.from("profiles").select("role,is_active").eq("id", user.id).single()
+      : { data: null, error: null };
+    if (requestId !== loadRequestRef.current) return;
+    const currentRole = activeStaffRole(profileError ? null : profile);
+    setRole(currentRole);
+    if (!currentRole) {
+      setError("Không xác định được quyền truy cập. Vui lòng tải lại trang.");
+      setLoading(false);
+      return;
+    }
+
+    const classTeacherSelection = currentRole === "admin"
+      ? "teacher_id, teachers(id,full_name,salary_rate)"
+      : "teacher_id, teachers(id,full_name)";
+    const teacherSelection = currentRole === "admin"
+      ? "id,full_name,salary_rate"
+      : "id,full_name";
+
     const [{ data: branchData }, { data: classStudents }, { data: classTeachers }, { data: allTeachers }] =
       await Promise.all([
         supabase
@@ -137,12 +159,12 @@ export default function ClassDetailPage() {
 
         supabase
           .from("class_teachers")
-          .select("teacher_id, teachers(id,full_name,salary_rate)")
+          .select(classTeacherSelection)
           .eq("class_id", classId),
 
         supabase
           .from("teachers")
-          .select("id,full_name,salary_rate")
+          .select(teacherSelection)
           .eq("status", "active")
           .order("full_name"),
     ]);
@@ -162,7 +184,7 @@ export default function ClassDetailPage() {
       .filter((teacher: Teacher) => teacher?.id && teacher?.full_name);
 
     setTeachers(teacherList);
-    setAvailableTeachers(allTeachers ?? []);
+    setAvailableTeachers((allTeachers ?? []) as unknown as Teacher[]);
 
     setLoading(false);
   }, [classId, supabase]);
@@ -423,12 +445,12 @@ export default function ClassDetailPage() {
                       {teacher.full_name}
                     </div>
 
-                    <div className="mt-1 text-xs font-semibold text-slate-400">
+                    {role === "admin" && <div className="mt-1 text-xs font-semibold text-slate-400">
                       {Number(
                         teacher.salary_rate || 0
                       ).toLocaleString("vi-VN")}{" "}
                       đ/buổi
-                    </div>
+                    </div>}
                   </div>
 
                   <button

@@ -72,8 +72,10 @@ export default function Sidebar({
   const menus =
     role === "teacher"
       ? teacherMenus
-      : role === "admin" || role === "manager"
+      : role === "admin"
         ? adminManagerMenus
+        : role === "manager"
+          ? adminManagerMenus.filter((item) => item[2] !== "/teacher-payroll")
         : [];
 
   return (

@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
+import { AttendanceDetailSheet } from "@/components/teachers/attendance-detail-sheet";
+import { activeStaffRole, type ActiveStaffRole } from "@/lib/active-staff-role";
+
+type Role = ActiveStaffRole;
 
 type Teacher = {
   id: string;
@@ -13,9 +17,9 @@ type Teacher = {
   birth_date: string | null;
   address: string | null;
   start_date: string | null;
-  salary_type: string;
-  salary_rate: number;
-  allowance: number;
+  salary_type?: string;
+  salary_rate?: number;
+  allowance?: number;
   avatar_url: string | null;
   notes: string | null;
   status: string;
@@ -45,6 +49,8 @@ export default function TeachersPage() {
   const loadRequestRef = useRef(0);
 
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [role, setRole] = useState<Role>("");
+  const [attendanceTeacher, setAttendanceTeacher] = useState<Teacher | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -70,11 +76,26 @@ export default function TeachersPage() {
   const loadData = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
     setLoading(true);
+    setRole("");
 
-    const { data, error } = await supabase
-      .from("teachers")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: profile, error: profileError } = user
+      ? await supabase.from("profiles").select("role,is_active").eq("id", user.id).single()
+      : { data: null, error: null };
+    const currentRole = activeStaffRole(profileError ? null : profile);
+    if (requestId !== loadRequestRef.current) return;
+    setRole(currentRole);
+    if (!currentRole) {
+      setTeachers([]);
+      setShowForm(false);
+      setLoading(false);
+      return;
+    }
+
+    const queryResult = currentRole === "admin"
+      ? await supabase.from("teachers").select("*").order("created_at", { ascending: false })
+      : await supabase.from("teachers").select("id,profile_id,full_name,phone,birth_date,address,start_date,avatar_url,notes,status,end_date,created_at").order("created_at", { ascending: false });
+    const { data, error } = queryResult;
 
     if (requestId !== loadRequestRef.current) return;
 
@@ -84,7 +105,7 @@ export default function TeachersPage() {
       return;
     }
 
-    const teacherRows = data ?? [];
+    const teacherRows = (data ?? []) as Teacher[];
     const profileIds = teacherRows
       .map((teacher) => teacher.profile_id)
       .filter((id): id is string => Boolean(id));
@@ -135,6 +156,7 @@ export default function TeachersPage() {
   }
 
   function openAdd() {
+    if (!role) return;
     resetForm();
     setShowForm(true);
     requestAnimationFrame(() => {
@@ -146,13 +168,14 @@ export default function TeachersPage() {
   }
 
   function openEdit(t: Teacher) {
+    if (!role) return;
     setEditingId(t.id);
     setFullName(t.full_name || "");
     setPhone(t.phone || "");
     setBirthDate(t.birth_date || "");
     setAddress(t.address || "");
     setStartDate(t.start_date || "");
-    setSalaryRate(String(t.salary_rate ?? ""));
+    if (role === "admin") setSalaryRate(String(t.salary_rate ?? ""));
     setAvatarUrl(t.avatar_url || "");
     setNotes(t.notes || "");
     setShowForm(true);
@@ -166,6 +189,7 @@ export default function TeachersPage() {
 
   async function saveTeacher(e: React.FormEvent) {
     e.preventDefault();
+    if (!role) return;
 
     if (!fullName.trim()) {
       alert("Hãy nhập họ tên giáo viên.");
@@ -174,44 +198,57 @@ export default function TeachersPage() {
 
     const rate = Number(salaryRate);
 
-    if (!salaryRate.trim() || !Number.isFinite(rate) || rate < 0) {
+    if (role === "admin" && (!salaryRate.trim() || !Number.isFinite(rate) || rate < 0)) {
       alert("Hãy nhập mức lương / thù lao theo buổi hợp lệ.");
       return;
     }
 
     setSaving(true);
 
-    const payload = {
+    const commonPayload = {
       full_name: fullName.trim(),
       phone: phone.trim() || null,
       birth_date: birthDate || null,
       address: address.trim() || null,
       start_date: startDate || null,
-      salary_type: "per_session",
-      salary_rate: rate,
-      allowance: 0,
       avatar_url: avatarUrl.trim() || null,
       notes: notes.trim() || null,
     };
+    const payload = role === "admin"
+      ? { ...commonPayload, salary_type: "per_session", salary_rate: rate, allowance: 0 }
+      : commonPayload;
 
-    let result;
+    let result: { data: Teacher | null; error: { message: string; code?: string } | null };
 
     if (editingId) {
-      result = await supabase
-        .from("teachers")
-        .update(payload)
-        .eq("id", editingId)
-        .select("*")
-        .single();
+      if (role === "admin") {
+        result = await supabase.from("teachers").update(payload).eq("id", editingId).select("*").single();
+      } else {
+        const managerResult = await supabase.from("teachers").update(payload).eq("id", editingId);
+        result = {
+          error: managerResult.error,
+          data: managerResult.error ? null : { ...teachers.find((item) => item.id === editingId)!, ...payload },
+        };
+      }
     } else {
-      result = await supabase
-        .from("teachers")
-        .insert({
-          ...payload,
-          status: "active",
-        })
-        .select("*")
-        .single();
+      if (role === "admin") {
+        result = await supabase.from("teachers").insert({ ...payload, status: "active" }).select("*").single();
+      } else {
+        const managerFields = "id,profile_id,full_name,phone,birth_date,address,start_date,avatar_url,notes,status,end_date";
+        result = await supabase.from("teachers").insert({ ...commonPayload, status: "active" }).select(managerFields).single();
+        // Legacy schemas may require salary columns without defaults. Retry only
+        // a failed NOT NULL insert with fixed system values, never fetched salary.
+        if (result.error?.code === "23502" &&
+            ["salary_type", "salary_rate", "allowance"].some((field) => result.error?.message.includes(field))) {
+          result = await supabase.from("teachers").insert({
+            ...commonPayload,
+            status: "active",
+            salary_type: "per_session",
+            salary_rate: 0,
+            allowance: 0,
+          }).select(managerFields).single();
+        }
+      }
     }
 
     setSaving(false);
@@ -242,9 +279,7 @@ export default function TeachersPage() {
       (editingId
         ? "✅ Đã cập nhật giáo viên."
         : "✅ Đã thêm giáo viên.") +
-        "\n\nMức lương: " +
-        Number(savedTeacher.salary_rate ?? 0).toLocaleString("vi-VN") +
-        " đ/buổi"
+        (role === "admin" ? "\n\nMức lương: " + Number(savedTeacher.salary_rate ?? 0).toLocaleString("vi-VN") + " đ/buổi" : "")
     );
 
     resetForm();
@@ -447,6 +482,10 @@ export default function TeachersPage() {
     );
   }, [teachers, search]);
 
+  if (!loading && !role) {
+    return <div className="ui-card p-8 text-slate-600">Không xác định được quyền truy cập. Vui lòng tải lại trang.</div>;
+  }
+
   return (
     <div className="space-y-6">
       <section className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -460,11 +499,11 @@ export default function TeachersPage() {
           </h1>
 
           <p className="mt-2 text-slate-400">
-            Quản lý hồ sơ, trạng thái và chế độ thu nhập giáo viên
+            {role === "admin" ? "Quản lý hồ sơ, trạng thái và chế độ thu nhập giáo viên" : "Quản lý hồ sơ và trạng thái giáo viên"}
           </p>
         </div>
 
-        <button className="ui-btn ui-btn-primary" onClick={openAdd}>
+        <button className="ui-btn ui-btn-primary" onClick={openAdd} disabled={!role}>
           + Thêm giáo viên
         </button>
       </section>
@@ -583,7 +622,7 @@ export default function TeachersPage() {
               />
             </label>
 
-            <label>
+            {role === "admin" && <label>
               <div className="mb-2 text-sm font-bold">
                 Kiểu tính lương
               </div>
@@ -594,9 +633,9 @@ export default function TeachersPage() {
               >
                 <option value="per_session">🕐 Theo buổi</option>
               </select>
-            </label>
+            </label>}
 
-            <label>
+            {role === "admin" && <label>
               <div className="mb-2 text-sm font-bold">
                 Mức lương / thù lao *
               </div>
@@ -613,7 +652,7 @@ export default function TeachersPage() {
               <div className="mt-1 text-xs font-semibold text-slate-400">
                 Tính theo mỗi buổi giáo viên đã dạy
               </div>
-            </label>
+            </label>}
 
             <label className="md:col-span-2">
               <div className="mb-2 text-sm font-bold">
@@ -758,7 +797,7 @@ export default function TeachersPage() {
         ) : (
           filteredTeachers.map((teacher) => (
             <article key={teacher.id} className="ui-card p-6">
-              <div className="flex items-start gap-4">
+              <button type="button" className="flex w-full items-start gap-4 text-left" onClick={() => setAttendanceTeacher(teacher)} aria-label={`Xem chi tiết chấm công của ${teacher.full_name}`}>
                 {teacher.avatar_url ? (
                   // URL ảnh do người dùng nhập nên không thể giới hạn hostname cho next/image.
                   // eslint-disable-next-line @next/next/no-img-element
@@ -796,7 +835,7 @@ export default function TeachersPage() {
                     </span>
                   </div>
                 </div>
-              </div>
+              </button>
 
               <div className="mt-5 space-y-2 text-sm">
                 <div className="flex justify-between">
@@ -804,15 +843,15 @@ export default function TeachersPage() {
                   <b>{date(teacher.start_date)}</b>
                 </div>
 
-                <div className="flex justify-between">
+                {role === "admin" && <div className="flex justify-between">
                   <span className="text-slate-400">Kiểu lương</span>
-                  <b>{salaryLabel(teacher.salary_type)}</b>
-                </div>
+                  <b>{salaryLabel(teacher.salary_type ?? "")}</b>
+                </div>}
 
-                <div className="flex justify-between">
+                {role === "admin" && <div className="flex justify-between">
                   <span className="text-slate-400">Mức lương</span>
                   <b>{money(Number(teacher.salary_rate))}</b>
-                </div>
+                </div>}
 
 
               </div>
@@ -899,6 +938,7 @@ export default function TeachersPage() {
                 <button
                   className="ui-btn"
                   onClick={() => openEdit(teacher)}
+                  disabled={!role}
                 >
                   ✏️ Sửa
                 </button>
@@ -916,6 +956,7 @@ export default function TeachersPage() {
           ))
         )}
       </section>
+      {attendanceTeacher && <AttendanceDetailSheet teacher={attendanceTeacher} onClose={() => setAttendanceTeacher(null)} />}
     </div>
   );
 }
