@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { activeStaffRole } from "@/lib/active-staff-role";
 import {
   EmptyState,
   MobileListRow,
@@ -155,6 +156,7 @@ type PayrollForAlert = {
 
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
+  const [role, setRole] = useState<"admin" | "manager" | "">("");
 
   const [students, setStudents] = useState<Student[]>([]);
   const [globalSearch, setGlobalSearch] = useState("");
@@ -177,6 +179,19 @@ export default function DashboardPage() {
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
+    setRole("");
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: profile, error: profileError } = user
+      ? await supabase.from("profiles").select("role,is_active").eq("id", user.id).single()
+      : { data: null, error: null };
+    const currentRole = activeStaffRole(profileError ? null : profile);
+    setRole(currentRole);
+    if (!currentRole) {
+      setPayrollAlerts([]);
+      setLoading(false);
+      return;
+    }
 
     const dashboardMonth = vietnamCurrentMonth();
     const previousDashboardMonth = shiftMonthKey(dashboardMonth, -1);
@@ -249,10 +264,12 @@ export default function DashboardPage() {
           .select("id,full_name,status")
           .eq("status", "active"),
 
-        supabase
-          .from("teacher_payrolls")
-          .select("id,teacher_id,payroll_month,status")
-          .eq("payroll_month", currentMonthStart),
+        currentRole === "admin"
+          ? supabase
+              .from("teacher_payrolls")
+              .select("id,teacher_id,payroll_month,status")
+              .eq("payroll_month", currentMonthStart)
+          : Promise.resolve({ data: [], error: null }),
         supabase
           .from("teacher_substitution_requests")
           .select("id", { count: "exact", head: true })
@@ -778,6 +795,10 @@ export default function DashboardPage() {
     return currentMinutes < hours * 60 + minutes ? "Sắp bắt đầu" : "Chưa điểm danh";
   }
 
+  if (!loading && !role) {
+    return <div className="ui-card p-8 text-slate-600">Không xác định được quyền truy cập. Vui lòng tải lại trang.</div>;
+  }
+
   return (
     <>
       <MobilePageShell>
@@ -802,8 +823,8 @@ export default function DashboardPage() {
           <div className="abk-mobile-card overflow-hidden">
             {todayClasses.map((item) => <MobileListRow key={item.id} href="/attendance" leading={item.schedule_start?.slice(0, 5) ?? "♪"} title={item.name} subtitle={`${item.studentCount} học viên · ${mobileClassStatus(item.id, item.schedule_start)}`} />)}
             {pendingSubstitutionCount > 0 ? <MobileListRow href="/teacher-payroll/substitution" leading="🔄" title={`${pendingSubstitutionCount} yêu cầu dạy thay`} subtitle="Đang chờ duyệt" /> : null}
-            {smartAlerts.payrollPendingCount > 0 ? <MobileListRow href="/teacher-payroll" leading="◷" title={`${smartAlerts.payrollPendingCount} giáo viên chưa chốt lương`} subtitle={`Đã chốt ${smartAlerts.payrollCompletedCount}/${smartAlerts.activeTeachersCount}`} /> : null}
-            {!loading && todayClasses.length === 0 && pendingSubstitutionCount === 0 && smartAlerts.payrollPendingCount === 0 ? <EmptyState icon="✓" title="Hôm nay chưa có việc cần xử lý" description="Các đầu việc mới sẽ xuất hiện tại đây." /> : null}
+            {role === "admin" && smartAlerts.payrollPendingCount > 0 ? <MobileListRow href="/teacher-payroll" leading="◷" title={`${smartAlerts.payrollPendingCount} giáo viên chưa chốt lương`} subtitle={`Đã chốt ${smartAlerts.payrollCompletedCount}/${smartAlerts.activeTeachersCount}`} /> : null}
+            {!loading && todayClasses.length === 0 && pendingSubstitutionCount === 0 && (role !== "admin" || smartAlerts.payrollPendingCount === 0) ? <EmptyState icon="✓" title="Hôm nay chưa có việc cần xử lý" description="Các đầu việc mới sẽ xuất hiện tại đây." /> : null}
           </div>
         </section>
 
@@ -1208,7 +1229,7 @@ export default function DashboardPage() {
               </a>
             ))}
 
-            {smartAlerts.activeTeachersCount > 0 && (
+            {role === "admin" && smartAlerts.activeTeachersCount > 0 && (
               <a
                 href="/teacher-payroll"
                 className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2.5 shadow-sm hover:shadow-md"
@@ -1232,7 +1253,7 @@ export default function DashboardPage() {
 
             {smartAlerts.unpaidStudents === 0 &&
             smartAlerts.unpaidClasses.length === 0 &&
-            smartAlerts.payrollPendingCount === 0 ? (
+            (role !== "admin" || smartAlerts.payrollPendingCount === 0) ? (
               <div className="rounded-xl bg-white px-3 py-3 text-center text-sm font-semibold text-emerald-600">
                 ✅ Mọi thứ đang ổn
               </div>
