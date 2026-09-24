@@ -38,9 +38,9 @@ Folder names were treated as organizational hints. Selection was based on visual
 | `01-BRAND/TYPOGRAPHY/_87A7588.JPG` | Experience | Team training | Shows practice, teamwork and a second view of the studio | Landscape training crop | Vertical crop on central dancers |
 | `03-CLASSES/MANH5143.JPG` | Stage | Main performance | Large-scale theatrical image with room for overlay typography | Full-width stage composition | Shift toward central performer and lights |
 | `03-CLASSES/MANH6436.JPG` | Stage | Supporting performance card | Young crew on a real stage; complements the main stage scene | Group crop with lighting | Central group crop |
-| `04-TEACHERS/Cô Min.png` | Teachers | Portrait | Verified active teacher and clean, expressive portrait | Upper-body portrait | Face and upper-body crop |
+| `04-TEACHERS/Cô Nhung.png` | Teachers | Portrait | Correct matching teacher portrait with a clean white background | Upper-body portrait | Face and upper-body crop |
 | `04-TEACHERS/Cô Nga.png` | Teachers | Portrait | Verified active teacher and distinctive styling | Upper-body portrait | Face and upper-body crop |
-| `04-TEACHERS/Cô Ngọc.png` | Teachers | Portrait | Verified active teacher and strong monochrome pose | Upper-body portrait | Face and upper-body crop |
+| `04-TEACHERS/Cô. Thuỷ.png` | Teachers | Portrait | Correct matching teacher portrait with a strong pink studio background | Upper-body portrait | Face and upper-body crop |
 | `04-TEACHERS/Thầy Huy.png` | Teachers | Portrait | Verified active teacher and vivid blue studio portrait | Upper-body portrait | Face and upper-body crop |
 | `08-ACTIVITIES/Thiết kế chưa có tên (2).png` | Activities | Vietnam concept | Branded group activity with an unmistakable Vietnam theme | Wide group crop | Keep central line of students |
 | `08-ACTIVITIES/Thiết kế chưa có tên (4).png` | Activities | ANGEL BK concept | Large youth group in front of the ANGEL BK wall | Wide environment crop | Center group and logo wall |

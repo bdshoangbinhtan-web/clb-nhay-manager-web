@@ -57,9 +57,9 @@ const programs = [
 ] as const;
 
 const teachers = [
-  { name: "Cô Min", image: "/images/angelbk/teachers/co-min.webp", crop: "center 22%" },
+  { name: "Cô Nhung", image: "/images/angelbk/teachers/co-nhung.webp", crop: "center 22%" },
   { name: "Cô Nga", image: "/images/angelbk/teachers/co-nga.webp", crop: "center 18%" },
-  { name: "Cô Ngọc", image: "/images/angelbk/teachers/co-ngoc.webp", crop: "center 16%" },
+  { name: "Cô Thủy", image: "/images/angelbk/teachers/co-thuy.webp", crop: "center 16%" },
   { name: "Thầy Huy", image: "/images/angelbk/teachers/thay-huy.webp", crop: "center 18%" },
 ] as const;
 
