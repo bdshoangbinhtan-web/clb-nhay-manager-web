@@ -153,7 +153,7 @@ export default function PublicHome() {
     <div className="abk-public" id="dau-trang">
       <header className="abk-header">
         <a className="abk-logo" href="#dau-trang" aria-label="ANGEL BK — Trang chủ">
-          <Image src="/images/angelbk/brand/angel-bk-logo.webp" alt="ANGEL BK" width={184} height={92} priority />
+          <Image src="/images/angelbk/brand/angel-bk-logo.webp" alt="ANGEL BK" width={720} height={675} priority />
         </a>
         <button className="abk-menu-button" type="button" aria-label="Mở menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
           <span /><span />
