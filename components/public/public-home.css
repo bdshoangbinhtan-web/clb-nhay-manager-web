@@ -35,7 +35,7 @@
   z-index: 20;
 }
 
-.abk-logo { align-items: center; display: flex; flex-shrink: 0; height: 72px; width: 128px; }
+.abk-logo { align-items: center; display: flex; flex-shrink: 0; height: 72px; width: 120px; }
 .abk-logo img { display: block; height: 100%; object-fit: contain; object-position: center; width: 100%; }
 .abk-nav { align-items: center; display: flex; font-size: 11px; font-weight: 700; gap: clamp(16px, 2vw, 32px); letter-spacing: .04em; text-transform: uppercase; }
 .abk-nav a { color: inherit; transition: color .2s ease; }
@@ -68,7 +68,7 @@
 .abk-button:disabled { cursor: wait; opacity: .65; transform: none; }
 
 .abk-hero { background: var(--black); display: grid; grid-template-columns: 42% 58%; min-height: min(880px, 100vh); padding-top: 92px; }
-.abk-hero-copy { align-self: center; color: var(--white); min-width: 0; padding: clamp(60px, 8vw, 132px) clamp(28px, 4.8vw, 78px); position: relative; z-index: 2; }
+.abk-hero-copy { align-self: center; color: var(--white); min-width: 0; padding: clamp(60px, 8vw, 132px) clamp(28px, 4.8vw, 78px); position: relative; transform: translateY(-75px); z-index: 2; }
 .abk-kicker { color: var(--orange); font-size: 10px; font-weight: 800; letter-spacing: .18em; margin-bottom: 22px !important; text-transform: uppercase; }
 .abk-hero h1, .abk-public h2 { font-family: "Archivo Black", Impact, sans-serif; font-weight: 400; letter-spacing: -.055em; text-transform: uppercase; }
 .abk-hero h1 { font-size: clamp(56px, 6.25vw, 112px); line-height: .86; }
@@ -210,7 +210,7 @@
 @media (max-width: 800px) {
   .abk-public { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
   .abk-header { height: 68px; padding: 0 20px; position: absolute; }
-  .abk-logo { height: 54px; width: 88px; }
+  .abk-logo { height: 54px; width: 78px; }
   .abk-menu-button { display: block; }
   .abk-nav { align-items: stretch; background: #151515; display: none; flex-direction: column; font-size: 12px; gap: 0; left: 14px; padding: 16px 20px 22px; position: absolute; right: 14px; top: 64px; }
   .abk-nav.is-open { display: flex; }
@@ -218,7 +218,7 @@
   .abk-nav-video { background: transparent; border: 0; border-bottom: 1px solid #303030; color: var(--orange) !important; padding: 13px 0; }
   .abk-nav .abk-button { margin-top: 16px; width: 100%; }
   .abk-hero { display: flex; flex-direction: column; min-height: 0; padding-top: 68px; }
-  .abk-hero-copy { align-self: stretch; padding: 58px 24px 47px; width: 100%; }
+  .abk-hero-copy { align-self: stretch; margin-bottom: -60px; padding: 58px 24px 47px; transform: translateY(-60px); width: 100%; }
   .abk-hero h1 { font-size: clamp(50px, 16vw, 70px); }
   .abk-hero-slogan { font-size: 16px; margin-top: 31px !important; }
   .abk-hero-actions { align-items: flex-start; flex-direction: column; gap: 22px; margin-top: 32px; }
