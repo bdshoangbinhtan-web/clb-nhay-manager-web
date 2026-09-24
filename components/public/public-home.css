@@ -35,8 +35,8 @@
   z-index: 20;
 }
 
-.abk-logo { align-items: center; display: flex; height: 72px; width: 128px; }
-.abk-logo img { height: auto; object-fit: contain; width: 100%; }
+.abk-logo { align-items: center; display: flex; flex-shrink: 0; height: 72px; width: 128px; }
+.abk-logo img { display: block; height: 100%; object-fit: contain; object-position: center; width: 100%; }
 .abk-nav { align-items: center; display: flex; font-size: 11px; font-weight: 700; gap: clamp(16px, 2vw, 32px); letter-spacing: .04em; text-transform: uppercase; }
 .abk-nav a { color: inherit; transition: color .2s ease; }
 .abk-nav a:hover { color: var(--orange); }
