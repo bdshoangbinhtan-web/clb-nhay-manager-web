@@ -13,6 +13,7 @@ const adminManagerMenus = [
 
   ["🏢", "Cơ sở & Lớp", "/branches"],
   ["🏆", "Học viên", "/students"],
+  ["✨", "Đăng ký từ WEB", "/dashboard/trial-leads"],
   ["👨‍🏫", "Giáo viên", "/teachers"],
   ["📋", "Điểm danh", "/attendance"],
   ["🎟️", "Quản lý học thử", "/trial-students"],

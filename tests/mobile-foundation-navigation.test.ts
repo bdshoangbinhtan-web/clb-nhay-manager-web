@@ -23,9 +23,10 @@ test("teacher daily view and complete assigned-class entry remain distinct", () 
   assert.doesNotMatch(mobileNavigation, /Lịch của tôi/);
 });
 
-test("manager navigation omits trial registration but retains trial management", () => {
+test("manager navigation exposes web registrations and retains trial management", () => {
   for (const source of [mobileNavigation, sidebar]) {
-    assert.doesNotMatch(source, /Đăng ký học thử/);
+    assert.match(source, /Đăng ký từ WEB/);
+    assert.match(source, /\/dashboard\/trial-leads/);
   }
   assert.match(mobileNavigation, /\["Học thử", "Quản lý học viên học thử"/);
   assert.match(sidebar, /"Quản lý học thử"/);
