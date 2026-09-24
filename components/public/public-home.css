@@ -40,8 +40,9 @@
 .abk-nav { align-items: center; display: flex; font-size: 11px; font-weight: 700; gap: clamp(16px, 2vw, 32px); letter-spacing: .04em; text-transform: uppercase; }
 .abk-nav a { color: inherit; transition: color .2s ease; }
 .abk-nav a:hover { color: var(--orange); }
-.abk-nav-video { border-left: 1px solid #444; padding-left: clamp(16px, 2vw, 32px); }
-.abk-menu-button { background: none; border: 0; display: none; padding: 10px; }
+.abk-nav-video { background: rgba(255, 90, 31, .08); border: 1px solid rgba(255, 90, 31, .72); color: #ff8a60 !important; padding: 10px 13px; }
+.abk-nav-video:hover { background: rgba(255, 90, 31, .16); color: #fff !important; }
+.abk-menu-button { align-items: center; background: none; border: 0; display: none; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px; }
 .abk-menu-button span { background: #fff; display: block; height: 2px; margin: 6px 0; width: 27px; }
 
 .abk-button {
@@ -80,9 +81,6 @@
 .abk-hero-image { min-height: 660px; overflow: hidden; position: relative; }
 .abk-hero-image::after { background: linear-gradient(90deg, rgba(17,17,17,.38), transparent 32%), linear-gradient(0deg, rgba(17,17,17,.25), transparent 35%); content: ""; inset: 0; position: absolute; }
 .abk-hero-image img { object-position: 54% center; }
-.abk-hero-badge { background: var(--orange); color: #fff; font-family: "Archivo Black", Impact, sans-serif; font-size: 18px; line-height: .8; padding: 22px 18px; position: absolute; right: 34px; top: 32px; transform: rotate(4deg); z-index: 2; }
-.abk-hero-image > p { bottom: 34px; color: #fff; font-size: 12px; letter-spacing: .12em; line-height: 1.5; position: absolute; right: 40px; text-align: right; z-index: 2; }
-.abk-hero-image > p strong { color: var(--orange); }
 
 .abk-marquee { background: var(--orange); color: #fff; font-family: "Archivo Black", Impact, sans-serif; font-size: clamp(20px, 2.2vw, 36px); letter-spacing: -.04em; overflow: hidden; padding: 17px 0 14px; text-transform: uppercase; white-space: nowrap; }
 .abk-marquee div { animation: abk-marquee 24s linear infinite; width: max-content; }
@@ -202,7 +200,7 @@
   .abk-header { height: 78px; }
   .abk-logo { width: 110px; }
   .abk-nav { gap: 14px; font-size: 9px; }
-  .abk-nav-video { padding-left: 14px; }
+  .abk-nav-video { padding: 9px 11px; }
   .abk-hero { grid-template-columns: 45% 55%; padding-top: 78px; }
   .abk-program-card { grid-template-columns: 50% 50%; }
   .abk-program-copy { padding: 22px; }
@@ -212,22 +210,21 @@
 @media (max-width: 800px) {
   .abk-public { padding-bottom: 60px; }
   .abk-header { height: 68px; padding: 0 20px; position: absolute; }
-  .abk-logo { height: 58px; width: 100px; }
+  .abk-logo { height: 54px; width: 88px; }
   .abk-menu-button { display: block; }
   .abk-nav { align-items: stretch; background: #151515; display: none; flex-direction: column; font-size: 12px; gap: 0; left: 14px; padding: 16px 20px 22px; position: absolute; right: 14px; top: 64px; }
   .abk-nav.is-open { display: flex; }
   .abk-nav a { border-bottom: 1px solid #303030; padding: 13px 0; }
-  .abk-nav-video { border-left: 0; padding-left: 0 !important; }
+  .abk-nav-video { background: transparent; border: 0; border-bottom: 1px solid #303030; color: var(--orange) !important; padding: 13px 0; }
   .abk-nav .abk-button { margin-top: 16px; width: 100%; }
   .abk-hero { display: flex; flex-direction: column; min-height: 0; padding-top: 68px; }
   .abk-hero-copy { align-self: stretch; padding: 58px 24px 47px; width: 100%; }
   .abk-hero h1 { font-size: clamp(50px, 16vw, 70px); }
   .abk-hero-slogan { font-size: 16px; margin-top: 31px !important; }
   .abk-hero-actions { align-items: flex-start; flex-direction: column; gap: 22px; margin-top: 32px; }
-  .abk-hero-image { min-height: 480px; order: 2; }
+  .abk-hero-image { border-radius: 28px 28px 0 0; margin-top: -18px; min-height: 480px; order: 2; }
+  .abk-hero-image::after { background: linear-gradient(180deg, #111 0, rgba(17,17,17,.48) 9%, transparent 25%), linear-gradient(0deg, rgba(17,17,17,.22), transparent 32%); }
   .abk-hero-image img { object-position: 54% center; }
-  .abk-hero-badge { right: 18px; top: 18px; }
-  .abk-hero-image > p { bottom: 20px; right: 20px; }
   .abk-marquee { font-size: 21px; padding: 13px 0 11px; }
   .abk-section { padding: 78px 20px; }
   .abk-section-intro { display: block; margin-bottom: 40px; }
@@ -269,10 +266,10 @@
   .abk-footer { grid-template-columns: 1fr 1fr; padding: 56px 24px 30px; }
   .abk-footer > .abk-button { align-self: start; }
   .abk-copyright { grid-column: 1 / -1; }
-  .abk-mobile-actions { bottom: 0; display: grid; grid-template-columns: 1fr 1.25fr; left: 0; position: fixed; right: 0; z-index: 30; }
+  .abk-mobile-actions { bottom: 0; display: grid; grid-template-columns: 1.2fr 1fr; left: 0; position: fixed; right: 0; z-index: 30; }
   .abk-mobile-actions a, .abk-mobile-actions button { align-items: center; border: 0; display: flex; font-size: 10px; font-weight: 800; height: 60px; justify-content: center; text-transform: uppercase; }
-  .abk-mobile-actions a { background: #fff; color: #111; }
   .abk-mobile-actions button { background: var(--orange); color: #fff; }
+  .abk-mobile-actions a { background: #111; border-top: 1px solid #383838; color: #fff; }
 }
 
 @media (max-width: 430px) {

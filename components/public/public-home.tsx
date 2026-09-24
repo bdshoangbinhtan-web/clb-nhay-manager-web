@@ -182,8 +182,6 @@ export default function PublicHome() {
           </div>
           <div className="abk-hero-image">
             <Image src="/images/angelbk/hero/angel-bk-dance-crew.webp" alt="Đội nhảy thiếu nhi ANGEL BK" fill priority sizes="(max-width: 800px) 100vw, 58vw" />
-            <span className="abk-hero-badge">ANGEL<br />BK</span>
-            <p>MOVE WITH<br /><strong>CONFIDENCE</strong></p>
           </div>
         </section>
 
@@ -310,8 +308,8 @@ export default function PublicHome() {
       </footer>
 
       <div className="abk-mobile-actions">
-        <a href="tel:0933309336">Gọi tư vấn</a>
         <button type="button" onClick={() => scrollToSignup()}>Đăng ký học thử ↗</button>
+        <a href="https://video.angelbk.vn">Video của bé ↗</a>
       </div>
     </div>
   );
