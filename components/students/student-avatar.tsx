@@ -32,7 +32,7 @@ export function StudentAvatar({ name, url, size = "list", editable = false, onPh
   return <div className="flex shrink-0 flex-col items-center gap-1">
     <button type="button" className="rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600" aria-label="Chụp ảnh đại diện" onClick={() => cameraRef.current?.click()}>{visual}</button>
     <input ref={cameraRef} className="sr-only" type="file" accept="image/*" capture="environment" onChange={(event) => { selected(event.target.files?.[0]); event.currentTarget.value = ""; }} />
-    <input ref={galleryRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { selected(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+    <input ref={galleryRef} className="sr-only" type="file" accept="image/*,.heic,.heif" onChange={(event) => { selected(event.target.files?.[0]); event.currentTarget.value = ""; }} />
     <button type="button" className="min-h-11 px-1 text-[11px] font-bold text-blue-700" onClick={() => galleryRef.current?.click()}>Chọn ảnh có sẵn</button>
   </div>;
 }

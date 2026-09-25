@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- local object URLs must never leave the browser */
 
 import { useEffect, useRef, useState } from "react";
-import { AvatarCrop, PreparedAvatarImage, prepareAvatarImage, processStudentAvatar, sourceCropRect } from "@/lib/student-avatar-image";
+import { AvatarCrop, PreparedAvatarImage, avatarErrorDetails, canvasToBlob, prepareAvatarImage, processStudentAvatar, sourceCropRect } from "@/lib/student-avatar-image";
 
 type FaceDetectorShape = { detect: (input: CanvasImageSource) => Promise<Array<{ boundingBox: DOMRectReadOnly }>> };
 type FaceDetectorConstructor = new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => FaceDetectorShape;
@@ -47,19 +47,26 @@ export function StudentAvatarEditor({ file, onCancel, onRetake, onSave }: Props)
         } catch { setMessage("Chưa tự căn được khuôn mặt. Kéo hoặc zoom ảnh để căn lại."); }
       }
       if (active) { setCrop(initial); setImage(next); }
-    }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Không thể đọc ảnh."));
+    }).catch((reason: unknown) => {
+      console.error("[student-avatar] editor decode failed", avatarErrorDetails(reason));
+      if (active) setError(reason instanceof Error ? reason.message : "Không thể đọc ảnh.");
+    });
     return () => { active = false; prepared?.cleanup(); };
   }, [file]);
 
   useEffect(() => {
     if (!image) return;
+    let active = true;
     let url = "";
-    image.canvas.toBlob((blob) => {
-      if (!blob) return;
+    void canvasToBlob(image.canvas, "image/jpeg", .72).then((blob) => {
+      if (!active) return;
       url = URL.createObjectURL(blob);
       setPreview(url);
-    }, "image/webp", .72);
-    return () => { if (url) URL.revokeObjectURL(url); setPreview(""); };
+    }).catch((reason: unknown) => {
+      console.error("[student-avatar] preview export failed", avatarErrorDetails(reason));
+      if (active) setError(reason instanceof Error ? reason.message : "Không thể tạo ảnh xem trước.");
+    });
+    return () => { active = false; if (url) URL.revokeObjectURL(url); setPreview(""); };
   }, [image]);
   const view = image ? sourceCropRect(image.width, image.height, crop) : null;
 
@@ -83,7 +90,11 @@ export function StudentAvatarEditor({ file, onCancel, onRetake, onSave }: Props)
     if (!image || stage === "optimizing" || stage === "saving") return;
     setError(""); setStage("optimizing");
     try { const blob = await processStudentAvatar(image, crop); setStage("saving"); await onSave(blob); }
-    catch { setStage("failed"); setError("Chưa lưu được ảnh. Ảnh cũ vẫn được giữ."); }
+    catch (reason) {
+      console.error("[student-avatar] save failed", avatarErrorDetails(reason));
+      setStage("failed");
+      setError("Chưa lưu được ảnh. Ảnh cũ vẫn được giữ.");
+    }
   }
 
   return <div className="ui-modal-backdrop p-0 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="avatar-editor-title">
