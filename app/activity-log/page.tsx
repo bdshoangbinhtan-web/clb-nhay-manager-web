@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type BusinessGroup = "finance" | "teachers" | "students" | "classes" | "system";
 
@@ -276,6 +277,13 @@ export default function ActivityLogPage() {
     setPage(1); setLogs([]);
     void loadPage(1, false);
   }, [ready, loadPage]);
+
+  useRealtimeRefresh(["activity-log"], () => {
+    if (!ready) return;
+    setPage(1);
+    setLogs([]);
+    return loadPage(1, false);
+  });
 
   const profileMap = useMemo(() => new Map(profiles.map((item) => [item.id, item])), [profiles]);
   const studentMap = useMemo(() => new Map(students.map((item) => [item.id, item.student_code ? `${item.full_name} · ${item.student_code}` : item.full_name])), [students]);

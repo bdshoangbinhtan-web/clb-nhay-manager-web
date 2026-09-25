@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type TrialStudent = {
   id: string;
@@ -129,6 +130,8 @@ export default function TrialStudentsPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["trials"], loadData);
 
   const filteredRows = rows.filter((row) =>
     row.full_name.toLowerCase().includes(search.toLowerCase())

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Branch = { id: string; name: string };
 type ClassItem = {
@@ -171,6 +172,11 @@ export default function AttendancePage() {
   useEffect(() => {
     void loadStudents();
   }, [loadStudents]);
+
+  useRealtimeRefresh(["attendance"], async () => {
+    await loadBase();
+    await loadStudents();
+  });
 
   function setStudentStatus(studentId: string, status: string) {
     setStatusMap((prev) => ({

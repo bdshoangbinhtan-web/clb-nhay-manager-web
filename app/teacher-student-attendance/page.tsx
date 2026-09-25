@@ -12,6 +12,7 @@ import {
 } from "@/lib/student-avatar-storage";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type ClassItem = {
 
@@ -131,6 +132,12 @@ export default function TeacherStudentAttendancePage() {
 
   const [error, setError] = useState("");
 
+  const [realtimeRevision, setRealtimeRevision] = useState(0);
+
+  useRealtimeRefresh(["attendance", "classes", "students", "substitutions"], () => {
+    setRealtimeRevision((revision) => revision + 1);
+  });
+
     useEffect(() => {
       let cancelled = false;
 
@@ -215,7 +222,7 @@ export default function TeacherStudentAttendancePage() {
       return () => {
         cancelled = true;
       };
-    }, [date, supabase]);
+    }, [date, realtimeRevision, supabase]);
 
     
 useEffect(() => {
@@ -324,7 +331,7 @@ useEffect(() => {
       cancelled = true;
     };
 
-  }, [classId, date, supabase]);
+  }, [classId, date, realtimeRevision, supabase]);
 
   useEffect(() => {
     let cancelled = false;

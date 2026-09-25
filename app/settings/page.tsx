@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Branch = {
   id: string;
@@ -83,6 +84,8 @@ export default function SettingsPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["settings"], loadData);
 
   function branchName(id: string | null) {
     return branches.find((b) => b.id === id)?.name ?? "Toàn CLB";

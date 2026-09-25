@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Branch = {
   id: string;
@@ -112,6 +113,8 @@ export default function BranchesPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["branches"], loadData);
 
   const branchMap = useMemo(
     () => new Map(branches.map((branch) => [branch.id, branch])),

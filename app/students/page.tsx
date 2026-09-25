@@ -7,6 +7,7 @@ import { EmptyState, InlineState, Skeleton } from "@/components/ui/mobile-ui";
 import { StudentAvatar } from "@/components/students/student-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { getStudentAvatarUrls } from "@/lib/student-avatar-storage";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Student = { id: string; student_code: string; full_name: string; status: string | null; created_at: string; join_date: string | null; branch_id: string | null };
 type Branch = { id: string; name: string };
@@ -74,6 +75,7 @@ function StudentsContent() {
   }, [supabase]);
 
   useEffect(() => { void loadData(); }, [loadData]);
+  useRealtimeRefresh(["students"], loadData);
 
   useEffect(() => {
     const params = new URLSearchParams();

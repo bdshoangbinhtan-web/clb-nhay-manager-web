@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Student = {
   id: string;
@@ -309,6 +310,8 @@ export default function TuitionPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["tuition"], loadData);
 
   useEffect(() => {
     if (urlContextAppliedRef.current) return;

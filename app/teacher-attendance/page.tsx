@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
 import { scheduleIncludesDay } from "@/lib/class-schedule";
 import { activeStaffRole, type ActiveStaffRole } from "@/lib/active-staff-role";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import {
   PAYROLL_LOCKED_DETAIL,
   teacherAttendanceErrorMessage,
@@ -285,6 +286,11 @@ export default function TeacherAttendancePage() {
       setLoadingTeachers(false);
     }
   }, [classId, loadTeachers]);
+
+  useRealtimeRefresh(["attendance"], async () => {
+    await loadBase();
+    if (classId) await loadTeachers();
+  });
 
   const filteredClasses = useMemo(() => {
     const scheduleDay = getScheduleDayKey(date);

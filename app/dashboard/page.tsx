@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import { activeStaffRole } from "@/lib/active-staff-role";
 import {
   EmptyState,
@@ -323,6 +324,8 @@ export default function DashboardPage() {
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  useRealtimeRefresh(["dashboard"], loadDashboard);
 
   useEffect(() => {
     const savedSearch = window.sessionStorage.getItem("abk-dashboard-search");

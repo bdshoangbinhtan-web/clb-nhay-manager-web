@@ -8,6 +8,7 @@ import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { StudentAvatar } from "@/components/students/student-avatar";
 import { StudentAvatarEditor } from "@/components/students/student-avatar-editor";
 import { getStudentAvatarUrl, uploadStudentAvatar } from "@/lib/student-avatar-storage";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Student = {
   id: string;
@@ -203,6 +204,8 @@ function StudentDetailContent() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["students", "tuition"], loadData);
 
   useEffect(() => { void loadAvatarAccess(); }, [loadAvatarAccess]);
 

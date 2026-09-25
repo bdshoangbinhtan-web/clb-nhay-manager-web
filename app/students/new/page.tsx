@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Branch = {
   id: string;
@@ -109,6 +110,8 @@ export default function NewStudentPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["classes"], loadData);
 
   const branchClasses = classes.filter(
     (item) => !branchId || item.branch_id === branchId

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamScheduleDayKey, vietnamToday } from "@/lib/vietnam-date";
 import { scheduleIncludesDay } from "@/lib/class-schedule";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type ClassItem = {
   id: string;
@@ -332,6 +333,8 @@ export default function TeacherSessionPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["attendance", "substitutions"], loadData);
 
   async function confirmSession(session: SessionItem) {
     if (!teacherId) {

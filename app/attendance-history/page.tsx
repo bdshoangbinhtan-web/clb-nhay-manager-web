@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamMonthStart, vietnamToday } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Branch = { id: string; name: string };
 type ClassItem = { id: string; name: string; branch_id: string };
@@ -136,6 +137,11 @@ export default function AttendanceHistoryPage() {
   useEffect(() => {
     void loadHistory();
   }, [loadHistory]);
+
+  useRealtimeRefresh(["attendance"], async () => {
+    await loadBase();
+    await loadHistory();
+  });
 
   const filteredClasses = useMemo(
     () =>

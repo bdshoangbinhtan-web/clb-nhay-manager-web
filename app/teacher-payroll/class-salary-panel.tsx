@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Branch = { id: string; name: string };
 type SalaryClass = {
@@ -103,6 +104,8 @@ export default function ClassSalaryPanel() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["payroll"], loadData);
 
   const branchMap = useMemo(
     () => new Map(branches.map((branch) => [branch.id, branch.name])),

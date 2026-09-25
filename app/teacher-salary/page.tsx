@@ -2,8 +2,9 @@
 
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type SalaryRow = {
   teacher_id: string;
@@ -52,39 +53,39 @@ export default function TeacherSalaryPage() {
   const [rows, setRows] = useState<SalaryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const loadRequestRef = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    setLoading(true);
+    setError("");
 
-    async function loadData() {
-      setLoading(true);
-      setError("");
+    const { data, error } = await supabase.rpc("get_my_teacher_salary", {
+      p_payroll_month: `${month}-01`,
+    });
 
-      const { data, error } = await supabase.rpc("get_my_teacher_salary", {
-        p_payroll_month: `${month}-01`,
-      });
+    if (requestId !== loadRequestRef.current) return;
 
-      // Request của tháng cũ không được ghi đè tháng mới.
-      if (cancelled) return;
-
-      if (error) {
-        console.error(error);
-        setError("Không tải được dữ liệu lương.\n\n" + error.message);
-        setRows([]);
-        setLoading(false);
-        return;
-      }
-
-      setRows((data ?? []) as SalaryRow[]);
+    if (error) {
+      console.error(error);
+      setError("Không tải được dữ liệu lương.\n\n" + error.message);
+      setRows([]);
       setLoading(false);
+      return;
     }
 
-    void loadData();
-
-    return () => {
-      cancelled = true;
-    };
+    setRows((data ?? []) as SalaryRow[]);
+    setLoading(false);
   }, [month, supabase]);
+
+  useEffect(() => {
+    void loadData();
+    return () => {
+      loadRequestRef.current += 1;
+    };
+  }, [loadData]);
+
+  useRealtimeRefresh(["payroll"], loadData);
 
   const first = rows[0];
 

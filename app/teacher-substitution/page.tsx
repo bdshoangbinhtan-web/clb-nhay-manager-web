@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday, vietnamTodayLabel } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Teacher = {
   id: string;
@@ -167,6 +168,8 @@ export default function TeacherSubstitutionPage() {
   useEffect(() => {
     void loadPage();
   }, [loadPage]);
+
+  useRealtimeRefresh(["substitutions"], loadPage);
 
   const eligibleClasses = useMemo(() => {
     const map = new Map<string, ClassTeacherRow>();

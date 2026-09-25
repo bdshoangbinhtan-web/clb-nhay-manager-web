@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 function money(value: number) {
   return new Intl.NumberFormat("vi-VN").format(value) + " đ";
@@ -50,6 +51,11 @@ export default function ReceiptPage() {
 
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [realtimeRevision, setRealtimeRevision] = useState(0);
+
+  useRealtimeRefresh(["tuition"], () => {
+    setRealtimeRevision((revision) => revision + 1);
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -140,7 +146,7 @@ export default function ReceiptPage() {
     return () => {
       cancelled = true;
     };
-  }, [id, supabase]);
+  }, [id, realtimeRevision, supabase]);
 
   if (loading) {
     return <div className="p-10 text-center">Đang tải phiếu thu...</div>;

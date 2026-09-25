@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type TeacherSalarySummaryRow = {
   payroll_status: "draft" | "locked" | "paid" | null;
@@ -119,6 +120,8 @@ export default function Header({ onMenu }: { onMenu: () => void }) {
       window.removeEventListener("focus", refresh);
     };
   }, [loadTeacherSummary]);
+
+  useRealtimeRefresh(["attendance", "payroll"], loadTeacherSummary);
 
   async function logout() {
     await supabase.auth.signOut();
