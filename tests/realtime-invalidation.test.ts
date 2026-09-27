@@ -66,7 +66,7 @@ test("publication migration is idempotent and excludes the Admin-only activity l
     "utf8",
   );
   const financeMigration = readFileSync(
-    "supabase/migrations/20260927100000_finance_ledger_v1.sql",
+    "supabase/migrations/20260927170749_finance_ledger_v1.sql",
     "utf8",
   );
 
