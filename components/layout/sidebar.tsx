@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { usePrivacyView } from "./privacy-view-context";
+import { usePrivacyLogoGesture } from "./use-privacy-logo-gesture";
 
 type Role = "admin" | "manager" | "teacher" | "";
 
@@ -44,6 +46,8 @@ export default function Sidebar({
 }) {
   const pathname = usePathname();
   const supabase = createClient();
+  const { privacyView } = usePrivacyView();
+  const logoGesture = usePrivacyLogoGesture();
 
   const [role, setRole] = useState<Role>("");
 
@@ -71,7 +75,9 @@ export default function Sidebar({
   }, [supabase]);
 
   const menus =
-    role === "teacher"
+    privacyView
+      ? adminManagerMenus.filter((item) => ["/dashboard", "/branches", "/students", "/tuition", "/finance"].includes(item[2]))
+      : role === "teacher"
       ? teacherMenus
       : role === "admin"
         ? adminManagerMenus
@@ -96,13 +102,14 @@ export default function Sidebar({
       >
         <div className="mb-5 rounded-[24px] bg-white/85 px-5 py-5 shadow-[0_8px_25px_rgba(35,50,75,.07)]">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-[0_6px_0_rgba(15,23,42,.16)]">
+            <div {...logoGesture} className="flex h-12 w-12 select-none touch-manipulation items-center justify-center overflow-hidden rounded-2xl bg-white shadow-[0_6px_0_rgba(15,23,42,.16)]" style={{ WebkitTouchCallout: "none" }}>
               <Image
                 src="/angelbk-logo.jpg"
                 alt="Logo CLB ANGEL BK"
                 width={48}
                 height={48}
                 unoptimized
+                draggable={false}
                 className="h-full w-full object-contain"
               />
             </div>
@@ -147,7 +154,7 @@ export default function Sidebar({
           })}
 
           {/* ADMIN ONLY */}
-          {role === "admin" && (
+          {role === "admin" && !privacyView && (
             <>
               <div className="my-2 border-t border-slate-200" />
 

@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { BottomSheet } from "@/components/ui/mobile-ui";
+import { usePrivacyView } from "./privacy-view-context";
+import { usePrivacyLogoGesture } from "./use-privacy-logo-gesture";
 
 type Role = "admin" | "manager" | "teacher" | "";
 const primaryItems = [
@@ -33,6 +36,8 @@ export default function MobileBottomNav() {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const { privacyView } = usePrivacyView();
+  const logoGesture = usePrivacyLogoGesture();
   const [role, setRole] = useState<Role>("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -49,7 +54,9 @@ export default function MobileBottomNav() {
   }, [supabase]);
   if (!role) return null;
   const isTeacher = role === "teacher";
-  const visibleMoreItems = role === "admin"
+  const visibleMoreItems = privacyView
+    ? moreItems.filter((item) => item[3] === "/branches" || item[3] === "/finance")
+    : role === "admin"
     ? moreItems
     : moreItems.filter((item) => item[3] !== "/system-integrity" && item[3] !== "/teacher-payroll" && item[3] !== "/finance/monitor");
   const isMoreActive = !isTeacher && visibleMoreItems.some((item) => pathname.startsWith(item[3]));
@@ -65,7 +72,7 @@ export default function MobileBottomNav() {
         return <Link key={href} href={href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}><span className="abk-nav-icon" aria-hidden="true">{icon}</span><span>{label}</span></Link>;
       }) : primaryItems.map((item) => {
         const active = item.match.some((prefix) => pathname.startsWith(prefix));
-        return <Link key={item.href} href={item.href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}><span className="abk-nav-icon" aria-hidden="true">{item.icon}</span><span>{item.label}</span></Link>;
+        return <Link key={item.href} href={item.href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}><span {...(item.href === "/dashboard" ? logoGesture : {})} className={item.href === "/dashboard" ? "abk-nav-icon h-9 select-none touch-manipulation" : "abk-nav-icon"} style={item.href === "/dashboard" ? { WebkitTouchCallout: "none" } : undefined} aria-hidden="true">{item.href === "/dashboard" ? <Image src="/angelbk-logo.jpg" alt="" width={30} height={30} unoptimized draggable={false} className="h-[30px] w-[30px] rounded-md object-contain" /> : item.icon}</span><span>{item.label}</span></Link>;
       })}
       <button type="button" onClick={() => setMoreOpen(true)} className={isMoreActive || moreOpen ? "is-active" : ""} aria-expanded={moreOpen}><span className="abk-nav-icon" aria-hidden="true">•••</span><span>Thêm</span></button>
     </nav>
