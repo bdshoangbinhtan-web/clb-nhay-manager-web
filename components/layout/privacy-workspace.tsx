@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
-import { excludeReversedPrivacySources, filterPrivacyTransactions, resolveTransferLedgerRows, summarizePrivacyTransactions, type PrivacyLedgerRow, type PrivacyTransaction } from "@/lib/privacy-view";
+import { buildTransferLedgerSourceBatches, excludeReversedPrivacySources, filterPrivacyTransactions, matchedTransferRefundBatchIds, resolveTransferLedgerRows, summarizePrivacyTransactions, type PrivacyLedgerRow, type PrivacyTransaction } from "@/lib/privacy-view";
 import { toVietnamDateKey, vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { usePrivacyView } from "./privacy-view-context";
 
@@ -104,13 +104,14 @@ export default function PrivacyWorkspace() {
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const isFinance = pathname === "/finance";
-  const queryMonth = isFinance ? date.slice(0, 7) : month;
+  const startDate = isFinance ? date : `${month}-01`;
+  const endDate = isFinance ? new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10) : `${nextMonth(month)}-01`;
   useRealtimeRefresh(["finance", "tuition", "students", "branches"], () => setRevision((current) => current + 1));
 
   useEffect(() => {
     let active = true;
-    const start = `${queryMonth}-01`;
-    const end = `${nextMonth(queryMonth)}-01`;
+    const start = startDate;
+    const end = endDate;
     setLoading(true);
     setError("");
     void (async () => {
@@ -119,7 +120,7 @@ export default function PrivacyWorkspace() {
           if (active) { setTransactions([]); setFinanceTransactions([]); setStudents([]); setClasses([]); setBranches([]); setLoading(false); }
           return;
         }
-        const [payments, refunds, expenses, revenues, ledger, branchesResult, classesResult] = await Promise.all([
+        const [payments, refunds, expenses, revenues, branchesResult, classesResult] = await Promise.all([
           readAll<PaymentRow>(async (from, to) => {
             let query = supabase.from("tuition_payments")
               .select("id,amount,payment_method,payment_date,tuition:tuition_id!inner(student_id,class_id,branch_id,billing_month)")
@@ -132,7 +133,7 @@ export default function PrivacyWorkspace() {
           readAll<RefundRow>(async (from, to) => {
             let query = supabase.from("tuition_adjustments")
               .select("id,refund_batch_id,amount,refund_payment_method,created_at,tuition:tuition_id!inner(student_id,class_id,branch_id,billing_month)")
-              .eq("action", "refund")
+              .eq("action", "refund").eq("refund_payment_method", "transfer")
               .gte("created_at", `${start}T00:00:00+07:00`).lt("created_at", `${end}T00:00:00+07:00`)
               .order("created_at", { ascending: false }).order("id");
             if (role === "manager" && branchId) query = query.eq("tuition.branch_id", branchId);
@@ -157,15 +158,6 @@ export default function PrivacyWorkspace() {
             const result = await query.range(from, to);
             return { data: result.data as RevenueRow[] | null, error: result.error };
           }),
-          readAll<PrivacyLedgerRow>(async (from, to) => {
-            let query = supabase.from("cash_ledger")
-              .select("id,business_date,direction,amount,description,branch_id,source_type,source_id,reversal_of")
-              .gte("business_date", start).lt("business_date", end)
-              .order("business_date", { ascending: false }).order("id");
-            if (role === "manager" && branchId) query = query.eq("branch_id", branchId);
-            const result = await query.range(from, to);
-            return { data: result.data as PrivacyLedgerRow[] | null, error: result.error };
-          }),
           role === "manager" && branchId
             ? supabase.from("branches").select("id,name").eq("id", branchId).order("name")
             : supabase.from("branches").select("id,name").order("name"),
@@ -174,43 +166,57 @@ export default function PrivacyWorkspace() {
             : supabase.from("classes").select("id,name,branch_id,status").order("name"),
         ]);
         if (branchesResult.error || classesResult.error) throw new Error(branchesResult.error?.message ?? classesResult.error?.message);
-        const reversibleIds = [...new Set([...expenses.map((row) => row.id), ...revenues.map((row) => row.id)])];
-        const reversalChunks = await Promise.all(Array.from({ length: Math.ceil(reversibleIds.length / 100) }, async (_, index) => {
-          let query = supabase.from("finance_source_reversals")
-            .select("source_type,source_id")
-            .in("source_type", ["expense", "other_revenue"])
-            .in("source_id", reversibleIds.slice(index * 100, index * 100 + 100));
+        const sourceRows = transactionRows(payments, refunds, expenses, revenues, []);
+        const transferSources = new Map(sourceRows.map((row) => [`${row.sourceType}:${row.id}`, row]));
+        const refundTotalsInCents = new Map<string, number>();
+        const firstRefundByBatch = new Map<string, RefundRow>();
+        for (const refund of refunds) {
+          if (!refund.refund_batch_id) continue;
+          refundTotalsInCents.set(refund.refund_batch_id,
+            (refundTotalsInCents.get(refund.refund_batch_id) ?? 0) + Math.round(Number(refund.amount) * 100));
+          if (!firstRefundByBatch.has(refund.refund_batch_id)) firstRefundByBatch.set(refund.refund_batch_id, refund);
+        }
+        const transferRefundTotals = new Map([...refundTotalsInCents].map(([id, cents]) => [id, cents / 100]));
+        for (const [batchId, refund] of firstRefundByBatch) {
+          const source = transferSources.get(`tuition_refund:${refund.id}`);
+          if (source) transferSources.set(`tuition_refund:${batchId}`, source);
+        }
+        const sourceBatches = buildTransferLedgerSourceBatches(sourceRows, transferRefundTotals);
+        const ledgerChunks = await Promise.all(sourceBatches.map(async (batch) => {
+          let query = supabase.from("cash_ledger")
+            .select("id,business_date,direction,amount,description,branch_id,source_type,source_id,reversal_of")
+            .eq("source_type", batch.sourceType).in("source_id", batch.sourceIds);
+          if (batch.amount !== undefined) query = query.eq("amount", batch.amount);
           if (role === "manager" && branchId) query = query.eq("branch_id", branchId);
           const result = await query;
           if (result.error) throw new Error(result.error.message);
-          return (result.data ?? []) as ReversalRow[];
+          return (result.data ?? []) as PrivacyLedgerRow[];
         }));
-        const scopedTransactions = transactionRows(payments, refunds, expenses, revenues, reversalChunks.flat());
-        const sourceRows = transactionRows(payments, refunds, expenses, revenues, []);
-        const transferSources = new Map(sourceRows.map((row) => [`${row.sourceType}:${row.id}`, row]));
-        const refundBatches = new Map<string, RefundRow[]>();
-        for (const refund of refunds) {
-          if (!refund.refund_batch_id) continue;
-          refundBatches.set(refund.refund_batch_id, [...(refundBatches.get(refund.refund_batch_id) ?? []), refund]);
-        }
-        const transferRefundBatchIds = new Set<string>();
-        for (const [batchId, batch] of refundBatches) {
-          if (!batch.every((refund) => refund.refund_payment_method === "transfer")) continue;
-          const source = transferSources.get(`tuition_refund:${batch[0].id}`);
-          if (source) {
-            transferSources.set(`tuition_refund:${batchId}`, source);
-            transferRefundBatchIds.add(batchId);
-          }
-        }
-        const resolvedLedger = resolveTransferLedgerRows(ledger, transferSources);
-        const ledgerSourceKeys = new Set(ledger.filter((row) => row.source_id &&
-          ["tuition_payment", "tuition_refund", "expense", "other_revenue"].includes(row.source_type))
+        const sourceLedger = ledgerChunks.flat();
+        const sourceLedgerIds = sourceLedger.map((row) => row.id);
+        const reversalChunks = await Promise.all(Array.from({ length: Math.ceil(sourceLedgerIds.length / 100) }, async (_, index) => {
+          let query = supabase.from("cash_ledger")
+            .select("id,business_date,direction,amount,description,branch_id,source_type,source_id,reversal_of")
+            .eq("source_type", "reversal")
+            .in("reversal_of", sourceLedgerIds.slice(index * 100, index * 100 + 100));
+          if (role === "manager" && branchId) query = query.eq("branch_id", branchId);
+          const result = await query;
+          if (result.error) throw new Error(result.error.message);
+          return (result.data ?? []) as PrivacyLedgerRow[];
+        }));
+        const reversedLedgerIds = new Set(reversalChunks.flat().map((row) => row.reversal_of));
+        const reversedSources: ReversalRow[] = sourceLedger.filter((row) => reversedLedgerIds.has(row.id) && row.source_id &&
+          ["expense", "other_revenue"].includes(row.source_type))
+          .map((row) => ({ source_type: row.source_type, source_id: row.source_id! }));
+        const validRefundBatchIds = matchedTransferRefundBatchIds(sourceLedger, transferRefundTotals);
+        const validRefunds = refunds.filter((row) => !row.refund_batch_id || validRefundBatchIds.has(row.refund_batch_id));
+        const scopedTransactions = transactionRows(payments, validRefunds, expenses, revenues, reversedSources);
+        const resolvedLedger = resolveTransferLedgerRows([...sourceLedger, ...reversalChunks.flat()], transferSources, transferRefundTotals);
+        const ledgerSourceKeys = new Set(sourceLedger.filter((row) => row.source_id)
           .map((row) => `${row.source_type}:${row.source_id}`));
-        const refundLedgerIds = new Set(refunds.filter((row) => row.refund_batch_id &&
-          transferRefundBatchIds.has(row.refund_batch_id) &&
-          ledgerSourceKeys.has(`tuition_refund:${row.refund_batch_id}`)).map((row) => row.id));
+        const batchedRefundIds = new Set(validRefunds.filter((row) => row.refund_batch_id).map((row) => row.id));
         const legacySources = scopedTransactions.filter((row) => !ledgerSourceKeys.has(`${row.sourceType}:${row.id}`) &&
-          !(row.sourceType === "tuition_refund" && refundLedgerIds.has(row.id)));
+          !(row.sourceType === "tuition_refund" && batchedRefundIds.has(row.id)));
         const ids = [...new Set(payments.map((row) => tuitionRef(row.tuition)?.student_id).filter((id): id is string => Boolean(id)))];
         const studentChunks = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, async (_, index) => {
           const result = await supabase.from("students").select("id,student_code,full_name,status")
@@ -232,11 +238,9 @@ export default function PrivacyWorkspace() {
       }
     })();
     return () => { active = false; };
-  }, [branchId, queryMonth, revision, role, supabase]);
+  }, [branchId, endDate, revision, role, startDate, supabase]);
 
   const scopeBranchId = role === "manager" ? branchId : branchFilter || null;
-  const startDate = isFinance ? date : `${month}-01`;
-  const endDate = isFinance ? new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10) : `${nextMonth(month)}-01`;
   const visibleTransactions = useMemo(() => role === "manager" && !branchId ? [] :
     filterPrivacyTransactions(transactions, startDate, endDate, scopeBranchId),
   [branchId, endDate, role, scopeBranchId, startDate, transactions]);

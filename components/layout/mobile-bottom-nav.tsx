@@ -76,12 +76,12 @@ export default function MobileBottomNav() {
       })}
       <button type="button" onClick={() => setMoreOpen(true)} className={isMoreActive || moreOpen ? "is-active" : ""} aria-expanded={moreOpen}><span className="abk-nav-icon" aria-hidden="true">•••</span><span>Thêm</span></button>
     </nav>
-    <BottomSheet open={moreOpen} onClose={closeMore} title="Thêm" description="Các khu vực ít dùng hơn">
+    <BottomSheet open={moreOpen} onClose={closeMore} title="Thêm" description={privacyView ? undefined : "Các khu vực ít dùng hơn"}>
       <div className="grid grid-cols-2 gap-2">
         {(isTeacher ? [["Tất cả lớp", "Xem tất cả lớp được phân công", "🗓️", "/teacher-classes?view=all"], ["Dạy thay", "Lịch dạy thay", "🔄", "/teacher-substitution"], ["Lương của tôi", "Xem bảng lương", "💰", "/teacher-salary"]] as const : visibleMoreItems).map(([label, description, icon, href]) => <Link key={href} href={href} onClick={closeMore} className="abk-more-link"><span className="text-xl" aria-hidden="true">{icon}</span><span className="font-extrabold text-slate-900">{label}</span><span className="text-xs leading-4 text-slate-500">{description}</span></Link>)}
       </div>
       <div className="mt-4 border-t border-slate-200 px-1 pt-4">
-        <div className="px-2 pb-3"><div className="text-xs font-black uppercase tracking-wide text-slate-400">Tài khoản</div>{email ? <div className="mt-1 truncate text-sm font-semibold text-slate-700">{email}</div> : null}</div>
+        {!privacyView && <div className="px-2 pb-3"><div className="text-xs font-black uppercase tracking-wide text-slate-400">Tài khoản</div>{email ? <div className="mt-1 truncate text-sm font-semibold text-slate-700">{email}</div> : null}</div>}
         <button type="button" onClick={logout} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 font-extrabold text-slate-800">🚪 Đăng xuất</button>
       </div>
     </BottomSheet>

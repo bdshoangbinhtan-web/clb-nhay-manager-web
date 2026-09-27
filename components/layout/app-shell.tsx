@@ -24,7 +24,7 @@ function ManagedApp({ children, pathname }: { children: React.ReactNode; pathnam
   }, [pathname, privacyView, router]);
 
   return (
-    <GlobalRealtimeProvider>
+    <GlobalRealtimeProvider enabled={!privacyView}>
       <div className="min-h-screen">
         <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
         <div className="app-main ml-0 min-h-screen lg:ml-[264px]">

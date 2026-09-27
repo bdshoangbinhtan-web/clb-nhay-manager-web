@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { excludeReversedPrivacySources, filterPrivacyTransactions, resolveTransferLedgerRows, summarizePrivacyTransactions, type PrivacyLedgerRow, type PrivacyTransaction } from "../lib/privacy-view.ts";
+import { buildTransferLedgerSourceBatches, excludeReversedPrivacySources, filterPrivacyTransactions, matchedTransferRefundBatchIds, resolveTransferLedgerRows, summarizePrivacyTransactions, type PrivacyLedgerRow, type PrivacyTransaction } from "../lib/privacy-view.ts";
 
 const transaction = (
   id: string,
@@ -76,12 +76,49 @@ test("ledger rows resolve through transfer sources, never the bank account", () 
     ledger("internal-transfer", "account_transfer", "transfer-id"),
     ledger("expense-reversal", "reversal", "expense-ledger", { reversal_of: "expense-ledger", direction: "in", amount: 100000 }),
     ledger("opening-reversal", "reversal", "opening", { reversal_of: "opening", direction: "out" }),
-  ], sources);
+  ], sources, new Map());
   assert.deepEqual(rows.map((row) => row.id), ["payment-ledger", "effective-expense-ledger"]);
   assert.deepEqual(summarizePrivacyTransactions(rows), {
     income: 500000, expense: 40000, net: 460000,
     studentCount: 1, studentIds: new Set(["student-1"]),
   });
+});
+
+test("ledger lookup batches contain only allowed transfer source IDs and constrain refund amounts", () => {
+  assert.deepEqual(buildTransferLedgerSourceBatches(
+    [
+      transaction("payment-1"), transaction("payment-2"), transaction("payment-3"),
+      transaction("cash-payment", { paymentMethod: "cash" }),
+      transaction("expense-1", { sourceType: "expense", direction: "out" }),
+      transaction("cash-expense", { sourceType: "expense", paymentMethod: "cash", direction: "out" }),
+      transaction("revenue-1", { sourceType: "other_revenue" }),
+    ], new Map([["refund-1", 300000], ["refund-2", 300000], ["refund-3", 500000]]), 2,
+  ), [
+    { sourceType: "tuition_payment", sourceIds: ["payment-1", "payment-2"] },
+    { sourceType: "tuition_payment", sourceIds: ["payment-3"] },
+    { sourceType: "expense", sourceIds: ["expense-1"] },
+    { sourceType: "other_revenue", sourceIds: ["revenue-1"] },
+    { sourceType: "tuition_refund", sourceIds: ["refund-1", "refund-2"], amount: 300000 },
+    { sourceType: "tuition_refund", sourceIds: ["refund-3"], amount: 500000 },
+  ]);
+});
+
+test("refund ledger is excluded when its amount differs from transfer refund rows", () => {
+  const sources = new Map<string, PrivacyTransaction>([
+    ["tuition_refund:valid", transaction("valid", { sourceType: "tuition_refund", direction: "out", amount: 200000 })],
+    ["tuition_refund:mixed", transaction("mixed", { sourceType: "tuition_refund", direction: "out", amount: 200000 })],
+  ]);
+  const ledger = (id: string, amount: number): PrivacyLedgerRow => ({
+    id, business_date: "2026-10-15", direction: "out", amount, description: id,
+    branch_id: "cs1", source_type: "tuition_refund", source_id: id, reversal_of: null,
+  });
+  const rows = resolveTransferLedgerRows([ledger("valid", 200000), ledger("mixed", 300000)],
+    sources, new Map([["valid", 200000], ["mixed", 200000]]));
+  assert.deepEqual(rows.map((row) => row.id), ["valid"]);
+  assert.deepEqual(matchedTransferRefundBatchIds(
+    [ledger("valid", 200000), ledger("mixed", 300000)],
+    new Map([["valid", 200000], ["mixed", 200000]]),
+  ), new Set(["valid"]));
 });
 
 test("a corrected transfer expense or revenue no longer contributes to the visible total", () => {

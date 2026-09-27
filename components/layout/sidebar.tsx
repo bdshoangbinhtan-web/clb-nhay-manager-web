@@ -118,9 +118,9 @@ export default function Sidebar({
               <div className="text-[17px] font-extrabold tracking-tight">
                 CLB ANGEL BK
               </div>
-              <div className="text-xs font-semibold text-slate-400">
+              {!privacyView && <div className="text-xs font-semibold text-slate-400">
                 MANAGER V2
-              </div>
+              </div>}
             </div>
           </div>
         </div>

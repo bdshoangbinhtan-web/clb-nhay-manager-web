@@ -24,7 +24,7 @@ type RealtimeRegistry = {
 
 const RealtimeRegistryContext = createContext<RealtimeRegistry | null>(null);
 
-export function GlobalRealtimeProvider({ children }: { children: React.ReactNode }) {
+export function GlobalRealtimeProvider({ children, enabled = true }: { children: React.ReactNode; enabled?: boolean }) {
   const supabase = useMemo(() => createClient(), []);
   const listenersRef = useRef(new Map<symbol, Listener>());
 
@@ -37,6 +37,7 @@ export function GlobalRealtimeProvider({ children }: { children: React.ReactNode
   const registry = useMemo<RealtimeRegistry>(() => ({ subscribe }), [subscribe]);
 
   useEffect(() => {
+    if (!enabled) return;
     let disposed = false;
     let channel: RealtimeChannel | null = supabase.channel("angel-bk-global-data-v1");
 
@@ -83,7 +84,7 @@ export function GlobalRealtimeProvider({ children }: { children: React.ReactNode
       if (channel) void supabase.removeChannel(channel);
       channel = null;
     };
-  }, [supabase]);
+  }, [enabled, supabase]);
 
   return (
     <RealtimeRegistryContext.Provider value={registry}>
