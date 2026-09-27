@@ -4,6 +4,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
+import {
+  applyTuitionAdjustments,
+  determineActiveClasses,
+  getFirstUnpaidMonth,
+  getMembershipTuitionStatus,
+  monthKey,
+  periodDate,
+  type TuitionMembership,
+} from "@/lib/tuition/due-status";
 
 type Student = {
   id: string;
@@ -39,10 +49,14 @@ type Tuition = {
   description: string | null;
   amount_due: number;
   amount_paid: number;
+  effective_amount_due?: number;
+  effective_amount_paid?: number;
   payment_date: string | null;
   note: string | null;
   status: string;
 };
+
+type ClassMembership = TuitionMembership;
 
 type TuitionPayment = {
   id: string;
@@ -51,6 +65,14 @@ type TuitionPayment = {
   payment_method: "cash" | "transfer" | string | null;
   payment_date: string | null;
   receipt_no: string | null;
+};
+
+type TuitionAdjustment = {
+  id: string;
+  tuition_id: string;
+  target_tuition_id: string | null;
+  action: string;
+  amount: number;
 };
 
 
@@ -126,6 +148,43 @@ function lessonsInMonth(
   return count;
 }
 
+function suggestedTuitionAmount(
+  student: Student,
+  classItem: ClassItem,
+  billingMonth: string,
+  enrollmentStartDate: string | null = null
+) {
+  const effectiveJoinDate = [student.join_date, enrollmentStartDate]
+    .filter((value): value is string => !!value)
+    .sort()
+    .at(-1) ?? null;
+  const lessons = lessonsInMonth(
+    effectiveJoinDate,
+    billingMonth,
+    classItem.schedule_days
+  );
+  const startMinutes = classItem.schedule_start
+    ? Number(classItem.schedule_start.slice(0, 2)) * 60 +
+      Number(classItem.schedule_start.slice(3, 5))
+    : 0;
+  const endMinutes = classItem.schedule_end
+    ? Number(classItem.schedule_end.slice(0, 2)) * 60 +
+      Number(classItem.schedule_end.slice(3, 5))
+    : 0;
+  const durationMinutes = endMinutes > startMinutes ? endMinutes - startMinutes : 60;
+  const feePerLesson = (durationMinutes / 60) * 50000;
+
+  if (!effectiveJoinDate) return Number(classItem.monthly_fee);
+
+  const [year, month] = billingMonth.split("-").map(Number);
+  const joined = new Date(effectiveJoinDate + "T00:00:00");
+  if (joined.getFullYear() === year && joined.getMonth() === month - 1) {
+    return Math.round(Math.min(lessons * feePerLesson, Number(classItem.monthly_fee)));
+  }
+  if (joined < new Date(year, month - 1, 1)) return Number(classItem.monthly_fee);
+  return 0;
+}
+
 export default function TuitionPage() {
   const supabase = useMemo(() => createClient(), []);
   const loadRequestRef = useRef(0);
@@ -136,6 +195,7 @@ export default function TuitionPage() {
 
   const [tuition, setTuition] = useState<Tuition[]>([]);
   const [payments, setPayments] = useState<TuitionPayment[]>([]);
+  const [tuitionAdjustments, setTuitionAdjustments] = useState<TuitionAdjustment[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
@@ -143,7 +203,6 @@ export default function TuitionPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [isNewStudentFlow, setIsNewStudentFlow] = useState(false);
-  const [newStudentClassQueue, setNewStudentClassQueue] = useState<string[]>([]);
 
   const [search, setSearch] = useState("");
   const [focusedStudentId, setFocusedStudentId] = useState("");
@@ -160,20 +219,20 @@ export default function TuitionPage() {
   const [classId, setClassId] = useState("");
   const [studentClassIds, setStudentClassIds] = useState<string[]>([]);
   const [amountDue, setAmountDue] = useState("");
+  const [amountToCollect, setAmountToCollect] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
+  const [collectionMonth, setCollectionMonth] = useState(vietnamCurrentMonth());
+  const [manualPeriod, setManualPeriod] = useState(false);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const [bulkCreating, setBulkCreating] = useState(false);
   const [voicePayment, setVoicePayment] = useState<VoicePayment | null>(null);
   const [voicePaymentListening, setVoicePaymentListening] = useState(false);
-  const [classMemberships, setClassMemberships] = useState<
-    { student_id: string; class_id: string; status: string | null }[]
-  >([]);
+  const [classMemberships, setClassMemberships] = useState<ClassMembership[]>([]);
   const [selectedTuitionClassId, setSelectedTuitionClassId] = useState("");
   const [classStudentSearch, setClassStudentSearch] = useState("");
   const [isListening, setIsListening] = useState(false);
   const loadData = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
-    const billingDate = `${billingMonth}-01`;
     setLoading(true);
 
     const { data: authData } = await supabase.auth.getUser();
@@ -193,43 +252,70 @@ export default function TuitionPage() {
     }
 
     const [
-      { data: tuitionData, error: tuitionError },
-      { data: studentData, error: studentError },
-      { data: branchData, error: branchError },
-      { data: classData, error: classError },
-      { data: membershipData, error: membershipError },
+      studentResult,
+      branchResult,
+      classResult,
+      membershipResult,
+      adjustmentResult,
     ] = await Promise.all([
-      supabase
-        .from("tuition")
-        .select(
-          "id,student_id,class_id,branch_id,billing_month,description,amount_due,amount_paid,payment_date,note,status"
-        )
-        .eq("billing_month", billingDate)
-        .order("billing_month", { ascending: false }),
-
       supabase
         .from("students")
         .select("id,student_code,full_name,branch_id,join_date,status")
         .order("full_name"),
-
       supabase.from("branches").select("id,name").order("name"),
-
       supabase
         .from("classes")
-        .select(
-          "id,name,branch_id,monthly_fee,status,schedule_days,schedule_start,schedule_end"
-        )
+        .select("id,name,branch_id,monthly_fee,status,schedule_days,schedule_start,schedule_end")
         .order("name"),
       supabase
         .from("class_students")
-        .select("student_id,class_id,status")
+        .select("student_id,class_id,status,start_date,end_date")
         .eq("status", "active"),
+      supabase
+        .from("tuition_adjustments")
+        .select("id,tuition_id,target_tuition_id,action,amount"),
     ]);
 
     if (requestId !== loadRequestRef.current) return;
 
+    const tuitionRows: Tuition[] = [];
+    let tuitionOffset = 0;
+    let tuitionError: string | null = null;
+    while (true) {
+      const result = await supabase
+        .from("tuition")
+        .select("id,student_id,class_id,branch_id,billing_month,description,amount_due,amount_paid,payment_date,note,status")
+        .order("billing_month", { ascending: false })
+        .order("id", { ascending: true })
+        .range(tuitionOffset, tuitionOffset + 499);
+      if (result.error) {
+        tuitionError = result.error.message;
+        break;
+      }
+      const batch = (result.data ?? []) as Tuition[];
+      tuitionRows.push(...batch);
+      if (batch.length < 500) break;
+      tuitionOffset += 500;
+    }
+
+    const [
+      { data: studentData, error: studentError },
+      { data: branchData, error: branchError },
+      { data: classData, error: classError },
+      { data: membershipData, error: membershipError },
+      { data: adjustmentData, error: adjustmentError },
+    ] = [
+      studentResult,
+      branchResult,
+      classResult,
+      membershipResult,
+      adjustmentResult,
+    ];
+
+    if (requestId !== loadRequestRef.current) return;
+
     if (tuitionError) {
-      alert(tuitionError.message);
+      alert(tuitionError);
       setLoading(false);
       return;
     }
@@ -258,7 +344,13 @@ export default function TuitionPage() {
       return;
     }
 
-    const tuitionIds = (tuitionData ?? []).map((item) => item.id);
+    if (adjustmentError) {
+      alert(adjustmentError.message);
+      setLoading(false);
+      return;
+    }
+
+    const tuitionIds = tuitionRows.map((item) => item.id);
     let paymentData: TuitionPayment[] = [];
 
     if (tuitionIds.length > 0) {
@@ -297,18 +389,21 @@ export default function TuitionPage() {
       );
     }
 
-    setTuition(tuitionData ?? []);
+    setTuition(tuitionRows);
     setPayments(paymentData ?? []);
+    setTuitionAdjustments((adjustmentData ?? []) as TuitionAdjustment[]);
     setStudents(studentData ?? []);
     setBranches(branchData ?? []);
     setClasses(classData ?? []);
     setClassMemberships(membershipData ?? []);
     setLoading(false);
-  }, [billingMonth, supabase]);
+  }, [supabase]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["tuition"], loadData);
 
   useEffect(() => {
     if (urlContextAppliedRef.current) return;
@@ -375,6 +470,149 @@ export default function TuitionPage() {
     [classMemberships]
   );
 
+  const currentMonth = vietnamCurrentMonth();
+
+  const tuitionForDueStatus = useMemo(() => {
+    return applyTuitionAdjustments(tuition, payments, tuitionAdjustments);
+  }, [payments, tuition, tuitionAdjustments]);
+
+  const membershipTuitionRows = useMemo(() => {
+    const rows: Array<{
+      membership: ClassMembership;
+      student: Student;
+      classItem: ClassItem;
+      due: ReturnType<typeof getMembershipTuitionStatus>;
+      suggestedAmount: number;
+    }> = [];
+
+    for (const membership of activeMemberships) {
+      const student = studentById.get(membership.student_id);
+      const classItem = classById.get(membership.class_id);
+      if (!student || !classItem) continue;
+      const due = getMembershipTuitionStatus(
+        membership,
+        student.status,
+        classItem.status,
+        tuitionForDueStatus,
+        currentMonth
+      );
+      if (due.status === "INACTIVE") continue;
+      const record = tuitionForDueStatus.find(
+        (item) =>
+          item.student_id === student.id &&
+          item.class_id === classItem.id &&
+          monthKey(item.billing_month) === due.firstUnpaidMonth
+      );
+      rows.push({
+        membership,
+        student,
+        classItem,
+        due,
+        suggestedAmount:
+          record?.effective_amount_due ?? record?.amount_due ??
+          (due.firstUnpaidMonth
+            ? suggestedTuitionAmount(student, classItem, due.firstUnpaidMonth, membership.start_date)
+            : Number(classItem.monthly_fee)),
+      });
+    }
+
+    return rows.sort((a, b) => {
+      const aMonth = a.due.firstUnpaidMonth ?? "9999-12";
+      const bMonth = b.due.firstUnpaidMonth ?? "9999-12";
+      return aMonth.localeCompare(bMonth) || a.student.full_name.localeCompare(b.student.full_name, "vi");
+    });
+  }, [activeMemberships, classById, currentMonth, studentById, tuitionForDueStatus]);
+
+  const actionableDueRows = useMemo(
+    () => membershipTuitionRows.filter((row) =>
+      ["DUE", "OVERDUE", "PARTIAL"].includes(row.due.status) &&
+      (row.due.remaining > 0 || row.suggestedAmount > 0)
+    ),
+    [membershipTuitionRows]
+  );
+
+  const dueCount = actionableDueRows.filter(
+    (row) => row.due.firstUnpaidMonth === currentMonth
+  ).length;
+  const overdueCount = actionableDueRows.filter(
+    (row) => !!row.due.firstUnpaidMonth && row.due.firstUnpaidMonth < currentMonth
+  ).length;
+  const collectedThisMonth = useMemo(
+    () => payments
+      .filter((payment) => monthKey(payment.payment_date) === currentMonth)
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+    [currentMonth, payments]
+  );
+
+  useEffect(() => {
+    if (!studentId) return;
+    const { classes: assigned, autoSelectedClassId } = determineActiveClasses(
+      studentId,
+      classes.filter((item) => item.status === "active"),
+      activeMemberships
+    );
+    setStudentClassIds(assigned.map((item) => item.id));
+    if (assigned.length === 1) {
+      setClassId(autoSelectedClassId);
+    } else if (!assigned.some((item) => item.id === classId)) {
+      setClassId("");
+    }
+  }, [activeMemberships, classes, classId, studentId]);
+
+  useEffect(() => {
+    if (!selectedStudent || !classId) return;
+    const membership = activeMemberships.find(
+      (item) => item.student_id === selectedStudent.id && item.class_id === classId
+    );
+    const period = manualPeriod
+      ? collectionMonth
+      : getFirstUnpaidMonth(
+          membership ?? {
+            student_id: selectedStudent.id,
+            class_id: classId,
+            status: "active",
+            start_date: null,
+            end_date: null,
+          },
+          tuitionForDueStatus,
+          currentMonth
+        );
+    if (!manualPeriod && collectionMonth !== period) setCollectionMonth(period);
+    const classItem = classById.get(classId);
+    if (!classItem) return;
+    const existing = tuition.find(
+      (item) =>
+        item.student_id === selectedStudent.id &&
+        item.class_id === classId &&
+        monthKey(item.billing_month) === period
+    );
+    const effectiveExisting = existing
+      ? tuitionForDueStatus.find((item) => item.id === existing.id)
+      : undefined;
+    const suggested = Number(
+      existing?.amount_due ?? suggestedTuitionAmount(selectedStudent, classItem, period, membership?.start_date ?? null)
+    );
+    const remaining = existing
+      ? Math.max(
+          Number(effectiveExisting?.effective_amount_due ?? existing.amount_due) -
+            Number(effectiveExisting?.effective_amount_paid ?? existing.amount_paid),
+          0
+        )
+      : suggested;
+    setAmountDue(String(suggested));
+    setAmountToCollect(String(remaining));
+  }, [
+    activeMemberships,
+    classById,
+    classId,
+    collectionMonth,
+    currentMonth,
+    manualPeriod,
+    selectedStudent,
+    tuition,
+    tuitionForDueStatus,
+  ]);
+
   const activeStudentIdsByClass = useMemo(() => {
     const result = new Map<string, string[]>();
 
@@ -389,14 +627,13 @@ export default function TuitionPage() {
 
   const tuitionByStudentClass = useMemo(() => {
     const result = new Map<string, Tuition>();
-
     for (const item of tuition) {
-      if (!item.class_id) continue;
+      if (!item.class_id || monthKey(item.billing_month) !== billingMonth) continue;
       result.set(`${item.student_id}__${item.class_id}`, item);
     }
 
     return result;
-  }, [tuition]);
+  }, [tuition, billingMonth]);
 
   const paymentsByTuition = useMemo(() => {
     const result = new Map<string, TuitionPayment[]>();
@@ -711,68 +948,6 @@ export default function TuitionPage() {
     recognition.start();
   }
 
-  const calculateAmount = useCallback((
-    classItem: ClassItem,
-    student = selectedStudent
-  ) => {
-    if (!student) return;
-
-    const lessons = lessonsInMonth(
-      student.join_date,
-      billingMonth,
-      classItem.schedule_days
-    );
-
-    // Đơn giá chuẩn: 50.000đ / giờ.
-    // Tiền mỗi buổi được tính theo thời lượng thực tế của lớp.
-    const startMinutes = classItem.schedule_start
-      ? Number(classItem.schedule_start.slice(0, 2)) * 60 +
-        Number(classItem.schedule_start.slice(3, 5))
-      : 0;
-
-    const endMinutes = classItem.schedule_end
-      ? Number(classItem.schedule_end.slice(0, 2)) * 60 +
-        Number(classItem.schedule_end.slice(3, 5))
-      : 0;
-
-    const durationMinutes =
-      endMinutes > startMinutes ? endMinutes - startMinutes : 60;
-
-    const feePerLesson = (durationMinutes / 60) * 50000;
-
-    if (!student.join_date) {
-      setAmountDue(String(classItem.monthly_fee));
-      return;
-    }
-
-    const [year, month] = billingMonth.split("-").map(Number);
-    const joined = new Date(student.join_date + "T00:00:00");
-
-    const isFirstMonth =
-      joined.getFullYear() === year &&
-      joined.getMonth() === month - 1;
-
-    if (isFirstMonth) {
-      const firstMonthFee = Math.min(
-        lessons * feePerLesson,
-        Number(classItem.monthly_fee)
-      );
-
-      setAmountDue(String(firstMonthFee));
-    } else if (joined < new Date(year, month - 1, 1)) {
-      setAmountDue(String(classItem.monthly_fee));
-    } else {
-      setAmountDue("0");
-    }
-  }, [billingMonth, selectedStudent]);
-
-  useEffect(() => {
-    const selected = classes.find((c) => c.id === classId);
-    if (selected && selectedStudent) {
-      calculateAmount(selected, selectedStudent);
-    }
-  }, [classId, classes, calculateAmount, selectedStudent]);
-
   useEffect(() => {
     if (loading || newStudentPrefillRef.current) return;
 
@@ -788,33 +963,24 @@ export default function TuitionPage() {
       .filter((membership) => membership.student_id === newStudentId)
       .map((membership) => membership.class_id);
     const requestedClassId = params.get("classId");
-    const requestedClassIds = (params.get("classIds") ?? "")
-      .split(",")
-      .filter((id) => assignedClassIds.includes(id));
     const requestedBillingMonth = params.get("billingMonth");
     const initialClassId =
       requestedClassId && assignedClassIds.includes(requestedClassId)
         ? requestedClassId
-        : requestedClassIds[0] ?? assignedClassIds[0] ?? "";
+        : assignedClassIds.length === 1 ? assignedClassIds[0] : "";
 
     newStudentPrefillRef.current = true;
     setStudentId(student.id);
     setStudentSearch(student.full_name);
     setStudentClassIds(assignedClassIds);
     setClassId(initialClassId);
-    setNote("Học phí khi tạo học viên mới");
+    setNote("");
     setShowForm(true);
     setIsNewStudentFlow(true);
-    setNewStudentClassQueue(
-      requestedClassIds.length > 0
-        ? requestedClassIds
-        : initialClassId
-          ? [initialClassId]
-          : []
-    );
 
-    if (requestedBillingMonth && requestedBillingMonth !== billingMonth) {
-      setBillingMonth(requestedBillingMonth);
+    if (requestedBillingMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedBillingMonth)) {
+      setCollectionMonth(requestedBillingMonth);
+      setManualPeriod(false);
     }
 
     window.history.replaceState({}, "", "/tuition");
@@ -826,183 +992,10 @@ export default function TuitionPage() {
     }, 100);
   }, [
     activeMemberships,
-    billingMonth,
     loading,
     students,
   ]);
 
-
-  async function createMonthlyTuition() {
-    if (!billingMonth) {
-      alert("Hãy chọn kỳ học phí.");
-      return;
-    }
-
-    if (bulkCreating) return;
-
-    const ok = window.confirm(
-      `Tạo học phí ${monthLabel(billingMonth)} cho toàn bộ học viên đang học?`
-    );
-
-    if (!ok) return;
-
-    setBulkCreating(true);
-
-    try {
-      const billingDate = `${billingMonth}-01`;
-
-      // Lấy toàn bộ học viên đang được gán lớp
-      const { data: memberships, error: membershipError } = await supabase
-        .from("class_students")
-        .select("student_id,class_id")
-        .eq("status", "active");
-
-      if (membershipError) {
-        alert("Không lấy được danh sách lớp của học viên: " + membershipError.message);
-        return;
-      }
-
-      // Các khoản đã tồn tại trong tháng
-      const { data: existingRows, error: existingError } = await supabase
-        .from("tuition")
-        .select("student_id,class_id,billing_month")
-        .eq("billing_month", billingDate);
-
-      if (existingError) {
-        alert("Không kiểm tra được học phí đã tạo: " + existingError.message);
-        return;
-      }
-
-      const existingKeys = new Set(
-        (existingRows || []).map(
-          (x) => `${x.student_id}__${x.class_id}__${x.billing_month}`
-        )
-      );
-
-      const rows: Array<{
-        student_id: string;
-        class_id: string;
-        branch_id: string | null;
-        billing_month: string;
-        description: string;
-        amount_due: number;
-        amount_paid: number;
-        payment_date: string | null;
-        note: string;
-      }> = [];
-
-      let skipped = 0;
-
-      for (const membership of memberships || []) {
-        const student = studentById.get(membership.student_id);
-        const classItem = classById.get(membership.class_id);
-
-        if (
-          !student ||
-          student.status !== "active" ||
-          !classItem ||
-          classItem.status !== "active"
-        ) {
-          continue;
-        }
-
-        const key = `${student.id}__${classItem.id}__${billingDate}`;
-
-        if (existingKeys.has(key)) {
-          skipped++;
-          continue;
-        }
-
-        const monthlyFee = Number(classItem.monthly_fee || 0);
-
-        // QUY TẮC HỌC PHÍ:
-        // 600.000đ: tính 50.000đ/giờ theo số buổi thực tế, tối đa 600.000đ.
-        // 750.000đ / 1.500.000đ / mức khác: lấy đúng monthly_fee.
-        let amount = monthlyFee;
-
-        if (monthlyFee === 600000 && student.join_date) {
-          const [year, month] = billingMonth.split("-").map(Number);
-          const joined = new Date(student.join_date + "T00:00:00");
-          const monthStart = new Date(year, month - 1, 1);
-          const monthEnd = new Date(year, month, 0);
-
-          if (joined > monthEnd) {
-            amount = 0;
-          } else if (
-            joined.getFullYear() === year &&
-            joined.getMonth() === month - 1
-          ) {
-            let durationMinutes = 60;
-
-            if (classItem.schedule_start && classItem.schedule_end) {
-              const [sh, sm] = classItem.schedule_start.split(":").map(Number);
-              const [eh, em] = classItem.schedule_end.split(":").map(Number);
-              const startMinutes = sh * 60 + sm;
-              const endMinutes = eh * 60 + em;
-
-              if (endMinutes > startMinutes) {
-                durationMinutes = endMinutes - startMinutes;
-              }
-            }
-
-            const feePerLesson = (durationMinutes / 60) * 50000;
-
-            const lessons = lessonsInMonth(
-              student.join_date,
-              billingMonth,
-              classItem.schedule_days
-            );
-
-            amount = Math.min(lessons * feePerLesson, monthlyFee);
-          } else if (joined < monthStart) {
-            amount = monthlyFee;
-          }
-        }
-
-        if (amount <= 0) continue;
-
-        rows.push({
-          student_id: student.id,
-          class_id: classItem.id,
-          branch_id: classItem.branch_id || null,
-          billing_month: billingDate,
-          description: `Học phí ${monthLabel(billingMonth)}`,
-          amount_due: Math.round(amount),
-          amount_paid: 0,
-          payment_date: null,
-          note: "Tự tạo học phí đầu kỳ",
-        });
-
-        existingKeys.add(key);
-      }
-
-      if (rows.length === 0) {
-        alert(
-          `ℹ️ Không có học phí mới cần tạo.\n\nĐã bỏ qua ${skipped} khoản đã tồn tại.`
-        );
-        return;
-      }
-
-      const { error: insertError } = await supabase
-        .from("tuition")
-        .insert(rows);
-
-      if (insertError) {
-        alert("Không tạo được học phí: " + insertError.message);
-        return;
-      }
-
-      alert(
-        `✅ Đã tạo ${rows.length} khoản học phí ${monthLabel(billingMonth)}.\n` +
-        `↪️ Bỏ qua ${skipped} khoản đã tồn tại.\n\n` +
-        `Không ghi đè các khoản cũ.`
-      );
-
-      await loadData();
-    } finally {
-      setBulkCreating(false);
-    }
-  }
 
   async function addTuition(e: React.FormEvent) {
     e.preventDefault();
@@ -1017,171 +1010,98 @@ export default function TuitionPage() {
       return;
     }
 
-    const amount = Number(amountDue);
+    const dueAmount = Number(amountDue);
+    const amount = Number(amountToCollect);
 
-    if (!amount || amount < 0) {
-      alert("Số tiền học phí không hợp lệ.");
+    if (!Number.isFinite(dueAmount) || dueAmount < 0 || !Number.isFinite(amount) || amount <= 0) {
+      alert("Số tiền học phí hoặc số tiền thực thu không hợp lệ.");
       return;
     }
 
     const classItem = classes.find((c) => c.id === classId);
+    const membership = activeMemberships.find(
+      (item) => item.student_id === studentId && item.class_id === classId
+    );
 
-    if (!classItem) {
-      alert("Không tìm thấy lớp.");
+    if (!classItem || !membership || selectedStudent?.status !== "active") {
+      alert("Học viên hiện không có lớp đang học.");
       return;
     }
 
-    // Mỗi học viên có thể học nhiều lớp:
-    // mỗi LỚP chỉ được tạo 1 kỳ học phí trong 1 tháng.
-    const billingDate = `${billingMonth}-01`;
-
     const existing = tuition.find(
-      (t) =>
-        t.student_id === studentId &&
-        t.class_id === classId &&
-        t.billing_month === billingDate
+      (item) =>
+        item.student_id === studentId &&
+        item.class_id === classId &&
+        monthKey(item.billing_month) === collectionMonth
     );
+    const expectedAmount = existing
+      ? Number(existing.amount_due)
+      : suggestedTuitionAmount(selectedStudent, classItem, collectionMonth, membership.start_date);
+    const noteParts = [note.trim()];
+    if (manualPeriod) noteParts.push(`Kỳ được chọn thủ công: ${collectionMonth}`);
+    if (Math.abs(dueAmount - expectedAmount) > 0.01) {
+      noteParts.push(`Điều chỉnh số học phí thủ công: đề xuất ${expectedAmount}, áp dụng ${dueAmount}`);
+    }
 
-    if (existing) {
-      const due = Number(existing.amount_due || 0);
-      const paid = Number(existing.amount_paid || 0);
-      const remain = Math.max(due - paid, 0);
-
-      if (remain <= 0) {
-        alert(
-          `🟢 ${studentName(studentId)} đã đóng đủ học phí ${monthLabel(
-            billingMonth
-          )}.\\nKhông thể thu thêm trong kỳ này.`
-        );
-      } else {
-        alert(
-          `⚠️ Học phí ${monthLabel(
-            billingMonth
-          )} đã tồn tại.\\nCòn nợ: ${money(remain)}.\\nVào danh sách bên dưới để thu phần còn lại.`
-        );
-      }
-
+    if (amount > dueAmount) {
+      alert("Số tiền thực thu không được lớn hơn số học phí của kỳ.");
       return;
     }
 
     setSaving(true);
-
-    const branchId = selectedStudent?.branch_id || classItem.branch_id;
-
-    const { error } = await supabase.from("tuition").insert({
-      student_id: studentId,
-      class_id: classId,
-      branch_id: branchId || null,
-      billing_month: billingDate,
-      description: `Học phí ${monthLabel(billingMonth)}`,
-      amount_due: amount,
-      amount_paid: 0,
-      payment_date: null,
-      note: note.trim() || null,
+    const receiptWindow = window.open("", "_blank");
+    const { data, error } = await supabase.rpc("collect_tuition_payment_atomic", {
+      p_student_id: studentId,
+      p_class_id: classId,
+      p_billing_month: periodDate(collectionMonth),
+      p_amount_due: dueAmount,
+      p_amount: amount,
+      p_payment_method: paymentMethod,
+      p_payment_date: null,
+      p_note: noteParts.filter(Boolean).join(" · ") || null,
     });
 
     setSaving(false);
 
     if (error) {
+      if (receiptWindow) receiptWindow.close();
       alert(error.message);
       return;
     }
 
-    alert(`Đã tạo học phí ${money(amount)} cho ${monthLabel(billingMonth)}.`);
-
-    const remainingClassIds = newStudentClassQueue.filter(
-      (id) => id !== classId
-    );
-
-    if (isNewStudentFlow && remainingClassIds.length > 0) {
-      setNewStudentClassQueue(remainingClassIds);
-      setClassId(remainingClassIds[0]);
-      setAmountDue("");
-      await loadData();
+    const result = data as {
+      success?: boolean;
+      payment_result?: { payment_id?: string };
+      remaining_amount?: number | string;
+    } | null;
+    if (!result?.success) {
+      if (receiptWindow) receiptWindow.close();
+      alert("Máy chủ chưa xác nhận đã thu học phí.");
       return;
     }
 
+    alert(
+      Number(result.remaining_amount || 0) <= 0
+        ? "Đã thu học phí thành công."
+        : `Đã thu ${money(amount)}. Còn thiếu ${money(Number(result.remaining_amount))}.`
+    );
+
+    const paymentId = result.payment_result?.payment_id;
+    setShowForm(false);
+    setIsNewStudentFlow(false);
     setStudentId("");
+    setStudentSearch("");
     setStudentClassIds([]);
     setClassId("");
     setAmountDue("");
+    setAmountToCollect("");
     setNote("");
-    setShowForm(false);
-    setIsNewStudentFlow(false);
-    setNewStudentClassQueue([]);
-
     await loadData();
-  }
-
-  async function processPayment(
-    item: Tuition,
-    payment: number,
-    paymentMethod: "cash" | "transfer"
-  ) {
-    const remain = Math.max(
-      Number(item.amount_due) - Number(item.amount_paid),
-      0
-    );
-
-    if (payment <= 0 || payment > remain) {
-      alert("Số tiền thanh toán không hợp lệ.");
-      return false;
-    }
-
-    // Mở cửa sổ ngay trong thao tác xác nhận để trình duyệt không chặn popup.
-    const receiptWindow = window.open("", "_blank");
-
-    const { data: paymentData, error: paymentError } = await supabase.rpc(
-      "record_tuition_payment_atomic",
-      {
-        p_tuition_id: item.id,
-        p_amount: payment,
-        p_payment_method: paymentMethod,
-      }
-    );
-
-    if (paymentError) {
-      if (receiptWindow) receiptWindow.close();
-      alert(paymentError.message);
-      return false;
-    }
-
-    const paymentResult = paymentData as {
-      payment_id?: string;
-      new_amount_paid?: number | string;
-      amount_due?: number | string;
-      payment_date?: string;
-    } | null;
-
-    const paymentId = paymentResult?.payment_id;
-    const newPaid = Number(paymentResult?.new_amount_paid ?? item.amount_paid);
-    const amountDue = Number(paymentResult?.amount_due ?? item.amount_due);
-
-    if (!paymentId || !Number.isFinite(newPaid)) {
-      if (receiptWindow) receiptWindow.close();
-      alert("Máy chủ chưa xác nhận thanh toán học phí thành công.");
-      return false;
-    }
-
-    if (receiptWindow && paymentId) {
-      receiptWindow.location.href =
-        `/tuition/receipt/${paymentId}`;
+    if (paymentId && receiptWindow) {
+      receiptWindow.location.href = `/tuition/receipt/${paymentId}`;
     } else if (paymentId) {
-      window.location.href =
-        `/tuition/receipt/${paymentId}`;
+      window.location.href = `/tuition/receipt/${paymentId}`;
     }
-
-    alert(
-      newPaid >= amountDue
-        ? "🟢 Đã thanh toán đủ học phí."
-        : `Đã thu ${money(payment)}. Còn lại ${money(
-            amountDue - newPaid
-          )}.`
-    );
-
-    await loadData();
-
-    return true;
   }
 
   async function deleteTuition(item: Tuition) {
@@ -1224,65 +1144,63 @@ export default function TuitionPage() {
     await loadData();
   }
 
-  async function markPaid(item: Tuition) {
-    const remain = Math.max(
-      Number(item.amount_due) - Number(item.amount_paid),
+  function openCollectionForTuition(
+    item: Tuition,
+    amountOverride?: number,
+    method: "cash" | "transfer" = "cash"
+  ) {
+    const student = studentById.get(item.student_id);
+    const classItem = item.class_id ? classById.get(item.class_id) : undefined;
+    const membership = activeMemberships.find(
+      (entry) => entry.student_id === item.student_id && entry.class_id === item.class_id
+    );
+    const period = monthKey(item.billing_month);
+    if (!student || !classItem || !membership || !period || student.status !== "active" || classItem.status !== "active") {
+      alert("Học viên hiện không có lớp đang học.");
+      return;
+    }
+    const effective = tuitionForDueStatus.find((entry) => entry.id === item.id);
+    const remaining = Math.max(
+      Number(effective?.effective_amount_due ?? item.amount_due) -
+        Number(effective?.effective_amount_paid ?? item.amount_paid),
       0
     );
-
-    if (remain <= 0) {
-      alert("Học phí này đã thanh toán đủ.");
+    const amount = amountOverride ?? remaining;
+    if (amount <= 0 || amount > remaining) {
+      alert("Số tiền thu không hợp lệ hoặc kỳ này đã được thanh toán đủ.");
       return;
     }
-
-    const amount = prompt(
-      `Còn phải đóng ${money(remain)}.\nNhập số tiền khách đóng:`,
-      String(remain)
+    const nextPeriod = getFirstUnpaidMonth(membership, tuitionForDueStatus, currentMonth);
+    const assigned = determineActiveClasses(
+      student.id,
+      classes.filter((entry) => entry.status === "active"),
+      activeMemberships
     );
-
-    if (amount === null) return;
-
-    const payment = Number(amount);
-
-    if (!payment || payment <= 0) {
-      alert("Số tiền không hợp lệ.");
-      return;
-    }
-
-    if (payment > remain) {
-      alert("Số tiền đóng không được lớn hơn số tiền còn lại.");
-      return;
-    }
-
-    const method = window.prompt(
-      "Chọn phương thức thanh toán:\n\n1 = 💵 Tiền mặt\n2 = 🏦 Chuyển khoản",
-      "1"
-    );
-
-    if (method === null) return;
-
-    let paymentMethod: "cash" | "transfer";
-
-    if (method.trim() === "1") {
-      paymentMethod = "cash";
-    } else if (method.trim() === "2") {
-      paymentMethod = "transfer";
-    } else {
-      alert("Vui lòng chọn 1 hoặc 2.");
-      return;
-    }
-
-    await processPayment(item, payment, paymentMethod);
+    setStudentId(student.id);
+    setStudentSearch(student.full_name);
+    setStudentClassIds(assigned.classes.map((entry) => entry.id));
+    setClassId(classItem.id);
+    setCollectionMonth(period);
+    setManualPeriod(period !== nextPeriod);
+    setAmountDue(String(item.amount_due));
+    setAmountToCollect(String(amount));
+    setPaymentMethod(method);
+    setNote("");
+    setShowForm(true);
+    window.setTimeout(() => document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
   }
 
-  async function confirmVoicePayment() {
+  function markPaid(item: Tuition) {
+    openCollectionForTuition(item);
+  }
+
+  function confirmVoicePayment() {
     if (!voicePayment) return;
 
     const { item, amount, method } = voicePayment;
 
     setVoicePayment(null);
-
-    await processPayment(item, amount, method);
+    openCollectionForTuition(item, amount, method);
   }
 
   function studentName(id: string) {
@@ -1342,25 +1260,6 @@ export default function TuitionPage() {
     focusedStudent,
   ]);
 
-  // Giữ nguyên cách tính Tổng phải thu / Đã thu / Còn nợ.
-  const { totalDue, totalPaid, totalRemain } = useMemo(() => {
-    const due = filteredTuition.reduce(
-      (sum, item) => sum + Number(item.amount_due),
-      0
-    );
-
-    const paid = filteredTuition.reduce(
-      (sum, item) => sum + Number(item.amount_paid),
-      0
-    );
-
-    return {
-      totalDue: due,
-      totalPaid: paid,
-      totalRemain: Math.max(due - paid, 0),
-    };
-  }, [filteredTuition]);
-
   useEffect(() => {
     setVisibleTuitionCount(TUITION_PER_BATCH);
   }, [billingMonth, focusedStudentId, search]);
@@ -1394,6 +1293,29 @@ export default function TuitionPage() {
     return result;
   }, [activeClasses]);
 
+  const selectedClass = classes.find((item) => item.id === classId);
+  const selectedCollectionMembership = activeMemberships.find(
+    (item) => item.student_id === studentId && item.class_id === classId
+  );
+  const selectedCollectionStatus = selectedStudent && selectedClass && selectedCollectionMembership
+    ? getMembershipTuitionStatus(
+        selectedCollectionMembership,
+        selectedStudent.status,
+        selectedClass.status,
+        tuitionForDueStatus,
+        currentMonth
+      )
+    : null;
+  const selectedCollectionRecord = tuition.find(
+    (item) =>
+      item.student_id === studentId &&
+      item.class_id === classId &&
+      monthKey(item.billing_month) === collectionMonth
+  );
+  const selectedCollectionEffective = selectedCollectionRecord
+    ? tuitionForDueStatus.find((item) => item.id === selectedCollectionRecord.id)
+    : undefined;
+
   return (
     <div className="space-y-6">
       <section className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -1404,22 +1326,10 @@ export default function TuitionPage() {
           <h1 className="mt-1 text-4xl font-black tracking-tight">
             💰 Học phí
           </h1>
-          <p className="mt-2 text-slate-400">
-            Thu học phí theo kỳ ngày 1 hàng tháng
-          </p>
+        <p className="mt-2 text-slate-400">Thu học phí khi nhận tiền</p>
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <button
-            className="ui-btn ui-btn-primary"
-            onClick={createMonthlyTuition}
-            disabled={bulkCreating}
-          >
-            {bulkCreating
-              ? "⏳ Đang tạo..."
-              : `📅 Tạo học phí ${monthLabel(billingMonth)}`}
-          </button>
-
           <button
             className="ui-btn ui-btn-primary"
             onClick={() => {
@@ -1427,7 +1337,7 @@ export default function TuitionPage() {
               setIsNewStudentFlow(false);
             }}
           >
-            {showForm ? "Đóng" : "+ Tạo học phí"}
+            {showForm ? "Đóng" : "+ Thu học phí"}
           </button>
         </div>
       </section>
@@ -1454,42 +1364,81 @@ export default function TuitionPage() {
 
       <section className="grid gap-4 md:grid-cols-3">
         <div className="ui-card p-6">
-          <div className="text-sm font-bold text-slate-400">TỔNG PHẢI THU</div>
-          <div className="mt-2 text-3xl font-black">{money(totalDue)}</div>
+          <div className="text-sm font-bold text-slate-400">ĐÃ THU THÁNG NÀY</div>
+          <div className="mt-2 text-3xl font-black text-emerald-600">{money(collectedThisMonth)}</div>
         </div>
 
         <div className="ui-card p-6">
-          <div className="text-sm font-bold text-slate-400">ĐÃ THU</div>
-          <div className="mt-2 text-3xl font-black text-emerald-600">
-            {money(totalPaid)}
-          </div>
+          <div className="text-sm font-bold text-slate-400">CẦN THU</div>
+          <div className="mt-2 text-3xl font-black">{dueCount}</div>
         </div>
 
         <div className="ui-card p-6">
-          <div className="text-sm font-bold text-slate-400">CÒN NỢ</div>
-          <div className="mt-2 text-3xl font-black text-rose-500">
-            {money(totalRemain)}
-          </div>
+          <div className="text-sm font-bold text-slate-400">QUÁ HẠN</div>
+          <div className="mt-2 text-3xl font-black text-rose-500">{overdueCount}</div>
         </div>
+      </section>
+
+      <section className="ui-card overflow-hidden">
+        <div className="border-b border-slate-100 p-5 sm:p-6">
+          <h2 className="text-2xl font-black">Cần thu</h2>
+          <p className="mt-1 text-sm text-slate-500">Danh sách được tính từ lớp đang học và lịch sử học phí; chưa thu thì chưa tạo phiếu.</p>
+        </div>
+        {loading ? (
+          <div className="p-8 text-center text-slate-400">Đang tính kỳ cần thu…</div>
+        ) : actionableDueRows.length === 0 ? (
+          <div className="p-8 text-center text-slate-500">Hiện không có học viên đến hạn.</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {actionableDueRows.map((row) => {
+              const period = row.due.firstUnpaidMonth ?? currentMonth;
+              const overdue = period < currentMonth;
+              const branch = branchById.get(row.classItem.branch_id)?.name ?? "Chưa gán cơ sở";
+              return (
+                <div key={`${row.student.id}-${row.classItem.id}`} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                  <div className="min-w-0">
+                    <div className="font-black text-slate-900">{row.student.full_name} <span className="text-xs font-bold text-blue-600">{row.student.student_code}</span></div>
+                    <div className="mt-1 text-sm text-slate-500">{row.classItem.name} · {branch} · Kỳ {monthLabel(period)}</div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
+                      <span className={`rounded-full px-3 py-1 ${row.due.status === "PARTIAL" ? "bg-amber-100 text-amber-800" : overdue ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"}`}>
+                        {row.due.status === "PARTIAL" ? "Còn thiếu" : overdue ? "Quá hạn" : "Đến hạn"}
+                      </span>
+                      {row.due.paidThroughMonth && <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Đã đóng đến {monthLabel(row.due.paidThroughMonth)}</span>}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center justify-between gap-4 sm:justify-end">
+                    <strong>{money(row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount)}</strong>
+                    <button type="button" className="ui-btn ui-btn-primary" onClick={() => {
+                      setStudentId(row.student.id);
+                      setStudentSearch(row.student.full_name);
+                      setStudentClassIds([row.classItem.id]);
+                      setClassId(row.classItem.id);
+                      setCollectionMonth(period);
+                      setManualPeriod(false);
+                      setNote("");
+                      setShowForm(true);
+                      window.setTimeout(() => document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+                    }}>Thu học phí</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {showForm && (
         <section id="create-tuition-form" className="ui-card p-6 sm:p-8">
           <div className="mb-6">
             <div className="text-xs font-black uppercase tracking-widest text-blue-600">
-              TẠO KỲ HỌC PHÍ
+              XÁC NHẬN KHOẢN THU
             </div>
             <h2 className="mt-1 text-2xl font-black">
-              Học phí thu ngày 1
+              Thu học phí
             </h2>
             {isNewStudentFlow && (
               <div className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">
-                ✅ Đã tạo học viên. Kiểm tra học phí bên dưới rồi bấm Lưu học phí.
-                {newStudentClassQueue.length > 1 && (
-                  <span>
-                    {" "}Sau đó hệ thống sẽ tiếp tục {newStudentClassQueue.length - 1} lớp còn lại.
-                  </span>
-                )}
+                ✅ Học viên đã được tạo. Học phí chỉ được ghi nhận sau khi xác nhận đã nhận tiền.
               </div>
             )}
           </div>
@@ -1535,6 +1484,9 @@ export default function TuitionPage() {
                             setShowStudentSearch(false);
                             setClassId("");
                             setAmountDue("");
+                            setAmountToCollect("");
+                            setManualPeriod(false);
+                            setNote("");
                             setStudentClassIds(
                               activeMemberships
                                 .filter(
@@ -1556,80 +1508,68 @@ export default function TuitionPage() {
               </div>
             </label>
 
-            <label className="block">
-              <div className="mb-2 text-sm font-bold">Lớp</div>
-              <select
-                value={classId}
-                onChange={(e) => {
-                  setClassId(e.target.value);
-                  const selected = classes.find(
-                    (c) => c.id === e.target.value
-                  );
-                  if (selected) calculateAmount(selected);
-                }}
-                className="ui-input"
-              >
-                <option value="">-- Chọn lớp --</option>
-                {studentClasses.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} — {money(Number(item.monthly_fee))}/tháng
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <div className="mb-2 text-sm font-bold">
-                Kỳ học phí
-              </div>
-              <input
-                type="month"
-                value={billingMonth}
-                onChange={(e) => setBillingMonth(e.target.value)}
-                className="ui-input"
-              />
-              <div className="mt-2 text-xs text-slate-400">
-                Kỳ thu luôn bắt đầu ngày 1
-              </div>
-            </label>
-
-            <label className="block">
-              <div className="mb-2 text-sm font-bold">
-                Số tiền phải thu
-              </div>
-              <input
-                type="number"
-                min="0"
-                step="1000"
-                value={amountDue}
-                onChange={(e) => setAmountDue(e.target.value)}
-                className="ui-input"
-              />
-            </label>
-
-            {selectedStudent && classId && (
-              <div className="rounded-3xl bg-blue-50 p-5 md:col-span-2">
-                <div className="font-black text-blue-900">
-                  🧮 Tính tự động
-                </div>
-
-                <div className="mt-2 text-sm text-blue-800">
-                  Ngày vào học:{" "}
-                  <b>
-                    {selectedStudent.join_date
-                      ? new Date(
-                          selectedStudent.join_date + "T00:00:00"
-                        ).toLocaleDateString("vi-VN")
-                      : "Chưa cập nhật"}
-                  </b>
-                </div>
-
-                <div className="mt-1 text-sm text-blue-800">
-                  Học phí kỳ {monthLabel(billingMonth)}:{" "}
-                  <b>{money(Number(amountDue || 0))}</b>
-                </div>
+            {studentId && studentClasses.length === 0 && (
+              <div className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-800 md:col-span-2">
+                Học viên hiện không có lớp đang học.
               </div>
             )}
+
+            {studentClasses.length === 1 && selectedClass && (
+              <div className="rounded-2xl bg-slate-50 p-4 md:col-span-2">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-400">Lớp đang học</div>
+                <div className="mt-1 font-black">{selectedClass.name} · {branchName(selectedClass.branch_id)}</div>
+              </div>
+            )}
+
+            {studentClasses.length > 1 && (
+              <label className="block md:col-span-2">
+                <div className="mb-2 text-sm font-bold">Chọn lớp cần thu</div>
+                <select value={classId} onChange={(e) => setClassId(e.target.value)} className="ui-input">
+                  <option value="">-- Chọn lớp --</option>
+                  {studentClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {branchName(item.branch_id)}</option>)}
+                </select>
+              </label>
+            )}
+
+            {selectedStudent && selectedClass && selectedCollectionStatus && (
+              <div className="grid gap-2 rounded-3xl bg-blue-50 p-5 text-sm text-blue-900 md:col-span-2 md:grid-cols-2">
+                <div><span className="text-blue-700">Học viên:</span> <b>{selectedStudent.full_name} · {selectedStudent.student_code}</b></div>
+                <div><span className="text-blue-700">Cơ sở:</span> <b>{branchName(selectedClass.branch_id)}</b></div>
+                <div><span className="text-blue-700">Đã đóng đến:</span> <b>{selectedCollectionStatus.paidThroughMonth ? monthLabel(selectedCollectionStatus.paidThroughMonth) : "Chưa có kỳ đã đóng"}</b></div>
+                <div><span className="text-blue-700">Kỳ cần thu:</span> <b>{monthLabel(collectionMonth)}</b></div>
+                {selectedCollectionRecord && <div className="md:col-span-2"><span className="text-blue-700">Đã ghi nhận kỳ này:</span> <b>{money(Number(selectedCollectionRecord.amount_paid))}</b> · <span className="text-blue-700">Còn thiếu:</span> <b>{money(Math.max(Number(selectedCollectionEffective?.effective_amount_due ?? selectedCollectionRecord.amount_due) - Number(selectedCollectionEffective?.effective_amount_paid ?? selectedCollectionRecord.amount_paid), 0))}</b></div>}
+              </div>
+            )}
+
+            <div className="md:col-span-2">
+              <button type="button" className="text-sm font-bold text-blue-700 underline" onClick={() => setManualPeriod((value) => !value)}>
+                {manualPeriod ? "Dùng kỳ tiếp theo tự động" : "Chọn kỳ khác (điều chỉnh thủ công)"}
+              </button>
+              {manualPeriod && (
+                <label className="mt-3 block max-w-sm">
+                  <span className="mb-2 block text-sm font-bold">Kỳ học phí</span>
+                  <input type="month" value={collectionMonth} onChange={(e) => setCollectionMonth(e.target.value)} className="ui-input" />
+                </label>
+              )}
+            </div>
+
+            <label className="block">
+              <div className="mb-2 text-sm font-bold">Số tiền đề xuất</div>
+              <input type="number" min="0" step="1000" value={amountDue} onChange={(e) => setAmountDue(e.target.value)} className="ui-input" />
+            </label>
+
+            <label className="block">
+              <div className="mb-2 text-sm font-bold">Số tiền thực thu</div>
+              <input type="number" min="1" step="1000" value={amountToCollect} onChange={(e) => setAmountToCollect(e.target.value)} className="ui-input" />
+            </label>
+
+            <label className="block">
+              <div className="mb-2 text-sm font-bold">Phương thức thanh toán</div>
+              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as "cash" | "transfer")} className="ui-input">
+                <option value="cash">Tiền mặt</option>
+                <option value="transfer">Chuyển khoản</option>
+              </select>
+            </label>
 
             <label className="block md:col-span-2">
               <div className="mb-2 text-sm font-bold">Ghi chú</div>
@@ -1646,9 +1586,9 @@ export default function TuitionPage() {
               <button
                 className="ui-btn ui-btn-primary"
                 type="submit"
-                disabled={saving}
+                disabled={saving || !studentId || !classId || studentClasses.length === 0 || Number(amountToCollect) <= 0}
               >
-                {saving ? "Đang lưu..." : "💾 Lưu học phí"}
+                {saving ? "Đang ghi nhận..." : "✅ Xác nhận thu học phí"}
               </button>
             </div>
           </form>

@@ -7,6 +7,7 @@ import { EmptyState, InlineState, Skeleton } from "@/components/ui/mobile-ui";
 import { StudentAvatar } from "@/components/students/student-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { getStudentAvatarUrls } from "@/lib/student-avatar-storage";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Student = { id: string; student_code: string; full_name: string; status: string | null; created_at: string; join_date: string | null; branch_id: string | null };
 type Branch = { id: string; name: string };
@@ -74,6 +75,7 @@ function StudentsContent() {
   }, [supabase]);
 
   useEffect(() => { void loadData(); }, [loadData]);
+  useRealtimeRefresh(["students"], loadData);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -136,10 +138,9 @@ function StudentsContent() {
 
   return (
     <div className="min-w-0 space-y-5 sm:space-y-7">
-      <section className="flex min-w-0 items-start justify-between gap-3 sm:items-end">
-        <div className="min-w-0"><div className="mb-1 text-xs font-black text-blue-600 sm:mb-2 sm:text-sm">QUẢN LÝ HỌC VIÊN</div><h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">Học viên</h1><p className="mt-2 hidden text-sm text-slate-500 sm:block sm:text-base">Quản lý hồ sơ, lớp học và tình trạng học viên</p></div>
+      <div className="flex justify-end">
         <Link href="/students/new" className="ui-btn ui-btn-primary flex min-h-12 shrink-0 items-center gap-1 px-4 sm:gap-2 sm:px-5"><span className="text-xl">＋</span><span className="hidden sm:inline">Thêm học viên</span><span className="sm:hidden">Thêm</span></Link>
-      </section>
+      </div>
 
       <section className="grid grid-cols-3 gap-2 sm:gap-4">
         {[["Tổng", students.length, "text-slate-900"], ["Đang học", activeCount, "text-emerald-700"], ["Tạm ngưng", students.length - activeCount, "text-slate-600"]].map(([label, value, tone]) => <div key={String(label)} className="ui-card min-w-0 p-3 sm:p-5"><div className="truncate text-[11px] font-bold text-slate-400 sm:text-sm">{label}</div><div className={`mt-1 text-xl font-black sm:text-2xl ${tone}`}>{loading ? "—" : value}</div></div>)}

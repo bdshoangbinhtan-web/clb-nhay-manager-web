@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
 import { AttendanceDetailSheet } from "@/components/teachers/attendance-detail-sheet";
 import { activeStaffRole, type ActiveStaffRole } from "@/lib/active-staff-role";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Role = ActiveStaffRole;
 
@@ -142,6 +143,8 @@ export default function TeachersPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["teachers"], loadData);
 
   function resetForm() {
     setEditingId(null);

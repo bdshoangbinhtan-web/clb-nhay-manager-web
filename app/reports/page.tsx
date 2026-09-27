@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, toVietnamDateKey } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Branch = { id: string; name: string };
 
@@ -215,6 +216,8 @@ export default function ReportsPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["reports"], loadData);
 
   const paymentInPeriod = useCallback((item: Payment) => {
     if (!item.payment_date) return false;

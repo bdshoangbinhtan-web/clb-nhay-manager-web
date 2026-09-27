@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 import ClassSalaryPanel from "./class-salary-panel";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type PayrollTab = "payroll" | "class-salaries";
 
@@ -388,6 +389,8 @@ export default function TeacherPayrollPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useRealtimeRefresh(["payroll"], loadData);
 
   const classMap = useMemo(
     () => new Map(classes.map((item) => [item.id, item.name])),

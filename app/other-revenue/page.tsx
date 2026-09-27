@@ -2,6 +2,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 type Branch={id:string;name:string};
 type Revenue={id:string;revenue_date:string;category:string;description:string;payer_name:string|null;amount:number;payment_method:string|null;branch_id:string|null;note:string|null;created_at:string;branch?:{id:string;name:string}|null};
 const CATEGORIES=[['room_rental','🏠 Cho thuê phòng'],['workshop','🎤 Workshop / Khóa ngắn hạn'],['event','🎪 Sự kiện / Biểu diễn'],['equipment','🎛️ Cho thuê thiết bị'],['materials','📦 Giáo trình / Tài liệu'],['partnership','🤝 Hợp tác / Đối tác'],['other','💵 Khoản thu khác']] as const;
@@ -14,6 +15,7 @@ export default function OtherRevenuePage(){
  const blank={revenue_date:vietnamToday(),category:'room_rental',description:'',payer_name:'',amount:'',payment_method:'transfer',branch_id:'',note:''}; const [form,setForm]=useState(blank);
  const loadData=useCallback(async()=>{const requestId=++loadRequestRef.current;setLoading(true);const [a,b,r]=await Promise.all([supabase.auth.getUser(),supabase.from('branches').select('id,name').order('name'),supabase.from('other_revenues').select('id,revenue_date,category,description,payer_name,amount,payment_method,branch_id,note,created_at,branch:branch_id(id,name)').order('revenue_date',{ascending:false}).order('created_at',{ascending:false})]);if(requestId!==loadRequestRef.current)return;if(b.error)alert('Không tải được cơ sở: '+b.error.message);if(r.error)alert('Không tải được khoản thu: '+r.error.message);if(a.data.user){const {data:p}=await supabase.from('profiles').select('role').eq('id',a.data.user.id).maybeSingle();if(requestId!==loadRequestRef.current)return;setIsAdmin(p?.role==='admin')}setBranches(b.data??[]);setRows((r.data??[]) as unknown as Revenue[]);setLoading(false)},[supabase]);
  useEffect(()=>{void loadData()},[loadData]);
+ useRealtimeRefresh(["expenses"],loadData);
  const filtered=useMemo(()=>rows.filter(r=>r.revenue_date.startsWith(month)&&(!categoryFilter||r.category===categoryFilter)&&(!branchFilter||r.branch_id===branchFilter)),[rows,month,categoryFilter,branchFilter]);
  const total=filtered.reduce((s,r)=>s+Number(r.amount||0),0);
  function openCreate(){setEditing(null);setForm({...blank,revenue_date:vietnamToday()});setShowForm(true)}

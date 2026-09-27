@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type RequestRow = {
   id: string;
@@ -79,6 +80,8 @@ export default function AdminSubstitutionPage() {
   useEffect(() => {
     void loadRequests();
   }, [loadRequests]);
+
+  useRealtimeRefresh(["substitutions"], loadRequests);
 
   async function updateRequest(id: string, status: "approved" | "rejected") {
     setProcessingId(id);

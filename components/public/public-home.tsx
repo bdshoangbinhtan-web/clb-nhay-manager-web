@@ -1,58 +1,328 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { classImagePath, publicMedia, teacherImagePath } from "./public-media";
 import "./public-home.css";
 
-type Branch = { id: string; name: string; address: string | null };
-type Teacher = { id: string; full_name: string; avatar_url: string | null; status: string };
-type DanceClass = { id: string; branch_id: string; name: string; status: string; schedule_days: string[] | null; schedule_start: string | null; schedule_end: string | null };
-type TeacherLink = { class_id: string; teachers: Teacher | Teacher[] | null };
-type Form = { parentName: string; childName: string; age: string; phone: string; classId: string; branchId: string; note: string };
-const dayLabels: Record<string, string> = { "2": "Thứ 2", "3": "Thứ 3", "4": "Thứ 4", "5": "Thứ 5", "6": "Thứ 6", "7": "Thứ 7", "0": "Chủ nhật" };
-const benefits = [["◌", "Vận động & sức khỏe", "Khơi dậy tình yêu vận động qua từng buổi học."], ["♫", "Cảm thụ âm nhạc", "Lắng nghe nhịp điệu và thể hiện bằng cơ thể."], ["◎", "Khả năng tập trung", "Rèn sự chú ý qua những tổ hợp động tác mới."], ["↗", "Làm việc nhóm", "Cùng nhau phối hợp, tôn trọng và tỏa sáng."], ["✦", "Sự tự tin", "Từng bước dám thử, dám thể hiện bản thân."], ["♥", "Niềm vui vận động", "Một không gian tích cực cho niềm vui mỗi ngày."]];
-const faqs = [["Bé bao nhiêu tuổi có thể tham gia?", "Độ tuổi phù hợp sẽ tùy theo từng lớp. Hãy để lại thông tin, ANGEL BK sẽ tư vấn lớp phù hợp với bé."], ["Người mới có học được không?", "Có. Việc bắt đầu từ nền tảng sẽ được cân nhắc khi tư vấn lớp cho bé."], ["Một buổi học kéo dài bao lâu?", "Thời lượng được công bố theo lịch của từng lớp. Bạn có thể xem lịch bên dưới hoặc đăng ký để được tư vấn."], ["Có thể học thử không?", "Có thể gửi yêu cầu đăng ký học thử qua biểu mẫu. Đội ngũ ANGEL BK sẽ liên hệ để xác nhận."], ["Làm sao để xem lịch học?", "Lịch của các lớp đang mở được hiển thị trong phần Lịch học khi dữ liệu sẵn sàng."]];
-const initialForm: Form = { parentName: "", childName: "", age: "", phone: "", classId: "", branchId: "", note: "" };
+type FormState = {
+  parentName: string;
+  childName: string;
+  age: string;
+  phone: string;
+  program: string;
+  branch: string;
+  note: string;
+};
 
-function presentClassName(raw: string) {
-  const time = raw.match(/\b\d{1,2}\s*h\s*\d{2}\b/i); const teacher = raw.match(/\b(?:cô|thầy)\s+.+$/i);
-  if (!time || !teacher || time.index === undefined || teacher.index === undefined || teacher.index <= time.index) return raw;
-  const name = raw.slice(time.index + time[0].length, teacher.index).replace(/^[\s\-–—:]+|[\s\-–—:]+$/g, "").trim();
-  return /[a-zà-ỹ]/i.test(name) ? name : raw;
+const initialForm: FormState = {
+  parentName: "",
+  childName: "",
+  age: "",
+  phone: "",
+  program: "",
+  branch: "",
+  note: "",
+};
+
+const programs = [
+  {
+    title: "Kids cơ bản",
+    label: "Nền tảng đầu tiên",
+    description: "Làm quen nhịp điệu, kiểm soát cơ thể và xây dựng sự tự tin từ những chuyển động đầu tiên.",
+    image: "/images/angelbk/programs/kids-dance-energy.webp",
+    crop: "center 30%",
+  },
+  {
+    title: "Kids nâng cao",
+    label: "Nâng cấp kỹ năng",
+    description: "Phát triển kỹ thuật, cá tính biểu diễn và khả năng làm việc cùng đội nhóm.",
+    image: "/images/angelbk/programs/street-crew.webp",
+    crop: "center 40%",
+  },
+  {
+    title: "Crew & biểu diễn",
+    label: "Cùng nhau tỏa sáng",
+    description: "Rèn luyện trong đội hình, chinh phục sân khấu và lưu lại những trải nghiệm đáng nhớ.",
+    image: "/images/angelbk/programs/studio-community.webp",
+    crop: "center 44%",
+  },
+  {
+    title: "Lớp cuối tuần",
+    label: "Nhịp vui cuối tuần",
+    description: "Một khoảng thời gian giàu năng lượng để con vận động, kết nối và thể hiện chính mình.",
+    image: "/images/angelbk/programs/stage-solo.webp",
+    crop: "center 34%",
+  },
+] as const;
+
+const teachers = [
+  { name: "Cô Nhung", image: "/images/angelbk/teachers/co-nhung.webp", crop: "center 22%" },
+  { name: "Cô Nga", image: "/images/angelbk/teachers/co-nga.webp", crop: "center 18%" },
+  { name: "Cô Thủy", image: "/images/angelbk/teachers/co-thuy.webp", crop: "center 16%" },
+  { name: "Thầy Huy", image: "/images/angelbk/teachers/thay-huy.webp", crop: "center 18%" },
+] as const;
+
+const branches = [
+  { name: "Cơ sở 1", address: "1033 Tỉnh Lộ 10", detail: "9 lớp đang hoạt động" },
+  { name: "Cơ sở 2", address: "299A Tân Hòa Đông", detail: "13 lớp đang hoạt động" },
+] as const;
+
+function isValidAge(value: string) {
+  const clean = value.trim();
+  if (!clean) return false;
+  const number = Number(clean);
+  return !Number.isNaN(number)
+    ? (number >= 3 && number <= 99) || (number >= 2000 && number <= new Date().getFullYear())
+    : /^\d{1,2}\s*tuổi$/i.test(clean);
 }
-function dayText(item: DanceClass) { return item.schedule_days?.length ? item.schedule_days.map((day) => dayLabels[day] ?? day).join(" · ") : "Ngày học đang cập nhật"; }
-function timeText(item: DanceClass) { return item.schedule_start && item.schedule_end ? `${item.schedule_start.slice(0, 5)}–${item.schedule_end.slice(0, 5)}` : "Giờ học đang cập nhật"; }
-function isValidAge(value: string) { const clean = value.trim(); if (!clean) return false; const year = Number(clean); return !Number.isNaN(year) ? year >= 2000 && year <= new Date().getFullYear() : /^\d{1,2}\s*tuổi$/i.test(clean); }
-function isUuid(value: string) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
-function linkedTeachers(rows: TeacherLink[], classId: string) { return rows.filter((row) => row.class_id === classId).flatMap((row) => row.teachers ? (Array.isArray(row.teachers) ? row.teachers : [row.teachers]) : []).filter((teacher) => teacher.full_name); }
 
 export default function PublicHome() {
   const supabase = useMemo(() => createClient(), []);
-  const [branches, setBranches] = useState<Branch[]>([]), [classes, setClasses] = useState<DanceClass[]>([]), [teachers, setTeachers] = useState<Teacher[]>([]), [links, setLinks] = useState<TeacherLink[]>([]);
-  const [menu, setMenu] = useState(false), [faq, setFaq] = useState<number | null>(0), [form, setForm] = useState<Form>(initialForm), [state, setState] = useState<"idle" | "loading" | "success" | "error">("idle"), [message, setMessage] = useState("");
-  useEffect(() => { async function load() { const [b, c, t, l] = await Promise.all([supabase.from("branches").select("id,name,address").order("name"), supabase.from("classes").select("id,branch_id,name,status,schedule_days,schedule_start,schedule_end").eq("status", "active").order("name"), supabase.from("teachers").select("id,full_name,avatar_url,status").eq("status", "active").order("full_name"), supabase.from("class_teachers").select("class_id, teachers(id,full_name,avatar_url,status)")]); if (!b.error) setBranches(b.data ?? []); if (!c.error) setClasses(c.data ?? []); if (!t.error) setTeachers(t.data ?? []); if (!l.error) setLinks((l.data ?? []) as TeacherLink[]); } load(); }, [supabase]);
-  const branchMap = useMemo(() => new Map(branches.map((branch) => [branch.id, branch.name])), [branches]);
-  const update = (key: keyof Form, value: string) => { setForm((current) => ({ ...current, [key]: value })); setState("idle"); };
-  const goToForm = (classItem?: DanceClass) => { setMenu(false); if (classItem) setForm((current) => ({ ...current, classId: classItem.id, branchId: classItem.branch_id })); requestAnimationFrame(() => document.getElementById("dang-ky")?.scrollIntoView({ behavior: "smooth", block: "start" })); };
-  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (state === "loading") return; if (!form.parentName.trim() || !form.childName.trim() || !form.age.trim() || !form.phone.trim()) { setState("error"); setMessage("Vui lòng điền đủ các trường bắt buộc."); return; } if (!isValidAge(form.age)) { setState("error"); setMessage("Nhập tuổi (ví dụ: 7 tuổi) hoặc năm sinh hợp lệ."); return; } if (!/^[0-9+\s().-]{8,}$/.test(form.phone.trim())) { setState("error"); setMessage("Vui lòng nhập số điện thoại hợp lệ."); return; } if ((form.classId && !isUuid(form.classId)) || (form.branchId && !isUuid(form.branchId))) { setState("error"); setMessage("Thông tin lớp hoặc cơ sở chưa hợp lệ. Vui lòng chọn lại hoặc thử lại sau."); return; } setState("loading"); const payload = { parent_name: form.parentName.trim(), child_name: form.childName.trim(), child_age_or_birth_year: form.age.trim(), phone: form.phone.trim(), class_id: form.classId || null, branch_id: form.branchId || null, note: form.note.trim() || null, status: "new" }; const { error } = await supabase.from("trial_class_leads").insert(payload); if (error) { if (process.env.NODE_ENV !== "production") console.error("Trial class lead insert failed", { message: error.message, code: error.code, details: error.details, hint: error.hint, payload }); setState("error"); setMessage(error.code === "42P01" || error.code === "42501" ? "Hệ thống tiếp nhận đang được thiết lập. Vui lòng liên hệ ANGEL BK để được hỗ trợ." : "Không thể gửi đăng ký lúc này. Vui lòng thử lại sau."); return; } setState("success"); setMessage("ANGEL BK đã nhận thông tin đăng ký học thử. Chúng tôi sẽ liên hệ với bạn sớm."); setForm(initialForm); }
-  return <div className="angel-site"><header className="angel-header"><a href="#dau-trang" className="angel-logo" aria-label="ANGEL BK - Trang chủ"><span>ANGEL</span><small>BK · DANCE</small></a><button className="angel-menu" type="button" aria-expanded={menu} onClick={() => setMenu(!menu)}><span /><span /><span /><i className="sr-only">Mở menu</i></button><nav className={menu ? "angel-nav is-open" : "angel-nav"} aria-label="Điều hướng chính"><a href="#lop-hoc" onClick={() => setMenu(false)}>Lớp học</a><a href="#lich-hoc" onClick={() => setMenu(false)}>Lịch học</a><a href="#hanh-trinh" onClick={() => setMenu(false)}>Hành trình</a><a href="#faq" onClick={() => setMenu(false)}>Giải đáp</a><button type="button" className="angel-button small" onClick={() => goToForm()}>Đăng ký học thử</button></nav></header><main id="dau-trang">
-    <section className="angel-hero"><div className="hero-copy"><p className="eyebrow">CLB NHẢY DÀNH CHO CÁC BẠN NHỎ</p><h1>ANGEL <em>BK</em></h1><p className="hero-slogan">Mỗi bước nhảy –<br />một bước trưởng thành.</p><p className="hero-intro">Nơi các bạn nhỏ khám phá nhịp điệu, chuyển động và niềm vui được là chính mình.</p><div className="hero-actions"><button className="angel-button" onClick={() => goToForm()}>Đăng ký học thử <b>→</b></button><a href="#lop-hoc" className="angel-link">Xem các lớp học <b>↓</b></a></div></div><MediaFrame src={publicMedia.hero} className="hero-visual" label="Không gian sáng tạo của ANGEL BK" title="ANGEL BK" subtitle="YOUR MOMENT TO MOVE" /></section>
-    <section className="angel-section benefits"><div className="section-heading"><p className="eyebrow">KHÔNG CHỈ LÀ NHỮNG BƯỚC NHẢY</p><h2>Mỗi buổi học là một<br /><em>khoảng trời mới.</em></h2></div><div className="benefit-grid">{benefits.map(([icon, title, text]) => <article className="benefit-card" key={title}><span>{icon}</span><h3>{title}</h3><p>{text}</p></article>)}</div></section>
-    <section className="angel-section class-time"><MediaFrame src={publicMedia.classSession} className="class-time-visual" label="Một buổi học tại ANGEL BK" title="CHUYỂN ĐỘNG · ÂM NHẠC · NIỀM VUI" subtitle="Cùng khám phá từng nhịp điệu" /><div className="class-time-copy"><p className="eyebrow">MỘT BUỔI HỌC TẠI ANGEL BK</p><h2>Khởi động,<br /><em>khám phá và tỏa sáng.</em></h2><p>Không gian nội dung này được thiết kế sẵn để đội ngũ bổ sung ảnh hoặc video chân thực về từng buổi học sau này.</p><ol><li><b>01</b> Chào đón & khởi động</li><li><b>02</b> Làm quen nhịp điệu, động tác</li><li><b>03</b> Luyện tập cùng nhóm</li><li><b>04</b> Thả lỏng & nhìn lại buổi học</li></ol></div></section>
-    <section className="angel-section classes" id="lop-hoc"><div className="section-heading split"><div><p className="eyebrow">TÌM LỚP PHÙ HỢP</p><h2>Các lớp học<br /><em>đang mở.</em></h2></div><p>Thông tin lớp được hiển thị từ dữ liệu quản lý hiện có.</p></div>{classes.length ? <div className="class-grid">{classes.map((item, index) => <ClassCard key={item.id} item={item} index={index} branch={branchMap.get(item.branch_id)} teachers={linkedTeachers(links, item.id)} onRegister={goToForm} />)}</div> : <Empty title="Thông tin lớp đang được cập nhật" text="Hãy để lại nhu cầu học thử để ANGEL BK tư vấn lớp phù hợp cho bé." action={() => goToForm()} />}</section>
-    <section className="angel-section teachers"><div className="section-heading"><p className="eyebrow">ĐỒNG HÀNH CÙNG BÉ</p><h2>Giáo viên<br /><em>ANGEL BK.</em></h2></div>{teachers.length ? <div className="teacher-grid">{teachers.map((teacher) => <TeacherCard teacher={teacher} key={teacher.id} />)}</div> : <Empty title="Hồ sơ giáo viên sẽ sớm được cập nhật" text="Chúng tôi chỉ hiển thị thông tin chính xác, đã được ANGEL BK xác nhận." />}</section>
-    <section className="angel-section moments"><div className="section-heading split"><div><p className="eyebrow">KHOẢNH KHẮC ANGEL BK</p><h2>Chờ những câu chuyện<br /><em>thật được kể.</em></h2></div><p>Những khoảnh khắc chân thực của học viên sẽ được bổ sung tại đây.</p></div><div className="moment-grid"><MediaFrame src={publicMedia.gallery.students} className="moment-one" label="Khoảnh khắc học viên" title="HỌC VIÊN" subtitle="Những bước nhảy đầy niềm vui" /><MediaFrame src={publicMedia.gallery.class} className="moment-two" label="Khoảnh khắc lớp học" title="LỚP HỌC" subtitle="Cùng nhau cảm nhận nhịp điệu" /><MediaFrame src={publicMedia.gallery.videoPoster} className="moment-three" label="Video ANGEL BK" title="VIDEO" subtitle="Những câu chuyện đang chờ được kể" /></div></section>
-    <section className="angel-section journey" id="hanh-trinh"><p className="eyebrow">HÀNH TRÌNH HỌC VIÊN</p><h2>Bắt đầu từ một<br /><em>nhịp đếm nhỏ.</em></h2><div className="journey-track">{["Ngày đầu", "Làm quen", "Tiến bộ", "Tự tin", "Biểu diễn"].map((step, index) => <div className="journey-step" key={step}><span>0{index + 1}</span><strong>{step}</strong></div>)}</div></section>
-    <section className="angel-section schedule" id="lich-hoc"><div className="section-heading split"><div><p className="eyebrow">LỊCH HỌC</p><h2>Chọn nhịp điệu<br /><em>phù hợp.</em></h2></div><button className="angel-button outline" onClick={() => goToForm()}>Nhận tư vấn lịch học</button></div>{classes.length ? <div className="schedule-list">{classes.map((item) => <article key={item.id}><div><span>{branchMap.get(item.branch_id) ?? "Cơ sở đang cập nhật"}</span><h3>{presentClassName(item.name)}</h3></div><div className="schedule-detail"><p>{dayText(item)}</p><p>{timeText(item)}</p>{linkedTeachers(links, item.id).length > 0 && <p>{linkedTeachers(links, item.id).map((teacher) => teacher.full_name).join(" · ")}</p>}</div><button className="text-button" onClick={() => goToForm(item)}>Đăng ký <b>→</b></button></article>)}</div> : <Empty title="Chưa có lịch công khai" text="Để lại thông tin để được tư vấn lịch học phù hợp." action={() => goToForm()} />}</section>
-    <section className="angel-section future-sections"><div><p className="eyebrow">THÀNH TÍCH & HOẠT ĐỘNG</p><h2>Những dấu mốc<br /><em>sẽ được cập nhật.</em></h2><p>ANGEL BK chưa có dữ liệu công khai phù hợp để hiển thị tại đây.</p></div><div><p className="eyebrow">PHỤ HUYNH NÓI GÌ</p><h2>Lắng nghe từ<br /><em>những trải nghiệm thật.</em></h2><p>Nhận xét sẽ chỉ xuất hiện khi có sự đồng ý và nội dung xác thực từ phụ huynh.</p></div></section>
-    <section className="angel-section faq" id="faq"><div className="section-heading"><p className="eyebrow">GIẢI ĐÁP NHANH</p><h2>Bạn đang<br /><em>băn khoăn điều gì?</em></h2></div><div className="faq-list">{faqs.map(([question, answer], index) => <article key={question} className={faq === index ? "open" : ""}><button type="button" aria-expanded={faq === index} onClick={() => setFaq(faq === index ? null : index)}><span>{question}</span><b>{faq === index ? "−" : "+"}</b></button>{faq === index && <p>{answer}</p>}</article>)}</div></section>
-    <section className="angel-section signup" id="dang-ky"><div className="signup-copy"><p className="eyebrow">BẮT ĐẦU HÀNH TRÌNH</p><h2>Sẵn sàng cho<br /><em>bước nhảy đầu tiên?</em></h2><p>Để lại thông tin để ANGEL BK có thể tư vấn lớp học phù hợp nhất cho bé.</p><div className="signup-deco">ANGEL<br />BK</div></div><form className="signup-form" onSubmit={submit} noValidate><Field label="Tên phụ huynh" value={form.parentName} onChange={(value) => update("parentName", value)} required /><Field label="Tên bé" value={form.childName} onChange={(value) => update("childName", value)} required /><div className="two-fields"><Field label="Tuổi/năm sinh" value={form.age} onChange={(value) => update("age", value)} required placeholder="VD: 7 tuổi / 2019" /><Field label="Số điện thoại" value={form.phone} onChange={(value) => update("phone", value)} required inputMode="tel" /></div><div className="two-fields"><label>Lớp quan tâm<select value={form.classId} onChange={(event) => update("classId", event.target.value)}><option value="">Chọn lớp</option>{classes.map((item) => <option key={item.id} value={item.id}>{presentClassName(item.name)}</option>)}</select></label><label>Cơ sở<select value={form.branchId} onChange={(event) => update("branchId", event.target.value)}><option value="">Chọn cơ sở</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label></div><label>Ghi chú<textarea value={form.note} onChange={(event) => update("note", event.target.value)} rows={3} placeholder="Điều bạn muốn ANGEL BK biết thêm" /></label>{state !== "idle" && <p className={`form-message ${state}`} role="status">{state === "loading" ? "Đang gửi đăng ký..." : message}</p>}<button className="angel-button submit" type="submit" disabled={state === "loading"}>{state === "loading" ? "Đang gửi..." : "Đăng ký học thử"} <b>→</b></button><small>Bằng việc gửi biểu mẫu, bạn đồng ý để ANGEL BK liên hệ tư vấn về lớp học.</small></form></section>
-  </main><footer className="angel-footer"><a href="#dau-trang" className="angel-logo"><span>ANGEL</span><small>BK · DANCE</small></a><p>© {new Date().getFullYear()} ANGEL BK. Mỗi bước nhảy – một bước trưởng thành.</p><a href="#dau-trang">Lên đầu trang ↑</a></footer></div>;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [form, setForm] = useState<FormState>(initialForm);
+  const [submitState, setSubmitState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  const update = (field: keyof FormState, value: string) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    if (submitState !== "idle") setSubmitState("idle");
+  };
+
+  const scrollToSignup = (program?: string) => {
+    setMenuOpen(false);
+    if (program) setForm((current) => ({ ...current, program }));
+    requestAnimationFrame(() => {
+      document.getElementById("dang-ky")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitState === "loading") return;
+
+    if (!form.parentName.trim() || !form.childName.trim() || !form.age.trim() || !form.phone.trim()) {
+      setSubmitState("error");
+      setMessage("Vui lòng điền đủ các trường bắt buộc.");
+      return;
+    }
+    if (!isValidAge(form.age)) {
+      setSubmitState("error");
+      setMessage("Nhập tuổi hoặc năm sinh hợp lệ của bé.");
+      return;
+    }
+    if (!/^[0-9+\s().-]{8,}$/.test(form.phone.trim())) {
+      setSubmitState("error");
+      setMessage("Vui lòng nhập số điện thoại hợp lệ.");
+      return;
+    }
+
+    setSubmitState("loading");
+    const details = [
+      form.program && `Chương trình quan tâm: ${form.program}`,
+      form.branch && `Cơ sở mong muốn: ${form.branch}`,
+      form.note.trim(),
+    ].filter(Boolean);
+    const payload = {
+      parent_name: form.parentName.trim(),
+      child_name: form.childName.trim(),
+      child_age_or_birth_year: form.age.trim(),
+      phone: form.phone.trim(),
+      class_id: null,
+      branch_id: null,
+      note: details.length ? details.join("\n") : null,
+      status: "new",
+    };
+    const { error } = await supabase.from("trial_class_leads").insert(payload);
+
+    if (error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.error("Trial class lead insert failed", { message: error.message, code: error.code });
+      }
+      setSubmitState("error");
+      setMessage("Chưa thể gửi đăng ký lúc này. Vui lòng gọi 0933 309 336 để được hỗ trợ.");
+      return;
+    }
+
+    setSubmitState("success");
+    setMessage("ANGEL BK đã nhận thông tin. Đội ngũ sẽ liên hệ với bạn sớm.");
+    setForm(initialForm);
+  }
+
+  return (
+    <div className="abk-public" id="dau-trang">
+      <header className="abk-header">
+        <a className="abk-logo" href="#dau-trang" aria-label="ANGEL BK — Trang chủ">
+          <Image src="/images/angelbk/brand/angel-bk-logo.webp" alt="ANGEL BK" width={720} height={675} priority />
+        </a>
+        <button className="abk-menu-button" type="button" aria-label="Mở menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+          <span /><span />
+        </button>
+        <nav className={menuOpen ? "abk-nav is-open" : "abk-nav"} aria-label="Điều hướng chính">
+          <a href="#lop-hoc" onClick={() => setMenuOpen(false)}>Lớp học</a>
+          <a href="#san-khau" onClick={() => setMenuOpen(false)}>Sân khấu</a>
+          <a href="#giao-vien" onClick={() => setMenuOpen(false)}>Giáo viên</a>
+          <a href="#co-so" onClick={() => setMenuOpen(false)}>Cơ sở</a>
+          <a href="#hoat-dong" onClick={() => setMenuOpen(false)}>Hoạt động</a>
+          <a className="abk-nav-video" href="https://video.angelbk.vn">Video của bé ↗</a>
+          <button className="abk-button abk-button-small" type="button" onClick={() => scrollToSignup()}>Đăng ký học thử</button>
+        </nav>
+      </header>
+
+      <main>
+        <section className="abk-hero">
+          <div className="abk-hero-copy">
+            <p className="abk-kicker">CLB NHẢY DÀNH CHO TRẺ EM · TP.HCM</p>
+            <h1><span>DANCE.</span><span>HIPHOP.</span><span>PERFORM.</span></h1>
+            <p className="abk-hero-slogan">Mỗi bước nhảy —<br />một bước trưởng thành.</p>
+            <div className="abk-hero-actions">
+              <button className="abk-button" type="button" onClick={() => scrollToSignup()}>Đăng ký học thử <b>↗</b></button>
+              <a className="abk-text-link" href="#lop-hoc">Khám phá lớp học <b>↓</b></a>
+            </div>
+          </div>
+          <div className="abk-hero-image">
+            <Image src="/images/angelbk/hero/angel-bk-dance-crew.webp" alt="Đội nhảy thiếu nhi ANGEL BK" fill priority sizes="(max-width: 800px) 100vw, 58vw" />
+          </div>
+        </section>
+
+        <div className="abk-marquee" aria-label="Thông điệp ANGEL BK">
+          <div>MOVE · GROW · SHINE · MOVE · GROW · SHINE · MOVE · GROW · SHINE ·</div>
+        </div>
+
+        <section className="abk-section abk-programs" id="lop-hoc">
+          <SectionIntro eyebrow="TÌM NHỊP ĐIỆU CỦA CON" title={<>Một nơi để con<br /><em>bật chất riêng.</em></>} text="Từ những bước nền tảng đến sân khấu biểu diễn, mỗi chương trình đều giúp con vận động, kết nối và tự tin hơn." />
+          <div className="abk-program-grid">
+            {programs.map((program, index) => (
+              <article className="abk-program-card" key={program.title}>
+                <div className="abk-program-image">
+                  <Image src={program.image} alt={program.title} fill sizes="(max-width: 800px) 100vw, 50vw" style={{ objectPosition: program.crop }} />
+                  <span>0{index + 1}</span>
+                </div>
+                <div className="abk-program-copy">
+                  <p>{program.label}</p>
+                  <h3>{program.title}</h3>
+                  <span>{program.description}</span>
+                  <button type="button" onClick={() => scrollToSignup(program.title)}>Chọn chương trình <b>→</b></button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="abk-experience" id="co-so">
+          <div className="abk-experience-gallery">
+            <div className="abk-experience-main"><Image src="/images/angelbk/experience/teacher-coaching.webp" alt="Giáo viên ANGEL BK hướng dẫn học viên" fill sizes="(max-width: 800px) 100vw, 44vw" /></div>
+            <div className="abk-experience-small"><Image src="/images/angelbk/experience/team-training.webp" alt="Các học viên cùng tập luyện tại ANGEL BK" fill sizes="(max-width: 800px) 54vw, 28vw" /></div>
+          </div>
+          <div className="abk-experience-copy">
+            <p className="abk-kicker">KHÔNG GIAN ĐỂ LỚN LÊN</p>
+            <h2>Tập hết mình.<br /><em>Vui đúng chất.</em></h2>
+            <p>Mỗi buổi tập là một trải nghiệm có nhịp điệu, có đồng đội và có những cột mốc để con tự hào về chính mình.</p>
+            <div className="abk-branch-list">
+              {branches.map((branch, index) => (
+                <article key={branch.name}>
+                  <span>0{index + 1}</span>
+                  <div><h3>{branch.name}</h3><p>{branch.address}</p><small>{branch.detail}</small></div>
+                </article>
+              ))}
+            </div>
+            <button className="abk-button abk-button-light" type="button" onClick={() => scrollToSignup()}>Chọn cơ sở gần bạn <b>→</b></button>
+          </div>
+        </section>
+
+        <section className="abk-stage" id="san-khau">
+          <div className="abk-stage-image">
+            <Image src="/images/angelbk/stage/hiphop-performance.webp" alt="Học viên ANGEL BK biểu diễn trên sân khấu" fill sizes="100vw" />
+          </div>
+          <div className="abk-stage-overlay">
+            <p className="abk-kicker">TỪ PHÒNG TẬP ĐẾN SÂN KHẤU</p>
+            <h2>Không chỉ học nhảy.<br /><em>Con học cách tỏa sáng.</em></h2>
+            <div className="abk-stage-steps"><span>01 <b>TRAIN</b></span><span>02 <b>PERFORM</b></span><span>03 <b>GROW</b></span></div>
+          </div>
+          <div className="abk-stage-card">
+            <Image src="/images/angelbk/stage/kids-stage-crew.webp" alt="Nhóm học viên nhỏ tuổi ANGEL BK biểu diễn" fill sizes="(max-width: 800px) 62vw, 26vw" />
+            <p>Sân khấu thật.<br /><strong>Kỷ niệm thật.</strong></p>
+          </div>
+        </section>
+
+        <section className="abk-section abk-teachers" id="giao-vien">
+          <SectionIntro eyebrow="NGƯỜI ĐỒNG HÀNH" title={<>Dẫn nhịp bằng<br /><em>chuyên môn & cảm hứng.</em></>} text="Đội ngũ giáo viên trực tiếp hướng dẫn, quan sát và giúp mỗi học viên tiến bộ theo nhịp độ riêng." />
+          <div className="abk-teacher-grid">
+            {teachers.map((teacher, index) => (
+              <article className="abk-teacher-card" key={teacher.name}>
+                <div><Image src={teacher.image} alt={teacher.name} fill sizes="(max-width: 800px) 50vw, 25vw" style={{ objectPosition: teacher.crop }} /></div>
+                <p><span>0{index + 1}</span> GIÁO VIÊN</p>
+                <h3>{teacher.name}</h3>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="abk-section abk-activities" id="hoat-dong">
+          <SectionIntro eyebrow="MỖI HOẠT ĐỘNG, MỘT CÂU CHUYỆN" title={<>Vận động hôm nay.<br /><em>Kỷ niệm ngày mai.</em></>} text="Workshop, dự án hình ảnh và những hoạt động đặc biệt giúp thế giới của con rộng hơn sau mỗi bước nhảy." />
+          <div className="abk-activity-grid">
+            <article><Image src="/images/angelbk/activities/vietnam-concept.webp" alt="Hoạt động chủ đề Việt Nam của ANGEL BK" fill sizes="(max-width: 800px) 100vw, 50vw" /><div><span>CONCEPT PROJECT</span><h3>Chất Việt trong từng chuyển động.</h3></div></article>
+            <article><Image src="/images/angelbk/activities/ao-dai-concept.webp" alt="Dự án áo dài của học viên ANGEL BK" fill sizes="(max-width: 800px) 100vw, 50vw" /><div><span>ANGEL BK MOMENTS</span><h3>Cá tính mới, cảm hứng mới.</h3></div></article>
+          </div>
+        </section>
+
+        <section className="abk-video-cta">
+          <div><p className="abk-kicker">VIDEO CỦA BÉ</p><h2>Khoảnh khắc của con.<br /><em>Một chạm để xem lại.</em></h2></div>
+          <a className="abk-round-link" href="https://video.angelbk.vn" aria-label="Mở trang Video của bé">PLAY<br />↗</a>
+          <p>Truy cập kho video riêng của ANGEL BK để tìm và xem lại những màn trình diễn đáng nhớ.</p>
+        </section>
+
+        <section className="abk-signup" id="dang-ky">
+          <div className="abk-signup-visual">
+            <Image src="/images/angelbk/cta/angel-bk-stage-community.webp" alt="Cộng đồng học viên ANGEL BK trên sân khấu" fill sizes="(max-width: 800px) 100vw, 48vw" />
+            <div><span>READY?</span><strong>LET&apos;S<br />MOVE.</strong></div>
+          </div>
+          <div className="abk-signup-content">
+            <p className="abk-kicker">BƯỚC NHẢY ĐẦU TIÊN</p>
+            <h2>Đăng ký<br /><em>học thử.</em></h2>
+            <p className="abk-signup-intro">Để lại thông tin, ANGEL BK sẽ liên hệ và tư vấn lớp phù hợp cho bé.</p>
+            <form onSubmit={submit} noValidate>
+              <div className="abk-form-grid">
+                <Field label="Tên phụ huynh" value={form.parentName} onChange={(value) => update("parentName", value)} required />
+                <Field label="Tên bé" value={form.childName} onChange={(value) => update("childName", value)} required />
+                <Field label="Tuổi / năm sinh" value={form.age} onChange={(value) => update("age", value)} required placeholder="VD: 7 tuổi / 2019" />
+                <Field label="Số điện thoại" value={form.phone} onChange={(value) => update("phone", value)} required inputMode="tel" />
+                <SelectField label="Chương trình" value={form.program} onChange={(value) => update("program", value)} options={programs.map((program) => program.title)} />
+                <SelectField label="Cơ sở" value={form.branch} onChange={(value) => update("branch", value)} options={branches.map((branch) => branch.name)} />
+              </div>
+              <label className="abk-field">Ghi chú<textarea rows={3} value={form.note} onChange={(event) => update("note", event.target.value)} placeholder="Điều bạn muốn ANGEL BK biết thêm" /></label>
+              {submitState !== "idle" && <p className={`abk-form-message ${submitState}`} role="status">{submitState === "loading" ? "Đang gửi đăng ký…" : message}</p>}
+              <button className="abk-button abk-submit" type="submit" disabled={submitState === "loading"}>{submitState === "loading" ? "Đang gửi…" : "Gửi đăng ký"} <b>↗</b></button>
+              <small>Bằng việc gửi biểu mẫu, bạn đồng ý để ANGEL BK liên hệ tư vấn lớp học.</small>
+            </form>
+          </div>
+        </section>
+      </main>
+
+      <footer className="abk-footer">
+        <div className="abk-footer-brand"><Image src="/images/angelbk/brand/angel-bk-logo.webp" alt="ANGEL BK" width={160} height={80} /><p>Mỗi bước nhảy — một bước trưởng thành.</p></div>
+        <div><h3>Địa chỉ</h3>{branches.map((branch) => <p key={branch.name}><b>{branch.name}</b> · {branch.address}</p>)}</div>
+        <div><h3>Liên hệ</h3><a href="tel:0933309336">0933 309 336</a><a href="https://video.angelbk.vn">Video của bé ↗</a></div>
+        <button className="abk-button abk-button-light" type="button" onClick={() => scrollToSignup()}>Đăng ký học thử</button>
+        <p className="abk-copyright">© {new Date().getFullYear()} ANGEL BK. All moves reserved.</p>
+      </footer>
+
+      <div className="abk-mobile-actions">
+        <button type="button" onClick={() => scrollToSignup()}>Đăng ký học thử ↗</button>
+        <a href="https://video.angelbk.vn">Video của bé ↗</a>
+      </div>
+    </div>
+  );
 }
-function MediaFrame({ src, className, label, title, subtitle }: { src: string; className: string; label: string; title: string; subtitle: string }) { const [broken, setBroken] = useState(false); return <div className={`${className} media-frame ${broken ? "is-placeholder" : ""}`}>{!broken && <Image src={src} alt={label} fill sizes="(max-width: 760px) 100vw, 50vw" unoptimized onError={() => setBroken(true)} />}{broken && <><div className="orb one" /><div className="orb two" /></>}<div className="media-copy"><strong>{title}</strong><small>{subtitle}</small></div></div>; }
-function ClassCard({ item, index, branch, teachers, onRegister }: { item: DanceClass; index: number; branch?: string; teachers: Teacher[]; onRegister: (item: DanceClass) => void }) { return <article className="class-card"><MediaFrame src={classImagePath(item.id)} className={`class-image image-${index % 3}`} label={`Lớp ${presentClassName(item.name)}`} title={presentClassName(item.name)} subtitle="ANGEL BK" /><div className="class-card-body"><p className="card-kicker">{branch ?? "Cơ sở đang cập nhật"}</p><h3>{presentClassName(item.name)}</h3><dl><div><dt>Ngày học</dt><dd>{dayText(item)}</dd></div><div><dt>Giờ học</dt><dd>{timeText(item)}</dd></div>{teachers.length > 0 && <div><dt>Giáo viên</dt><dd>{teachers.map((teacher) => teacher.full_name).join(" · ")}</dd></div>}</dl><button className="text-button" onClick={() => onRegister(item)}>Đăng ký học thử <b>→</b></button></div></article>; }
-function TeacherCard({ teacher }: { teacher: Teacher }) { const [broken, setBroken] = useState(false); const source = teacher.avatar_url || teacherImagePath(teacher.id); return <article className="teacher-card"><div className="teacher-image">{!broken && <Image src={source} alt={teacher.full_name} fill sizes="(max-width: 760px) 100vw, 33vw" unoptimized onError={() => setBroken(true)} />}{broken && <div className="teacher-silhouette" aria-hidden="true"><i /></div>}</div><div><p>GIÁO VIÊN</p><h3>{teacher.full_name}</h3></div></article>; }
-function Empty({ title, text, action }: { title: string; text: string; action?: () => void }) { return <div className="empty-panel"><span>✦</span><h3>{title}</h3><p>{text}</p>{action && <button className="text-button" onClick={action}>Đăng ký nhận tư vấn <b>→</b></button>}</div>; }
-function Field({ label, value, onChange, required, placeholder, inputMode }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; placeholder?: string; inputMode?: "tel" }) { return <label>{label} {required && <sup>*</sup>}<input value={value} onChange={(event) => onChange(event.target.value)} required={required} placeholder={placeholder} inputMode={inputMode} /></label>; }
+
+function SectionIntro({ eyebrow, title, text }: { eyebrow: string; title: React.ReactNode; text: string }) {
+  return <div className="abk-section-intro"><div><p className="abk-kicker">{eyebrow}</p><h2>{title}</h2></div><p>{text}</p></div>;
+}
+
+function Field({ label, value, onChange, required, placeholder, inputMode }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; placeholder?: string; inputMode?: "tel" }) {
+  return <label className="abk-field">{label}{required && <sup>*</sup>}<input value={value} onChange={(event) => onChange(event.target.value)} required={required} placeholder={placeholder} inputMode={inputMode} /></label>;
+}
+
+function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: readonly string[] }) {
+  return <label className="abk-field">{label}<select value={value} onChange={(event) => onChange(event.target.value)}><option value="">Chọn {label.toLowerCase()}</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>;
+}

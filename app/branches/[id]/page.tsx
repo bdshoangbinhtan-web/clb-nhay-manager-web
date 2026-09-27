@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { activeStaffRole } from "@/lib/active-staff-role";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type ClassItem = {
   id: string;
@@ -213,6 +214,8 @@ export default function ClassDetailPage() {
       loadRequestRef.current += 1;
     };
   }, [loadClass, supabase]);
+
+  useRealtimeRefresh(["classes"], loadClass);
 
   async function addTeacher() {
     if (!selectedTeacherId) {

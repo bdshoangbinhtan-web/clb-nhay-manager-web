@@ -149,5 +149,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Public marketing assets must bypass authentication so Next/Image can load
+  // them for the public homepage without being redirected to /login.
+  matcher: ["/((?!_next/static|_next/image|images/|favicon.ico).*)"],
 };

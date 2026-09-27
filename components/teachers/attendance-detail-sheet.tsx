@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type AuditEvent = {
   action: "INSERT" | "UPDATE";
@@ -65,6 +66,7 @@ export function AttendanceDetailSheet({
   }, [month, supabase, teacher.id]);
 
   useEffect(() => void load(), [load]);
+  useRealtimeRefresh(["attendance"], load);
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();

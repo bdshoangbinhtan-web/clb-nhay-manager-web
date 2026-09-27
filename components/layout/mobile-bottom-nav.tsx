@@ -11,7 +11,6 @@ type Role = "admin" | "manager" | "teacher" | "";
 const primaryItems = [
   { label: "Trang chủ", icon: "⌂", href: "/dashboard", match: ["/dashboard"] },
   { label: "Học viên", icon: "♙", href: "/students", match: ["/students"] },
-  { label: "Điểm danh", icon: "✓", href: "/attendance", match: ["/attendance", "/attendance-history"] },
   { label: "Học phí", icon: "₫", href: "/tuition", match: ["/tuition"] },
 ] as const;
 const moreItems = [
@@ -19,6 +18,7 @@ const moreItems = [
   ["Giáo viên", "Quản lý đội ngũ", "👨‍🏫", "/teachers"], ["Lương", "Bảng lương giáo viên", "💵", "/teacher-payroll"],
   ["Chi phí", "Theo dõi khoản chi", "💸", "/expenses"], ["Thu khác", "Các khoản thu ngoài học phí", "💰", "/other-revenue"],
   ["Báo cáo", "Tổng hợp hoạt động", "📊", "/reports"],
+  ["Đăng ký từ WEB", "Gia đình đăng ký trên website", "✨", "/dashboard/trial-leads"],
   ["Học thử", "Quản lý học viên học thử", "🎟️", "/trial-students"], ["Sức khỏe dữ liệu", "Kiểm tra tính toàn vẹn", "🛡️", "/system-integrity"],
   ["Cài đặt", "Thiết lập hệ thống", "⚙️", "/settings"],
 ] as const;

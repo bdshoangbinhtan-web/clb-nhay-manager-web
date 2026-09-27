@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type Status = "new" | "contacted" | "trial_booked" | "converted" | "closed";
 type Lead = { id: string; parent_name: string; child_name: string; child_age_or_birth_year: string; phone: string; class_id: string | null; branch_id: string | null; note: string | null; status: Status; created_at: string };
@@ -27,6 +28,7 @@ export default function TrialLeadsPage() {
   const [loading, setLoading] = useState(true), [saving, setSaving] = useState<string | null>(null), [error, setError] = useState(""), [query, setQuery] = useState(""), [filter, setFilter] = useState<"all" | Status>("all"), [selected, setSelected] = useState<Lead | null>(null);
   const load = useCallback(async () => { setLoading(true); setError(""); const [leadResult, classResult, branchResult] = await Promise.all([supabase.from("trial_class_leads").select("id,parent_name,child_name,child_age_or_birth_year,phone,class_id,branch_id,note,status,created_at").order("created_at", { ascending: false }), supabase.from("classes").select("id,name").order("name"), supabase.from("branches").select("id,name").order("name")]); if (leadResult.error) { setError("Không thể tải đăng ký học thử. Bạn cần quyền quản lý để xem dữ liệu này."); if (process.env.NODE_ENV !== "production") console.error("Trial leads load failed", leadResult.error); } else setLeads((leadResult.data ?? []) as Lead[]); if (!classResult.error) setClasses(classResult.data ?? []); if (!branchResult.error) setBranches(branchResult.data ?? []); setLoading(false); }, [supabase]);
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh(["trials"], load);
   const classMap = useMemo(() => new Map(classes.map((item) => [item.id, item.name])), [classes]); const branchMap = useMemo(() => new Map(branches.map((item) => [item.id, item.name])), [branches]);
   const visible = useMemo(() => leads.filter((lead) => (filter === "all" || lead.status === filter) && `${lead.parent_name} ${lead.child_name} ${lead.phone}`.toLowerCase().includes(query.trim().toLowerCase())), [leads, filter, query]);
   const count = (status?: Status) => status ? leads.filter((lead) => lead.status === status).length : leads.length;

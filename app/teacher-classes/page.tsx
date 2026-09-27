@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { scheduleIncludesDay } from "@/lib/class-schedule";
 import { vietnamScheduleDayKey, vietnamToday, vietnamTodayLabel } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type ClassItem = {
   id: string;
@@ -31,35 +32,38 @@ function TeacherClassesContent() {
   const showAll = searchParams.get("view") === "all";
   const today = vietnamToday();
 
-  useEffect(() => {
-    async function loadClasses() {
-      setLoading(true);
-      setError("");
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setError("Không xác định được tài khoản giáo viên."); setLoading(false); return; }
+  const loadClasses = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setError("Không xác định được tài khoản giáo viên."); setLoading(false); return; }
 
-      const { data: teacher } = await supabase.from("teachers").select("id").eq("profile_id", user.id).eq("status", "active").maybeSingle();
-      if (!teacher) { setError("Không tìm thấy tài khoản giáo viên."); setLoading(false); return; }
+    const { data: teacher } = await supabase.from("teachers").select("id").eq("profile_id", user.id).eq("status", "active").maybeSingle();
+    if (!teacher) { setError("Không tìm thấy tài khoản giáo viên."); setLoading(false); return; }
 
-      const { data, error: classesError } = await supabase.from("class_teachers").select(`teacher_id, classes (id,name,status,schedule_days,schedule_start,schedule_end)`).eq("teacher_id", teacher.id);
-      if (classesError) { console.error(classesError); setError("Không tải được danh sách lớp."); setLoading(false); return; }
+    const { data, error: classesError } = await supabase.from("class_teachers").select(`teacher_id, classes (id,name,status,schedule_days,schedule_start,schedule_end)`).eq("teacher_id", teacher.id);
+    if (classesError) { console.error(classesError); setError("Không tải được danh sách lớp."); setLoading(false); return; }
 
-      const assigned = ((data ?? []) as unknown as Assignment[]).map((row) => row.classes).filter((item): item is ClassItem => Boolean(item && item.status === "active"));
-      const classIds = assigned.map((item) => item.id);
-      const [memberships, attendance] = classIds.length ? await Promise.all([
-        supabase.from("class_students").select("class_id").in("class_id", classIds).eq("status", "active"),
-        supabase.from("attendance").select("class_id").in("class_id", classIds).eq("attendance_date", today),
-      ]) : [{ data: [] }, { data: [] }];
+    const assigned = ((data ?? []) as unknown as Assignment[]).map((row) => row.classes).filter((item): item is ClassItem => Boolean(item && item.status === "active"));
+    const classIds = assigned.map((item) => item.id);
+    const [memberships, attendance] = classIds.length ? await Promise.all([
+      supabase.from("class_students").select("class_id").in("class_id", classIds).eq("status", "active"),
+      supabase.from("attendance").select("class_id").in("class_id", classIds).eq("attendance_date", today),
+    ]) : [{ data: [] }, { data: [] }];
 
-      const counts: Record<string, number> = {};
-      ((memberships.data ?? []) as Membership[]).forEach((row) => { counts[row.class_id] = (counts[row.class_id] ?? 0) + 1; });
-      setClasses(assigned.sort((a, b) => (a.schedule_start ?? "99:99").localeCompare(b.schedule_start ?? "99:99")));
-      setStudentCounts(counts);
-      setAttendedIds(new Set(((attendance.data ?? []) as Attendance[]).map((row) => row.class_id)));
-      setLoading(false);
-    }
-    void loadClasses();
+    const counts: Record<string, number> = {};
+    ((memberships.data ?? []) as Membership[]).forEach((row) => { counts[row.class_id] = (counts[row.class_id] ?? 0) + 1; });
+    setClasses(assigned.sort((a, b) => (a.schedule_start ?? "99:99").localeCompare(b.schedule_start ?? "99:99")));
+    setStudentCounts(counts);
+    setAttendedIds(new Set(((attendance.data ?? []) as Attendance[]).map((row) => row.class_id)));
+    setLoading(false);
   }, [supabase, today]);
+
+  useEffect(() => {
+    void loadClasses();
+  }, [loadClasses]);
+
+  useRealtimeRefresh(["classes", "attendance"], loadClasses);
 
   const todayClasses = classes.filter((item) => scheduleIncludesDay(item.schedule_days, vietnamScheduleDayKey()));
   const displayedClasses = showAll ? classes : todayClasses;

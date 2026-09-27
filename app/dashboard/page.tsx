@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import { activeStaffRole } from "@/lib/active-staff-role";
 import {
   EmptyState,
@@ -323,6 +324,8 @@ export default function DashboardPage() {
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  useRealtimeRefresh(["dashboard"], loadDashboard);
 
   useEffect(() => {
     const savedSearch = window.sessionStorage.getItem("abk-dashboard-search");
@@ -821,7 +824,7 @@ export default function DashboardPage() {
         <section className="abk-section" aria-labelledby="mobile-attention-title">
           <h2 id="mobile-attention-title" className="abk-section-title text-lg">Việc cần làm</h2>
           <div className="abk-mobile-card overflow-hidden">
-            {todayClasses.map((item) => <MobileListRow key={item.id} href="/attendance" leading={item.schedule_start?.slice(0, 5) ?? "♪"} title={item.name} subtitle={`${item.studentCount} học viên · ${mobileClassStatus(item.id, item.schedule_start)}`} />)}
+            {todayClasses.map((item) => <MobileListRow key={item.id} href="/students/attendance" leading={item.schedule_start?.slice(0, 5) ?? "♪"} title={item.name} subtitle={`${item.studentCount} học viên · ${mobileClassStatus(item.id, item.schedule_start)}`} />)}
             {pendingSubstitutionCount > 0 ? <MobileListRow href="/teacher-payroll/substitution" leading="🔄" title={`${pendingSubstitutionCount} yêu cầu dạy thay`} subtitle="Đang chờ duyệt" /> : null}
             {role === "admin" && smartAlerts.payrollPendingCount > 0 ? <MobileListRow href="/teacher-payroll" leading="◷" title={`${smartAlerts.payrollPendingCount} giáo viên chưa chốt lương`} subtitle={`Đã chốt ${smartAlerts.payrollCompletedCount}/${smartAlerts.activeTeachersCount}`} /> : null}
             {!loading && todayClasses.length === 0 && pendingSubstitutionCount === 0 && (role !== "admin" || smartAlerts.payrollPendingCount === 0) ? <EmptyState icon="✓" title="Hôm nay chưa có việc cần xử lý" description="Các đầu việc mới sẽ xuất hiện tại đây." /> : null}

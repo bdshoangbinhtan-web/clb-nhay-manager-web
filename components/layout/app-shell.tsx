@@ -5,6 +5,7 @@ import { useState } from "react";
 import Sidebar from "./sidebar";
 import Header from "./header";
 import MobileBottomNav from "./mobile-bottom-nav";
+import { GlobalRealtimeProvider } from "@/components/realtime/global-realtime-provider";
 
 export default function AppShell({
   children,
@@ -19,17 +20,19 @@ export default function AppShell({
   }
 
   return (
-    <div className="min-h-screen">
-      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
+    <GlobalRealtimeProvider>
+      <div className="min-h-screen">
+        <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
 
-      <div className="app-main ml-0 min-h-screen lg:ml-[264px]">
-        <Header onMenu={() => setMenuOpen(true)} />
+        <div className="app-main ml-0 min-h-screen lg:ml-[264px]">
+          <Header onMenu={() => setMenuOpen(true)} />
 
-        <main className="px-4 py-5 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:py-7 lg:pb-7">
-          {children}
-        </main>
-        <MobileBottomNav />
+          <main className="px-4 py-5 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:py-7 lg:pb-7">
+            {children}
+          </main>
+          <MobileBottomNav />
+        </div>
       </div>
-    </div>
+    </GlobalRealtimeProvider>
   );
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamToday } from "@/lib/vietnam-date";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type ClassItem = {
   id: string;
@@ -113,6 +114,11 @@ export default function TeacherTrialStudentsPage() {
   useEffect(() => {
     void loadTrialStudents();
   }, [loadTrialStudents]);
+
+  useRealtimeRefresh(["trials"], async () => {
+    await loadClasses();
+    await loadTrialStudents();
+  });
 
   async function saveTrialStudent() {
     if (!classId) {
