@@ -12,8 +12,16 @@ import {
   getMembershipTuitionStatus,
   monthKey,
   periodDate,
+  TUITION_TRACKING_START_MONTH,
   type TuitionMembership,
 } from "@/lib/tuition/due-status";
+
+function defaultTrackedMonth() {
+  const currentMonth = vietnamCurrentMonth();
+  return currentMonth < TUITION_TRACKING_START_MONTH
+    ? TUITION_TRACKING_START_MONTH
+    : currentMonth;
+}
 
 type Student = {
   id: string;
@@ -188,6 +196,7 @@ function suggestedTuitionAmount(
 export default function TuitionPage() {
   const supabase = useMemo(() => createClient(), []);
   const loadRequestRef = useRef(0);
+  const collectionRequestIdRef = useRef<string | null>(null);
   const newStudentPrefillRef = useRef(false);
   const urlContextAppliedRef = useRef(false);
 
@@ -209,9 +218,7 @@ export default function TuitionPage() {
   const [visibleTuitionCount, setVisibleTuitionCount] = useState(
     TUITION_PER_BATCH
   );
-  const [billingMonth, setBillingMonth] = useState(
-    vietnamCurrentMonth()
-  );
+  const [billingMonth, setBillingMonth] = useState(defaultTrackedMonth);
 
   const [studentId, setStudentId] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
@@ -221,7 +228,7 @@ export default function TuitionPage() {
   const [amountDue, setAmountDue] = useState("");
   const [amountToCollect, setAmountToCollect] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
-  const [collectionMonth, setCollectionMonth] = useState(vietnamCurrentMonth());
+  const [collectionMonth, setCollectionMonth] = useState(defaultTrackedMonth);
   const [manualPeriod, setManualPeriod] = useState(false);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -471,6 +478,7 @@ export default function TuitionPage() {
   );
 
   const currentMonth = vietnamCurrentMonth();
+  const viewingPreLaunchMonth = billingMonth < TUITION_TRACKING_START_MONTH;
 
   const tuitionForDueStatus = useMemo(() => {
     return applyTuitionAdjustments(tuition, payments, tuitionAdjustments);
@@ -975,6 +983,7 @@ export default function TuitionPage() {
     setStudentClassIds(assignedClassIds);
     setClassId(initialClassId);
     setNote("");
+    collectionRequestIdRef.current = null;
     setShowForm(true);
     setIsNewStudentFlow(true);
 
@@ -1049,14 +1058,16 @@ export default function TuitionPage() {
     }
 
     setSaving(true);
+    collectionRequestIdRef.current ??= crypto.randomUUID();
     const receiptWindow = window.open("", "_blank");
-    const { data, error } = await supabase.rpc("collect_tuition_payment_atomic", {
+    const { data, error } = await supabase.rpc("collect_tuition_payment_idempotent_atomic", {
       p_student_id: studentId,
       p_class_id: classId,
       p_billing_month: periodDate(collectionMonth),
       p_amount_due: dueAmount,
       p_amount: amount,
       p_payment_method: paymentMethod,
+      p_client_request_id: collectionRequestIdRef.current,
       p_payment_date: null,
       p_note: noteParts.filter(Boolean).join(" · ") || null,
     });
@@ -1073,6 +1084,7 @@ export default function TuitionPage() {
       success?: boolean;
       payment_result?: { payment_id?: string };
       remaining_amount?: number | string;
+      already_processed?: boolean;
     } | null;
     if (!result?.success) {
       if (receiptWindow) receiptWindow.close();
@@ -1087,6 +1099,7 @@ export default function TuitionPage() {
     );
 
     const paymentId = result.payment_result?.payment_id;
+    collectionRequestIdRef.current = null;
     setShowForm(false);
     setIsNewStudentFlow(false);
     setStudentId("");
@@ -1186,6 +1199,7 @@ export default function TuitionPage() {
     setAmountToCollect(String(amount));
     setPaymentMethod(method);
     setNote("");
+    collectionRequestIdRef.current = null;
     setShowForm(true);
     window.setTimeout(() => document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
   }
@@ -1316,6 +1330,28 @@ export default function TuitionPage() {
     ? tuitionForDueStatus.find((item) => item.id === selectedCollectionRecord.id)
     : undefined;
 
+  function selectStudentForCollection(student: Student) {
+    setStudentId(student.id);
+    setStudentSearch(student.full_name);
+    setShowStudentSearch(false);
+    setStudentClassIds(
+      activeMemberships
+        .filter((membership) => membership.student_id === student.id)
+        .map((membership) => membership.class_id)
+    );
+    setClassId("");
+    setAmountDue("");
+    setAmountToCollect("");
+    setManualPeriod(false);
+    setNote("");
+    collectionRequestIdRef.current = null;
+    setIsNewStudentFlow(false);
+    setShowForm(true);
+    window.setTimeout(() => {
+      document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }
+
   return (
     <div className="space-y-6">
       <section className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -1326,20 +1362,48 @@ export default function TuitionPage() {
           <h1 className="mt-1 text-4xl font-black tracking-tight">
             💰 Học phí
           </h1>
-        <p className="mt-2 text-slate-400">Thu học phí khi nhận tiền</p>
+          <p className="mt-2 text-slate-400">Trung tâm quản lý học phí toàn câu lạc bộ</p>
         </div>
+      </section>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            className="ui-btn ui-btn-primary"
-            onClick={() => {
-              setShowForm(!showForm);
-              setIsNewStudentFlow(false);
-            }}
-          >
-            {showForm ? "Đóng" : "+ Thu học phí"}
-          </button>
-        </div>
+      <section className="rounded-3xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-sm sm:p-7">
+        <label className="block">
+          <span className="text-xs font-black uppercase tracking-widest text-blue-700">THU HỌC PHÍ THEO HỌC VIÊN</span>
+          <span className="mt-1 block text-xl font-black text-slate-900">Tìm học viên để ghi nhận khoản thu</span>
+          <span className="relative mt-4 block">
+            <input
+              autoComplete="off"
+              className="ui-input min-h-14 w-full border-blue-200 bg-white text-lg shadow-sm"
+              placeholder="Nhập tên hoặc mã học viên..."
+              value={studentSearch}
+              onChange={(event) => {
+                setStudentSearch(event.target.value);
+                setStudentId("");
+                setShowStudentSearch(true);
+              }}
+              onFocus={() => setShowStudentSearch(true)}
+              onBlur={() => window.setTimeout(() => setShowStudentSearch(false), 150)}
+            />
+            {showStudentSearch && studentSearch.trim() && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-2xl">
+                {filteredStudents.length === 0 ? (
+                  <div className="p-3 text-sm text-slate-400">Không tìm thấy học viên</div>
+                ) : filteredStudents.map((student) => (
+                  <button
+                    key={student.id}
+                    type="button"
+                    className="block min-h-12 w-full rounded-lg px-3 py-2 text-left hover:bg-blue-50"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => selectStudentForCollection(student)}
+                  >
+                    <span className="font-bold">{student.full_name}</span>
+                    <span className="ml-2 text-sm font-bold text-blue-700">{student.student_code}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+        </label>
       </section>
 
       {focusedStudent && (
@@ -1362,71 +1426,6 @@ export default function TuitionPage() {
         </section>
       )}
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <div className="ui-card p-6">
-          <div className="text-sm font-bold text-slate-400">ĐÃ THU THÁNG NÀY</div>
-          <div className="mt-2 text-3xl font-black text-emerald-600">{money(collectedThisMonth)}</div>
-        </div>
-
-        <div className="ui-card p-6">
-          <div className="text-sm font-bold text-slate-400">CẦN THU</div>
-          <div className="mt-2 text-3xl font-black">{dueCount}</div>
-        </div>
-
-        <div className="ui-card p-6">
-          <div className="text-sm font-bold text-slate-400">QUÁ HẠN</div>
-          <div className="mt-2 text-3xl font-black text-rose-500">{overdueCount}</div>
-        </div>
-      </section>
-
-      <section className="ui-card overflow-hidden">
-        <div className="border-b border-slate-100 p-5 sm:p-6">
-          <h2 className="text-2xl font-black">Cần thu</h2>
-          <p className="mt-1 text-sm text-slate-500">Danh sách được tính từ lớp đang học và lịch sử học phí; chưa thu thì chưa tạo phiếu.</p>
-        </div>
-        {loading ? (
-          <div className="p-8 text-center text-slate-400">Đang tính kỳ cần thu…</div>
-        ) : actionableDueRows.length === 0 ? (
-          <div className="p-8 text-center text-slate-500">Hiện không có học viên đến hạn.</div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {actionableDueRows.map((row) => {
-              const period = row.due.firstUnpaidMonth ?? currentMonth;
-              const overdue = period < currentMonth;
-              const branch = branchById.get(row.classItem.branch_id)?.name ?? "Chưa gán cơ sở";
-              return (
-                <div key={`${row.student.id}-${row.classItem.id}`} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                  <div className="min-w-0">
-                    <div className="font-black text-slate-900">{row.student.full_name} <span className="text-xs font-bold text-blue-600">{row.student.student_code}</span></div>
-                    <div className="mt-1 text-sm text-slate-500">{row.classItem.name} · {branch} · Kỳ {monthLabel(period)}</div>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
-                      <span className={`rounded-full px-3 py-1 ${row.due.status === "PARTIAL" ? "bg-amber-100 text-amber-800" : overdue ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"}`}>
-                        {row.due.status === "PARTIAL" ? "Còn thiếu" : overdue ? "Quá hạn" : "Đến hạn"}
-                      </span>
-                      {row.due.paidThroughMonth && <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Đã đóng đến {monthLabel(row.due.paidThroughMonth)}</span>}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center justify-between gap-4 sm:justify-end">
-                    <strong>{money(row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount)}</strong>
-                    <button type="button" className="ui-btn ui-btn-primary" onClick={() => {
-                      setStudentId(row.student.id);
-                      setStudentSearch(row.student.full_name);
-                      setStudentClassIds([row.classItem.id]);
-                      setClassId(row.classItem.id);
-                      setCollectionMonth(period);
-                      setManualPeriod(false);
-                      setNote("");
-                      setShowForm(true);
-                      window.setTimeout(() => document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
-                    }}>Thu học phí</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
       {showForm && (
         <section id="create-tuition-form" className="ui-card p-6 sm:p-8">
           <div className="mb-6">
@@ -1447,66 +1446,26 @@ export default function TuitionPage() {
             onSubmit={addTuition}
             className="grid gap-5 md:grid-cols-2"
           >
-            <label className="block">
-              <div className="mb-2 text-sm font-bold">Học viên</div>
-              <div className="relative">
-                <input
-                  className="ui-input"
-                  placeholder="🔎 Gõ mã hoặc tên học viên..."
-                  value={studentSearch}
-                  onChange={(e) => {
-                    setStudentSearch(e.target.value);
+            {selectedStudent && (
+              <div className="flex items-center justify-between gap-3 rounded-2xl bg-blue-50 p-4 md:col-span-2">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Học viên được chọn</div>
+                  <div className="mt-1 font-black">{selectedStudent.full_name} · {selectedStudent.student_code}</div>
+                </div>
+                <button
+                  type="button"
+                  className="ui-btn"
+                  onClick={() => {
                     setStudentId("");
-                    setShowStudentSearch(true);
+                    setStudentSearch("");
+                    setShowForm(false);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
-                  onFocus={() => setShowStudentSearch(true)}
-                  onBlur={() =>
-                    setTimeout(() => setShowStudentSearch(false), 150)
-                  }
-                />
-
-                {showStudentSearch && studentSearch.trim() && (
-                  <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-2xl">
-                    {filteredStudents.length === 0 ? (
-                      <div className="p-3 text-sm text-slate-400">
-                        Không tìm thấy học viên
-                      </div>
-                    ) : (
-                      filteredStudents.map((student) => (
-                        <button
-                          key={student.id}
-                          type="button"
-                          className="block w-full rounded-lg px-3 py-2 text-left hover:bg-slate-100"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            setStudentId(student.id);
-                            setStudentSearch(student.full_name);
-                            setShowStudentSearch(false);
-                            setClassId("");
-                            setAmountDue("");
-                            setAmountToCollect("");
-                            setManualPeriod(false);
-                            setNote("");
-                            setStudentClassIds(
-                              activeMemberships
-                                .filter(
-                                  (membership) =>
-                                    membership.student_id === student.id
-                                )
-                                .map((membership) => membership.class_id)
-                            );
-                          }}
-                        >
-                          <div className="font-semibold">
-                            {student.full_name} · {student.student_code}
-                          </div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
+                >
+                  Đổi học viên
+                </button>
               </div>
-            </label>
+            )}
 
             {studentId && studentClasses.length === 0 && (
               <div className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-800 md:col-span-2">
@@ -1595,6 +1554,77 @@ export default function TuitionPage() {
         </section>
       )}
 
+      {currentMonth < TUITION_TRACKING_START_MONTH && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+          Giai đoạn trước khai trương: theo dõi công nợ tự động bắt đầu từ tháng 10/2026. Dữ liệu tháng 9 và các tháng trước vẫn được giữ để tra cứu lịch sử.
+        </div>
+      )}
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <div className="ui-card p-6">
+          <div className="text-sm font-bold text-slate-400">ĐÃ THU THÁNG NÀY</div>
+          <div className="mt-2 text-3xl font-black text-emerald-600">{money(collectedThisMonth)}</div>
+        </div>
+
+        <div className="ui-card p-6">
+          <div className="text-sm font-bold text-slate-400">CẦN THU</div>
+          <div className="mt-2 text-3xl font-black">{dueCount}</div>
+        </div>
+
+        <div className="ui-card p-6">
+          <div className="text-sm font-bold text-slate-400">QUÁ HẠN</div>
+          <div className="mt-2 text-3xl font-black text-rose-500">{overdueCount}</div>
+        </div>
+      </section>
+
+      <section className="ui-card overflow-hidden">
+        <div className="border-b border-slate-100 p-5 sm:p-6">
+          <h2 className="text-2xl font-black">Cần thu</h2>
+          <p className="mt-1 text-sm text-slate-500">Danh sách được tính từ lớp đang học và lịch sử học phí; chưa thu thì chưa tạo phiếu.</p>
+        </div>
+        {loading ? (
+          <div className="p-8 text-center text-slate-400">Đang tính kỳ cần thu…</div>
+        ) : actionableDueRows.length === 0 ? (
+          <div className="p-8 text-center text-slate-500">Hiện không có học viên đến hạn.</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {actionableDueRows.map((row) => {
+              const period = row.due.firstUnpaidMonth ?? currentMonth;
+              const overdue = period < currentMonth;
+              const branch = branchById.get(row.classItem.branch_id)?.name ?? "Chưa gán cơ sở";
+              return (
+                <div key={`${row.student.id}-${row.classItem.id}`} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                  <div className="min-w-0">
+                    <div className="font-black text-slate-900">{row.student.full_name} <span className="text-xs font-bold text-blue-600">{row.student.student_code}</span></div>
+                    <div className="mt-1 text-sm text-slate-500">{row.classItem.name} · {branch} · Kỳ {monthLabel(period)}</div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
+                      <span className={`rounded-full px-3 py-1 ${row.due.status === "PARTIAL" ? "bg-amber-100 text-amber-800" : overdue ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"}`}>
+                        {row.due.status === "PARTIAL" ? "Còn thiếu" : overdue ? "Quá hạn" : "Đến hạn"}
+                      </span>
+                      {row.due.paidThroughMonth && <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Đã đóng đến {monthLabel(row.due.paidThroughMonth)}</span>}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center justify-between gap-4 sm:justify-end">
+                    <strong>{money(row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount)}</strong>
+                    <button type="button" className="ui-btn ui-btn-primary" onClick={() => {
+                      setStudentId(row.student.id);
+                      setStudentSearch(row.student.full_name);
+                      setStudentClassIds([row.classItem.id]);
+                      setClassId(row.classItem.id);
+                      setCollectionMonth(period);
+                      setManualPeriod(false);
+                      setNote("");
+                      collectionRequestIdRef.current = null;
+                      setShowForm(true);
+                      window.setTimeout(() => document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+                    }}>Thu học phí</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <section className="ui-card p-6 sm:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -1608,6 +1638,11 @@ export default function TuitionPage() {
             <p className="mt-1 text-sm text-slate-400">
               {monthLabel(billingMonth)} · Mỗi học viên chỉ có một khoản học phí cho mỗi lớp/kỳ.
             </p>
+            {viewingPreLaunchMonth && (
+              <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                Kỳ trước 10/2026 là dữ liệu lịch sử/dự khai trương, không được tính vào danh sách nợ tự động.
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-3">

@@ -43,36 +43,49 @@ test("one active class is auto-selected; multiple classes require a choice", () 
 });
 
 test("missing earlier period is returned even when a later period is paid", () => {
-  const history = [record("2026-06", 600000), record("2026-07", 600000), record("2026-09", 600000)];
-  assert.equal(getFirstUnpaidMonth(membership, history, "2026-09"), "2026-08");
+  const history = [record("2026-10", 600000), record("2026-11", 600000), record("2027-01", 600000)];
+  assert.equal(getFirstUnpaidMonth(membership, history, "2027-01"), "2026-12");
 });
 
 test("due, overdue, partial, paid current, and paid ahead are distinguished", () => {
-  assert.equal(getMembershipTuitionStatus(membership, "active", "active", [], "2026-06").status, "DUE");
-  const twoMonthsBehind = [record("2026-06", 600000)];
-  assert.equal(getMembershipTuitionStatus(membership, "active", "active", twoMonthsBehind, "2026-08").status, "OVERDUE");
-  const partial = getMembershipTuitionStatus(membership, "active", "active", [record("2026-06", 100000)], "2026-06");
+  assert.equal(getMembershipTuitionStatus(membership, "active", "active", [], "2026-10").status, "DUE");
+  const twoMonthsBehind = [record("2026-10", 600000)];
+  assert.equal(getMembershipTuitionStatus(membership, "active", "active", twoMonthsBehind, "2026-12").status, "OVERDUE");
+  const partial = getMembershipTuitionStatus(membership, "active", "active", [record("2026-10", 100000)], "2026-10");
   assert.equal(partial.status, "PARTIAL");
   assert.equal(partial.remaining, 500000);
-  assert.equal(getMembershipTuitionStatus(membership, "active", "active", [record("2026-06", 600000)], "2026-06").status, "PAID_CURRENT");
-  assert.equal(getMembershipTuitionStatus(membership, "active", "active", [record("2026-06", 600000), record("2026-07", 600000)], "2026-06").status, "PAID_AHEAD");
+  assert.equal(getMembershipTuitionStatus(membership, "active", "active", [record("2026-10", 600000)], "2026-10").status, "PAID_CURRENT");
+  assert.equal(getMembershipTuitionStatus(membership, "active", "active", [record("2026-10", 600000), record("2026-11", 600000)], "2026-10").status, "PAID_AHEAD");
+});
+
+test("pre-launch periods do not create automatic debt; October starts tracking at October", () => {
+  const septemberHistory = [record("2026-09", 0)];
+  const preLaunch = getMembershipTuitionStatus(membership, "active", "active", septemberHistory, "2026-09");
+  assert.equal(preLaunch.status, "PRE_LAUNCH");
+  assert.equal(preLaunch.firstUnpaidMonth, null);
+  assert.equal(preLaunch.remaining, 0);
+  assert.equal(getFirstUnpaidMonth(membership, septemberHistory, "2026-09"), "2026-10");
+
+  const october = getMembershipTuitionStatus(membership, "active", "active", septemberHistory, "2026-10");
+  assert.equal(october.status, "DUE");
+  assert.equal(october.firstUnpaidMonth, "2026-10");
 });
 
 test("ended and inactive memberships are excluded and start month is respected", () => {
-  assert.equal(getMembershipTuitionStatus({ ...membership, end_date: "2026-05-31" }, "active", "active", [], "2026-06").status, "INACTIVE");
-  assert.equal(getMembershipTuitionStatus({ ...membership, status: "inactive" }, "active", "active", [], "2026-06").status, "INACTIVE");
-  assert.equal(getFirstUnpaidMonth({ ...membership, start_date: "2026-08-24" }, [], "2026-09"), "2026-08");
+  assert.equal(getMembershipTuitionStatus({ ...membership, end_date: "2026-09-30" }, "active", "active", [], "2026-10").status, "INACTIVE");
+  assert.equal(getMembershipTuitionStatus({ ...membership, status: "inactive" }, "active", "active", [], "2026-10").status, "INACTIVE");
+  assert.equal(getFirstUnpaidMonth({ ...membership, start_date: "2026-12-24" }, [], "2027-01"), "2026-12");
 });
 
 test("missing start date anchors obligations at the earliest known period, never earlier", () => {
   const unknownStart = { ...membership, start_date: null };
-  assert.equal(getFirstUnpaidMonth(unknownStart, [record("2026-08", 600000)], "2026-09"), "2026-09");
+  assert.equal(getFirstUnpaidMonth(unknownStart, [record("2026-11", 600000)], "2026-12"), "2026-12");
 });
 
 test("historical tuition from a former class does not count toward the new class", () => {
-  const currentMembership = { ...membership, class_id: "class-2", start_date: "2026-09-10" };
-  const oldClassPayment = [record("2026-09", 600000)];
-  assert.equal(getFirstUnpaidMonth(currentMembership, oldClassPayment, "2026-09"), "2026-09");
+  const currentMembership = { ...membership, class_id: "class-2", start_date: "2026-11-10" };
+  const oldClassPayment = [record("2026-10", 600000)];
+  assert.equal(getFirstUnpaidMonth(currentMembership, oldClassPayment, "2026-11"), "2026-11");
 });
 
 test("effective due applies canceled amounts, payment ledger totals, and carry-forward credits", () => {

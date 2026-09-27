@@ -11,7 +11,7 @@ import {
 test("database entities map to selective screen topics", () => {
   assert.deepEqual(
     [...realtimeTopicsForTables(["tuition_payments"])].sort(),
-    ["activity-log", "dashboard", "reports", "students", "tuition"],
+    ["activity-log", "dashboard", "finance", "reports", "students", "tuition"],
   );
   assert.equal(realtimeTopicsForTables(["attendance"]).has("expenses"), false);
   assert.equal(realtimeTopicsForTables(["unknown_table"]).size, 0);
@@ -65,6 +65,10 @@ test("publication migration is idempotent and excludes the Admin-only activity l
     "supabase/migrations/20260925090000_enable_management_realtime.sql",
     "utf8",
   );
+  const financeMigration = readFileSync(
+    "supabase/migrations/20260927100000_finance_ledger_v1.sql",
+    "utf8",
+  );
 
   assert.match(migration, /from pg_publication_tables/);
   assert.match(migration, /tablename = v_table/);
@@ -72,6 +76,6 @@ test("publication migration is idempotent and excludes the Admin-only activity l
   assert.doesNotMatch(migration, /'activity_logs'/);
   assert.doesNotMatch(migration, /create policy|alter table public\.[a-z_]+ enable row level security/i);
   for (const table of REALTIME_TABLES) {
-    assert.match(migration, new RegExp(`'${table}'`), table);
+    assert.ok(migration.includes(`'${table}'`) || financeMigration.includes(`'${table}'`), table);
   }
 });

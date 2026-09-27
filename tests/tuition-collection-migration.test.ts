@@ -26,8 +26,14 @@ test("collection rejects amount changes to existing periods and validates curren
   assert.match(migration, /v_student\.status is distinct from 'active'[\s\S]*v_class\.status is distinct from 'active'/i);
 });
 
-test("normal tuition UI no longer exposes bulk creation and collects through the atomic RPC", () => {
+test("normal tuition UI no longer exposes bulk creation and collects through the idempotent ledger RPC", () => {
   assert.doesNotMatch(tuitionPage, /onClick=\{createMonthlyTuition\}/);
+  assert.doesNotMatch(tuitionPage, /\+ Thu học phí/);
   assert.match(tuitionPage, /onSubmit=\{addTuition\}/);
-  assert.match(tuitionPage, /rpc\("collect_tuition_payment_atomic"/);
+  assert.match(tuitionPage, /rpc\("collect_tuition_payment_idempotent_atomic"/);
+  assert.match(tuitionPage, /collectionRequestIdRef/);
+  assert.match(tuitionPage, /THU HỌC PHÍ THEO HỌC VIÊN/);
+  assert.ok(tuitionPage.indexOf("THU HỌC PHÍ THEO HỌC VIÊN") < tuitionPage.indexOf("ĐÃ THU THÁNG NÀY"));
+  assert.ok(tuitionPage.indexOf("ĐÃ THU THÁNG NÀY") < tuitionPage.indexOf("Cần thu"));
+  assert.ok(tuitionPage.indexOf("Cần thu") < tuitionPage.indexOf("QUẢN LÝ HỌC PHÍ THEO LỚP"));
 });

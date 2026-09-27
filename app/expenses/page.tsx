@@ -17,6 +17,7 @@ type Expense = {
   category: string;
   description: string;
   amount: number;
+  payment_method: "cash" | "transfer" | null;
   note: string | null;
 };
 
@@ -40,6 +41,7 @@ function categoryLabel(value: string) {
 export default function ExpensesPage() {
   const supabase = useMemo(() => createClient(), []);
   const loadRequestRef = useRef(0);
+  const createRequestIdRef = useRef<string | null>(null);
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -57,6 +59,8 @@ export default function ExpensesPage() {
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
+  const [ledgerSourceIds, setLedgerSourceIds] = useState<Set<string>>(new Set());
 
   const [filterBranch, setFilterBranch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
@@ -72,14 +76,16 @@ export default function ExpensesPage() {
     const [
       { data: branchData, error: branchError },
       { data: expenseData, error: expenseError },
+      { data: ledgerData, error: ledgerError },
     ] = await Promise.all([
       supabase.from("branches").select("id,name").order("name"),
       supabase
         .from("expenses")
         .select(
-          "id,branch_id,expense_date,category,description,amount,note"
+          "id,branch_id,expense_date,category,description,amount,payment_method,note"
         )
         .order("expense_date", { ascending: false }),
+      supabase.from("cash_ledger").select("source_id").eq("source_type", "expense"),
     ]);
 
     if (requestId !== loadRequestRef.current) return;
@@ -96,8 +102,15 @@ export default function ExpensesPage() {
       return;
     }
 
+    if (ledgerError) {
+      alert(ledgerError.message);
+      setLoading(false);
+      return;
+    }
+
     setBranches(branchData ?? []);
     setExpenses(expenseData ?? []);
+    setLedgerSourceIds(new Set((ledgerData ?? []).map((row) => row.source_id).filter((id): id is string => Boolean(id))));
     setLoading(false);
   }, [supabase]);
 
@@ -108,6 +121,7 @@ export default function ExpensesPage() {
   useRealtimeRefresh(["expenses"], loadData);
 
   function resetForm() {
+    createRequestIdRef.current = null;
     setEditingId(null);
     setBranchId("");
     setCategory("other");
@@ -115,6 +129,7 @@ export default function ExpensesPage() {
     setDescription("");
     setAmount("");
     setNote("");
+    setPaymentMethod("cash");
   }
 
   function openAdd() {
@@ -130,6 +145,7 @@ export default function ExpensesPage() {
     setDescription(item.description);
     setAmount(String(item.amount));
     setNote(item.note ?? "");
+    setPaymentMethod(item.payment_method === "transfer" ? "transfer" : "cash");
     setShowForm(true);
   }
 
@@ -154,20 +170,37 @@ export default function ExpensesPage() {
       category,
       description: description.trim(),
       amount: Number(amount),
+      payment_method: paymentMethod,
       note: note.trim() || null,
     };
 
-    const result = editingId
-      ? await supabase
-          .from("expenses")
-          .update(payload)
-          .eq("id", editingId)
-      : await supabase.from("expenses").insert(payload);
+    if (editingId && ledgerSourceIds.has(editingId)) {
+      setSaving(false);
+      alert("Khoản chi đã vào sổ quỹ. Hãy tạo bút toán đảo trong Tài chính rồi ghi khoản chi đúng mới.");
+      return;
+    }
+
+    let saveError: string | null = null;
+    if (editingId) {
+      const { error } = await supabase.from("expenses").update(payload).eq("id", editingId);
+      saveError = error?.message ?? null;
+    } else {
+      const requestId = (createRequestIdRef.current ??= crypto.randomUUID());
+      const { error } = await supabase.from("expenses").insert({ ...payload, id: requestId });
+      saveError = error?.message ?? null;
+      if (error?.code === "23505") {
+      const [{ data: existing }, { data: ledger }] = await Promise.all([
+        supabase.from("expenses").select("id").eq("id", requestId).maybeSingle(),
+        supabase.from("cash_ledger").select("id").eq("source_type", "expense").eq("source_id", requestId).maybeSingle(),
+      ]);
+        if (existing && ledger) saveError = null;
+      }
+    }
 
     setSaving(false);
 
-    if (result.error) {
-      alert(result.error.message);
+    if (saveError) {
+      alert(saveError);
       return;
     }
 
@@ -179,6 +212,10 @@ export default function ExpensesPage() {
   }
 
   async function deleteExpense(item: Expense) {
+    if (ledgerSourceIds.has(item.id)) {
+      alert("Khoản chi đã vào sổ quỹ và không thể xóa. Hãy tạo bút toán đảo trong Tài chính.");
+      return;
+    }
     const ok = confirm(
       `Xóa khoản chi "${item.description}" - ${money(
         Number(item.amount)
@@ -343,6 +380,14 @@ export default function ExpensesPage() {
                     {label}
                   </option>
                 ))}
+              </select>
+            </label>
+
+            <label>
+              <div className="mb-2 text-sm font-bold">Tài khoản tiền</div>
+              <select className="ui-input" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as "cash" | "transfer")}>
+                <option value="cash">💵 Tiền mặt</option>
+                <option value="transfer">🏦 Chuyển khoản / Ngân hàng</option>
               </select>
             </label>
 
@@ -529,6 +574,9 @@ export default function ExpensesPage() {
 
                     <td className="p-4">
                       <div className="flex justify-end gap-2">
+                        {ledgerSourceIds.has(item.id) ? (
+                          <span className="self-center text-xs font-bold text-amber-700">Đã ghi sổ · điều chỉnh tại Tài chính</span>
+                        ) : <>
                         <button
                           className="ui-btn"
                           onClick={() => openEdit(item)}
@@ -542,6 +590,7 @@ export default function ExpensesPage() {
                         >
                           🗑️
                         </button>
+                        </>}
                       </div>
                     </td>
                   </tr>
