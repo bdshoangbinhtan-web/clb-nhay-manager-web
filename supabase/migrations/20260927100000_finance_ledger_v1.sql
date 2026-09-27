@@ -498,10 +498,10 @@ declare
   v_id uuid;
 begin
   insert into public.cash_ledger (
-    business_date,account_id,direction,amount,category,description,branch_id,
+    occurred_at,created_at,business_date,account_id,direction,amount,category,description,branch_id,
     source_type,source_id,created_by,created_by_name,reversal_of,metadata
   ) values (
-    (now() at time zone 'Asia/Ho_Chi_Minh')::date,p_original.account_id,
+    now(),now(),p_original.business_date,p_original.account_id,
     case p_original.direction when 'in' then 'out' else 'in' end,p_original.amount,
     'reversal','Đảo: ' || p_original.description,p_original.branch_id,
     'reversal',p_original.id,auth.uid(),(select p.full_name from public.profiles p where p.id=auth.uid()),
@@ -763,7 +763,11 @@ declare
   v_rows jsonb := '[]'::jsonb;
   v_today date := (now() at time zone 'Asia/Ho_Chi_Minh')::date;
 begin
-  perform private.finance_require_actor(p_branch_id, true);
+  if p_branch_id is null then raise exception 'Chọn một cơ sở cụ thể để chốt quỹ.'; end if;
+  perform private.finance_require_actor(p_branch_id, false);
+  if not exists(select 1 from public.branches b where b.id=p_branch_id and b.status::text='active') then
+    raise exception 'Cơ sở chốt quỹ không tồn tại hoặc đã ngừng hoạt động.';
+  end if;
   if p_business_date is null or p_business_date > v_today then raise exception 'Ngày chốt quỹ không hợp lệ.'; end if;
   if jsonb_typeof(p_counts) <> 'array' or jsonb_array_length(p_counts) = 0 then raise exception 'Cần nhập số tiền đếm được cho ít nhất một tài khoản.'; end if;
   for v_count in select value from jsonb_array_elements(p_counts)
@@ -900,15 +904,15 @@ begin
     select 'unclosed_day','warning',d.day::date,null::uuid,a.id,null::numeric,'Ngày chưa chốt quỹ · ' || a.name
     from generate_series(
       greatest(v_from,(v_start at time zone 'Asia/Ho_Chi_Minh')::date),
-      least(v_to,(now() at time zone 'Asia/Ho_Chi_Minh')::date),
+      least(v_to,(now() at time zone 'Asia/Ho_Chi_Minh')::date - 1),
       interval '1 day'
     ) d(day)
     cross join public.cash_accounts a
-    cross join (select null::uuid branch_id union all select b.id from public.branches b where b.status::text='active') scopes
-    where a.is_active and (a.branch_id is null or a.branch_id is not distinct from scopes.branch_id)
+    cross join (select b.id branch_id from public.branches b where b.status::text='active') scopes
+    where a.is_active and (a.branch_id is null or a.branch_id=scopes.branch_id)
       and not exists (
         select 1 from public.daily_cash_closings c
-        where c.business_date=d.day::date and c.account_id=a.id and c.branch_id is not distinct from scopes.branch_id
+        where c.business_date=d.day::date and c.account_id=a.id and c.branch_id=scopes.branch_id
       )
   )
   select coalesce(jsonb_agg(jsonb_build_object('issue_type',issue_type,'severity',severity,'business_date',business_date,'transaction_id',transaction_id,'account_id',account_id,'amount',amount,'message',message) order by business_date desc, issue_type), '[]'::jsonb)

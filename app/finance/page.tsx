@@ -8,7 +8,7 @@ import { vietnamToday } from "@/lib/vietnam-date";
 import { accountBalances, summarizeLedger, type LedgerEntry } from "@/lib/finance/ledger";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
-type Account = { id: string; name: string; account_type: "cash" | "bank"; is_active: boolean; balance?: number };
+type Account = { id: string; name: string; account_type: "cash" | "bank"; is_active: boolean; branch_id: string | null; balance?: number };
 type Branch = { id: string; name: string };
 type Closing = { id: string; account_id: string; version: number; expected_balance: number; counted_balance: number; variance: number; closed_by_name: string; closed_at: string; note: string | null };
 type Role = "admin" | "manager" | "teacher";
@@ -51,10 +51,10 @@ export default function FinancePage() {
     setMyBranchId(profile.branch_id ?? null);
     const nextBranch = nextRole === "manager" ? profile.branch_id : branchFilter || null;
     let closingQuery = supabase.from("daily_cash_closings").select("id,account_id,version,expected_balance,counted_balance,variance,closed_by_name,closed_at,note").eq("business_date", date).order("version", { ascending: false });
-    closingQuery = nextBranch ? closingQuery.eq("branch_id", nextBranch) : closingQuery.is("branch_id", null);
+    closingQuery = nextBranch ? closingQuery.eq("branch_id", nextBranch) : closingQuery.limit(0);
     const [branchRes, accountRes, ledgerRes, reversalRes, closingRes, balanceRes] = await Promise.all([
       supabase.from("branches").select("id,name").order("name"),
-      supabase.from("cash_accounts").select("id,name,account_type,is_active").order("account_type").order("name"),
+      supabase.from("cash_accounts").select("id,name,account_type,is_active,branch_id").order("account_type").order("name"),
       supabase.from("cash_ledger").select("id,occurred_at,business_date,account_id,direction,amount,category,description,branch_id,source_type,source_id,created_by_name,reversal_of,metadata,account:cash_accounts!cash_ledger_account_id_fkey(id,name,account_type)").eq("business_date", date).order("occurred_at", { ascending: false }).limit(1000),
       supabase.from("finance_source_reversals").select("source_type,source_id"),
       closingQuery,
@@ -66,7 +66,8 @@ export default function FinancePage() {
     const allAccounts = (accountRes.data ?? []) as Account[];
     const balances = (balanceRes.data ?? []) as Array<{ account_id: string; balance: number }>;
     const balanceMap = new Map(balances.map((item) => [item.account_id, Number(item.balance)]));
-    setAccounts(allAccounts.map((account) => ({ ...account, balance: balanceMap.get(account.id) ?? 0 })).filter((account) => account.is_active));
+    setAccounts(allAccounts.map((account) => ({ ...account, balance: balanceMap.get(account.id) ?? 0 }))
+      .filter((account) => account.is_active && (!nextBranch || account.branch_id === null || account.branch_id === nextBranch)));
     let nextEntries = (ledgerRes.data ?? []) as unknown as LedgerEntry[];
     const reversedSources = new Set((reversalRes.data ?? []).map((item) => `${item.source_type}:${item.source_id}`));
     nextEntries = nextEntries.map((entry) => ({
@@ -79,7 +80,7 @@ export default function FinancePage() {
     for (const closing of (closingRes.data ?? []) as Closing[]) {
       if (!latestClosings.has(closing.account_id)) latestClosings.set(closing.account_id, closing);
     }
-    setClosings([...latestClosings.values()]);
+    setClosings(nextBranch ? [...latestClosings.values()] : []);
     setCounted(Object.fromEntries(allAccounts.filter((account) => account.is_active).map((account) => [account.id, ""])));
     setLoading(false);
   }, [branchFilter, date, router, supabase]);
@@ -93,6 +94,7 @@ export default function FinancePage() {
 
   async function closeDay(event: React.FormEvent) {
     event.preventDefault();
+    if (!activeBranchId) { alert("Chọn một cơ sở cụ thể để chốt quỹ."); return; }
     if (accounts.some((account) => counted[account.id] === "" || !Number.isFinite(Number(counted[account.id])) || Number(counted[account.id]) < 0)) {
       alert("Nhập số tiền đã đếm cho từng tài khoản trước khi chốt quỹ.");
       return;
@@ -193,11 +195,14 @@ export default function FinancePage() {
 
         <form onSubmit={closeDay} className="ui-card space-y-3 p-4 sm:p-5">
           <div><h2 className="text-lg font-black">Chốt quỹ ngày {date}</h2><p className="text-sm text-slate-500">Mỗi lần chốt được lưu thành một phiên bản lịch sử mới.</p></div>
+          {!activeBranchId && <p className="font-bold text-amber-700">Chọn CS1 hoặc CS2 để chốt quỹ.</p>}
+          <fieldset disabled={saving || !activeBranchId} className="space-y-3 disabled:opacity-50">
           {accounts.map((account) => {
             const closing = latestClosingByAccount.get(account.id);
             return <label key={account.id} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 text-sm"><span><strong className="block">{account.name}</strong><span className="text-xs text-slate-500">Hệ thống: {money(Number(closing?.expected_balance ?? account.balance ?? 0))}{closing ? ` · lần ${closing.version}` : ""}</span></span><input className="ui-input w-40 text-right" type="number" min="0" step="1" placeholder="Đã đếm" value={counted[account.id] ?? ""} onChange={(event) => setCounted((state) => ({ ...state, [account.id]: event.target.value }))} /></label>;
           })}
           <button className="ui-btn ui-btn-primary w-full sm:w-auto" disabled={saving || accounts.length === 0}>{saving ? "Đang chốt…" : "Chốt quỹ"}</button>
+          </fieldset>
           {closings.length > 0 && <div className="space-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">{closings.map((closing) => <div key={closing.id} className={Math.abs(Number(closing.variance)) > 0.01 ? "font-bold text-rose-700" : ""}>{accounts.find((account) => account.id === closing.account_id)?.name}: đếm {money(Number(closing.counted_balance))} · lệch {money(Number(closing.variance))} · {closing.closed_by_name} · {new Date(closing.closed_at).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}</div>)}</div>}
         </form>
       </section>

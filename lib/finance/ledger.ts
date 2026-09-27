@@ -1,6 +1,7 @@
 export type LedgerEntry = {
   id: string;
   occurred_at: string;
+  created_at?: string;
   business_date: string;
   account_id: string;
   direction: "in" | "out";

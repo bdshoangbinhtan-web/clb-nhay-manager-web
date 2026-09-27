@@ -69,13 +69,34 @@ test("account balances include both sides of transfers", () => {
 
 test("paired transfer reversals restore both account balances without operating income or expense", () => {
   const entries = [
-    entry({ id: "transfer-out", account_id: "cash", direction: "out", amount: 75_000, source_type: "account_transfer", source_id: "transfer-1" }),
-    entry({ id: "transfer-in", account_id: "bank", direction: "in", amount: 75_000, source_type: "account_transfer", source_id: "transfer-1" }),
-    entry({ id: "transfer-out-reversal", account_id: "cash", direction: "in", amount: 75_000, source_type: "reversal", reversal_of: "transfer-out" }),
-    entry({ id: "transfer-in-reversal", account_id: "bank", direction: "out", amount: 75_000, source_type: "reversal", reversal_of: "transfer-in" }),
+    entry({ id: "transfer-out", account_id: "cash", direction: "out", amount: 75_000, source_type: "account_transfer", source_id: "transfer-1", business_date: "2026-09-26" }),
+    entry({ id: "transfer-in", account_id: "bank", direction: "in", amount: 75_000, source_type: "account_transfer", source_id: "transfer-1", business_date: "2026-09-26" }),
+    entry({ id: "transfer-out-reversal", account_id: "cash", direction: "in", amount: 75_000, source_type: "reversal", reversal_of: "transfer-out", business_date: "2026-09-26", created_at: "2026-09-27T01:00:00.000Z" }),
+    entry({ id: "transfer-in-reversal", account_id: "bank", direction: "out", amount: 75_000, source_type: "reversal", reversal_of: "transfer-in", business_date: "2026-09-26", created_at: "2026-09-27T01:00:00.000Z" }),
   ];
+  assert.ok(entries.every((item) => item.business_date === "2026-09-26"));
   assert.deepEqual([...accountBalances(entries)], [["cash", 0], ["bank", 0]]);
   assert.deepEqual(summarizeLedger(entries), { income: 0, expense: 0, net: 0, transactions: 0, adjustments: 2 });
+});
+
+test("expense correction keeps its historical business date while retaining the later creation time", () => {
+  const original = entry({
+    id: "expense-wrong", direction: "out", amount: 500_000, source_type: "expense",
+    business_date: "2026-09-26", occurred_at: "2026-09-26T08:00:00.000Z", created_at: "2026-09-26T08:00:00.000Z",
+  });
+  const closingAt = "2026-09-26T09:00:00.000Z";
+  const reversal = entry({
+    id: "expense-correction", direction: "in", amount: 500_000, source_type: "reversal",
+    business_date: original.business_date, reversal_of: original.id,
+    occurred_at: "2026-09-27T02:00:00.000Z", created_at: "2026-09-27T02:00:00.000Z",
+  });
+  const historicalEntries = [original, reversal].filter((item) => item.business_date <= "2026-09-26");
+  assert.equal(summarizeLedger(historicalEntries).expense, 0);
+  assert.equal(accountBalances(historicalEntries).get("cash"), 0);
+  assert.ok(Date.parse(reversal.created_at!) > Date.parse(closingAt));
+  assert.ok(Date.parse(reversal.occurred_at) > Date.parse(original.occurred_at));
+  const reversalFunction = migration.match(/create or replace function private\.finance_insert_reversal[\s\S]*?\$function\$;/)?.[0] ?? "";
+  assert.match(reversalFunction, /now\(\),now\(\),p_original\.business_date/);
 });
 
 test("opening balance affects account balance but never operating income", () => {
@@ -88,6 +109,14 @@ test("opening balance affects account balance but never operating income", () =>
   });
   assert.equal(summarizeLedger([opening]).income, 0);
   assert.equal(accountBalances([opening]).get("cash"), 10_000_000);
+});
+
+test("opening balance correction restores the historical balance on the original business date", () => {
+  const opening = entry({ id: "opening", amount: 10_000_000, source_type: "opening_balance", business_date: "2026-09-26" });
+  const reversal = entry({ id: "opening-reversal", direction: "out", amount: 10_000_000, source_type: "reversal", reversal_of: opening.id, business_date: opening.business_date, created_at: "2026-09-27T02:00:00.000Z" });
+  const historicalEntries = [opening, reversal].filter((item) => item.business_date <= "2026-09-26");
+  assert.equal(accountBalances(historicalEntries).get("cash"), 0);
+  assert.equal(summarizeLedger(historicalEntries).income, 0);
 });
 
 test("expense and other-revenue corrections reconcile effective source totals to ledger totals", () => {
@@ -212,4 +241,18 @@ test("monitoring RPC is admin-only and checks missing/mismatched ledger referenc
   assert.match(migration, /'payment_amount_mismatch'/i);
   assert.match(migration, /'orphan_ledger'/i);
   assert.match(migration, /'unclosed_day'/i);
+});
+
+test("daily closing is branch-only and finance audit warns only for prior days on active branches", () => {
+  const closeFunction = migration.match(/create or replace function public\.close_daily_cash[\s\S]*?\$function\$;/)?.[0] ?? "";
+  const auditFunction = migration.match(/create or replace function public\.get_finance_audit[\s\S]*?\$function\$;/)?.[0] ?? "";
+  const financePage = readFileSync(new URL("../app/finance/page.tsx", import.meta.url), "utf8");
+  assert.match(closeFunction, /if p_branch_id is null then/);
+  assert.match(closeFunction, /finance_require_actor\(p_branch_id, false\)/);
+  assert.match(closeFunction, /branches b where b\.id=p_branch_id and b\.status::text='active'/);
+  assert.match(auditFunction, /least\(v_to,\(now\(\) at time zone 'Asia\/Ho_Chi_Minh'\)::date - 1\)/);
+  assert.match(auditFunction, /select b\.id branch_id from public\.branches b where b\.status::text='active'/);
+  assert.doesNotMatch(auditFunction, /select null::uuid branch_id union all/);
+  assert.match(financePage, /Chọn CS1 hoặc CS2 để chốt quỹ\./);
+  assert.match(financePage, /<fieldset disabled=\{saving \|\| !activeBranchId\}/);
 });
