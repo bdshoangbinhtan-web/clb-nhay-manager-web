@@ -39,7 +39,7 @@ test("normal tuition UI no longer exposes bulk creation and collects through the
   assert.match(tuitionPage, /collectionRequestIdRef/);
   assert.match(tuitionPage, /collectionRequestIdRef\.current \?\?= crypto\.randomUUID\(\)/);
   assert.match(tuitionPage, /p_payment_date: null/);
-  assert.match(tuitionPage, /if \(amount > dueAmount\)/);
+  assert.match(tuitionPage, /if \(amount > remainingAmount\)/);
   assert.match(tuitionPage, /p_payment_method: paymentMethod/);
   assert.match(tuitionPage, /<option value="cash">[\s\S]*?<option value="transfer">/);
   assert.match(tuitionPage, /placeholder="🔎 Tìm tên hoặc mã học viên\.\.\."/);
