@@ -5,13 +5,13 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
-import { excludeReversedPrivacySources, filterPrivacyTransactions, summarizePrivacyTransactions, type PrivacyTransaction } from "@/lib/privacy-view";
+import { excludeReversedPrivacySources, filterPrivacyTransactions, resolveTransferLedgerRows, summarizePrivacyTransactions, type PrivacyLedgerRow, type PrivacyTransaction } from "@/lib/privacy-view";
 import { toVietnamDateKey, vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { usePrivacyView } from "./privacy-view-context";
 
 type TuitionRef = { student_id: string; class_id: string | null; branch_id: string | null; billing_month: string };
 type PaymentRow = { id: string; amount: number; payment_method: string | null; payment_date: string; tuition: TuitionRef | TuitionRef[] | null };
-type RefundRow = { id: string; amount: number; refund_payment_method: string | null; created_at: string; tuition: TuitionRef | TuitionRef[] | null };
+type RefundRow = { id: string; refund_batch_id: string | null; amount: number; refund_payment_method: string | null; created_at: string; tuition: TuitionRef | TuitionRef[] | null };
 type ExpenseRow = { id: string; amount: number; payment_method: string | null; expense_date: string; description: string; branch_id: string | null };
 type RevenueRow = { id: string; amount: number; payment_method: string | null; revenue_date: string; description: string; branch_id: string | null };
 type ReversalRow = { source_type: string; source_id: string };
@@ -96,6 +96,7 @@ export default function PrivacyWorkspace() {
   const [date, setDate] = useState(vietnamToday);
   const [branchFilter, setBranchFilter] = useState("");
   const [transactions, setTransactions] = useState<PrivacyTransaction[]>([]);
+  const [financeTransactions, setFinanceTransactions] = useState<PrivacyTransaction[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -115,10 +116,10 @@ export default function PrivacyWorkspace() {
     void (async () => {
       try {
         if (role === "manager" && !branchId) {
-          if (active) { setTransactions([]); setStudents([]); setClasses([]); setBranches([]); setLoading(false); }
+          if (active) { setTransactions([]); setFinanceTransactions([]); setStudents([]); setClasses([]); setBranches([]); setLoading(false); }
           return;
         }
-        const [payments, refunds, expenses, revenues, reversals, branchesResult, classesResult] = await Promise.all([
+        const [payments, refunds, expenses, revenues, ledger, branchesResult, classesResult] = await Promise.all([
           readAll<PaymentRow>(async (from, to) => {
             let query = supabase.from("tuition_payments")
               .select("id,amount,payment_method,payment_date,tuition:tuition_id!inner(student_id,class_id,branch_id,billing_month)")
@@ -130,8 +131,8 @@ export default function PrivacyWorkspace() {
           }),
           readAll<RefundRow>(async (from, to) => {
             let query = supabase.from("tuition_adjustments")
-              .select("id,amount,refund_payment_method,created_at,tuition:tuition_id!inner(student_id,class_id,branch_id,billing_month)")
-              .eq("action", "refund").eq("refund_payment_method", "transfer")
+              .select("id,refund_batch_id,amount,refund_payment_method,created_at,tuition:tuition_id!inner(student_id,class_id,branch_id,billing_month)")
+              .eq("action", "refund")
               .gte("created_at", `${start}T00:00:00+07:00`).lt("created_at", `${end}T00:00:00+07:00`)
               .order("created_at", { ascending: false }).order("id");
             if (role === "manager" && branchId) query = query.eq("tuition.branch_id", branchId);
@@ -156,11 +157,14 @@ export default function PrivacyWorkspace() {
             const result = await query.range(from, to);
             return { data: result.data as RevenueRow[] | null, error: result.error };
           }),
-          readAll<ReversalRow>(async (from, to) => {
-            const result = await supabase.from("finance_source_reversals")
-              .select("source_type,source_id").in("source_type", ["expense", "other_revenue"])
-              .order("source_type").order("source_id").range(from, to);
-            return { data: result.data as ReversalRow[] | null, error: result.error };
+          readAll<PrivacyLedgerRow>(async (from, to) => {
+            let query = supabase.from("cash_ledger")
+              .select("id,business_date,direction,amount,description,branch_id,source_type,source_id,reversal_of")
+              .gte("business_date", start).lt("business_date", end)
+              .order("business_date", { ascending: false }).order("id");
+            if (role === "manager" && branchId) query = query.eq("branch_id", branchId);
+            const result = await query.range(from, to);
+            return { data: result.data as PrivacyLedgerRow[] | null, error: result.error };
           }),
           role === "manager" && branchId
             ? supabase.from("branches").select("id,name").eq("id", branchId).order("name")
@@ -170,9 +174,44 @@ export default function PrivacyWorkspace() {
             : supabase.from("classes").select("id,name,branch_id,status").order("name"),
         ]);
         if (branchesResult.error || classesResult.error) throw new Error(branchesResult.error?.message ?? classesResult.error?.message);
-        const scopedTransactions = transactionRows(payments, refunds, expenses, revenues, reversals)
-          .filter((row) => role !== "manager" || row.branchId === branchId);
-        const ids = [...new Set(scopedTransactions.map((row) => row.studentId).filter((id): id is string => Boolean(id)))];
+        const reversibleIds = [...new Set([...expenses.map((row) => row.id), ...revenues.map((row) => row.id)])];
+        const reversalChunks = await Promise.all(Array.from({ length: Math.ceil(reversibleIds.length / 100) }, async (_, index) => {
+          let query = supabase.from("finance_source_reversals")
+            .select("source_type,source_id")
+            .in("source_type", ["expense", "other_revenue"])
+            .in("source_id", reversibleIds.slice(index * 100, index * 100 + 100));
+          if (role === "manager" && branchId) query = query.eq("branch_id", branchId);
+          const result = await query;
+          if (result.error) throw new Error(result.error.message);
+          return (result.data ?? []) as ReversalRow[];
+        }));
+        const scopedTransactions = transactionRows(payments, refunds, expenses, revenues, reversalChunks.flat());
+        const sourceRows = transactionRows(payments, refunds, expenses, revenues, []);
+        const transferSources = new Map(sourceRows.map((row) => [`${row.sourceType}:${row.id}`, row]));
+        const refundBatches = new Map<string, RefundRow[]>();
+        for (const refund of refunds) {
+          if (!refund.refund_batch_id) continue;
+          refundBatches.set(refund.refund_batch_id, [...(refundBatches.get(refund.refund_batch_id) ?? []), refund]);
+        }
+        const transferRefundBatchIds = new Set<string>();
+        for (const [batchId, batch] of refundBatches) {
+          if (!batch.every((refund) => refund.refund_payment_method === "transfer")) continue;
+          const source = transferSources.get(`tuition_refund:${batch[0].id}`);
+          if (source) {
+            transferSources.set(`tuition_refund:${batchId}`, source);
+            transferRefundBatchIds.add(batchId);
+          }
+        }
+        const resolvedLedger = resolveTransferLedgerRows(ledger, transferSources);
+        const ledgerSourceKeys = new Set(ledger.filter((row) => row.source_id &&
+          ["tuition_payment", "tuition_refund", "expense", "other_revenue"].includes(row.source_type))
+          .map((row) => `${row.source_type}:${row.source_id}`));
+        const refundLedgerIds = new Set(refunds.filter((row) => row.refund_batch_id &&
+          transferRefundBatchIds.has(row.refund_batch_id) &&
+          ledgerSourceKeys.has(`tuition_refund:${row.refund_batch_id}`)).map((row) => row.id));
+        const legacySources = scopedTransactions.filter((row) => !ledgerSourceKeys.has(`${row.sourceType}:${row.id}`) &&
+          !(row.sourceType === "tuition_refund" && refundLedgerIds.has(row.id)));
+        const ids = [...new Set(payments.map((row) => tuitionRef(row.tuition)?.student_id).filter((id): id is string => Boolean(id)))];
         const studentChunks = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, async (_, index) => {
           const result = await supabase.from("students").select("id,student_code,full_name,status")
             .in("id", ids.slice(index * 100, index * 100 + 100));
@@ -181,9 +220,10 @@ export default function PrivacyWorkspace() {
         }));
         if (!active) return;
         setTransactions(scopedTransactions);
+        setFinanceTransactions([...resolvedLedger, ...legacySources].sort((a, b) => b.date.localeCompare(a.date)));
         setStudents(studentChunks.flat());
-        setBranches(((branchesResult.data ?? []) as Branch[]).filter((row) => role !== "manager" || row.id === branchId));
-        setClasses(((classesResult.data ?? []) as DanceClass[]).filter((row) => role !== "manager" || row.branch_id === branchId));
+        setBranches((branchesResult.data ?? []) as Branch[]);
+        setClasses((classesResult.data ?? []) as DanceClass[]);
         setLoading(false);
       } catch (failure) {
         if (!active) return;
@@ -200,18 +240,23 @@ export default function PrivacyWorkspace() {
   const visibleTransactions = useMemo(() => role === "manager" && !branchId ? [] :
     filterPrivacyTransactions(transactions, startDate, endDate, scopeBranchId),
   [branchId, endDate, role, scopeBranchId, startDate, transactions]);
+  const visibleFinanceTransactions = useMemo(() => role === "manager" && !branchId ? [] :
+    filterPrivacyTransactions(financeTransactions, startDate, endDate, scopeBranchId),
+  [branchId, endDate, financeTransactions, role, scopeBranchId, startDate]);
   const tuitionRows = visibleTransactions.filter((row) => row.sourceType === "tuition_payment" || row.sourceType === "tuition_refund");
-  const summaryRows = pathname === "/finance" || pathname === "/dashboard" ? visibleTransactions : tuitionRows;
+  const paymentRows = tuitionRows.filter((row) => row.sourceType === "tuition_payment");
+  const eligibleStudentIds = new Set(paymentRows.map((row) => row.studentId).filter((id): id is string => Boolean(id)));
+  const summaryRows = pathname === "/finance" || pathname === "/dashboard" ? visibleFinanceTransactions : tuitionRows;
   const summary = summarizePrivacyTransactions(summaryRows);
   const studentById = useMemo(() => new Map(students.map((student) => [student.id, student])), [students]);
   const classById = useMemo(() => new Map(classes.map((item) => [item.id, item])), [classes]);
-  const visibleStudents = students.filter((student) => summary.studentIds.has(student.id));
+  const visibleStudents = students.filter((student) => eligibleStudentIds.has(student.id));
   const selectedStudentId = pathname.match(/^\/students\/([0-9a-f-]{36})$/i)?.[1];
   const selectedClassId = pathname.match(/^\/branches\/([0-9a-f-]{36})$/i)?.[1];
   const selectedStudent = selectedStudentId ? visibleStudents.find((student) => student.id === selectedStudentId) : null;
   const selectedClass = selectedClassId ? classes.find((item) => item.id === selectedClassId) : null;
   const selectedClassStudents = selectedClass
-    ? visibleStudents.filter((student) => tuitionRows.some((row) => row.classId === selectedClass.id && row.studentId === student.id))
+    ? visibleStudents.filter((student) => paymentRows.some((row) => row.classId === selectedClass.id && row.studentId === student.id))
     : [];
   const title = pathname === "/finance" ? "Tài chính" : pathname.startsWith("/tuition") ? "Học phí" :
     pathname.startsWith("/students") ? "Học viên" : pathname.startsWith("/branches") ? "Cơ sở & Lớp" : "Dashboard";
@@ -235,7 +280,7 @@ export default function PrivacyWorkspace() {
         <Metric label="Đã thu" value={money(summary.income)} />
         <Metric label="Đã chi" value={money(summary.expense)} />
         <Metric label="Còn lại" value={money(summary.net)} />
-        <Metric label="Số học viên" value={String(summary.studentCount)} />
+        <Metric label="Số học viên" value={String(eligibleStudentIds.size)} />
       </section>
 
       {pathname.startsWith("/students") ? <section className="ui-card overflow-hidden">
@@ -252,7 +297,7 @@ export default function PrivacyWorkspace() {
         {selectedClassId && !selectedClass ? <div className="ui-card p-6 text-slate-500">Không tìm thấy lớp.</div> :
           (selectedClass ? [selectedClass] : classes).filter((item) => !scopeBranchId || item.branch_id === scopeBranchId).map((item) => {
             const rows = tuitionRows.filter((row) => row.classId === item.id);
-            const count = new Set(rows.map((row) => row.studentId).filter(Boolean)).size;
+            const count = new Set(paymentRows.filter((row) => row.classId === item.id).map((row) => row.studentId).filter(Boolean)).size;
             const total = rows.reduce((sum, row) => sum + (row.direction === "in" ? row.amount : -row.amount), 0);
             return <Link key={item.id} href={`/branches/${item.id}`} className="ui-card block p-5 hover:bg-slate-50"><strong className="block text-lg">{item.name}</strong><span className="mt-1 block text-sm text-slate-500">{branches.find((branch) => branch.id === item.branch_id)?.name ?? "Cơ sở"} · {count} học viên</span><span className="mt-2 block font-black">{money(total)}</span></Link>;
           })}
@@ -264,7 +309,7 @@ export default function PrivacyWorkspace() {
             )}</div>}
         </div>}
       </section> : pathname === "/tuition" ? <TransactionList rows={tuitionRows} students={studentById} classes={classById} /> :
-        <TransactionList rows={pathname === "/finance" ? visibleTransactions : visibleTransactions.slice(0, 20)} students={studentById} classes={classById} />}
+        <TransactionList rows={pathname === "/finance" ? visibleFinanceTransactions : visibleFinanceTransactions.slice(0, 20)} students={studentById} classes={classById} />}
     </>}
   </div>;
 }

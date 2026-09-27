@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { excludeReversedPrivacySources, filterPrivacyTransactions, summarizePrivacyTransactions, type PrivacyTransaction } from "../lib/privacy-view.ts";
+import { excludeReversedPrivacySources, filterPrivacyTransactions, resolveTransferLedgerRows, summarizePrivacyTransactions, type PrivacyLedgerRow, type PrivacyTransaction } from "../lib/privacy-view.ts";
 
 const transaction = (
   id: string,
@@ -40,19 +40,48 @@ test("only transfer transactions in the selected dates and branch affect totals"
   });
 });
 
-test("student count uses distinct transfer student IDs, including refund transactions", () => {
+test("student count uses distinct transfer tuition payments only", () => {
   const rows = filterPrivacyTransactions([
     transaction("payment-1"),
     transaction("payment-2", { studentId: "student-1", amount: 100000 }),
     transaction("refund", { sourceType: "tuition_refund", direction: "out", amount: 50000 }),
     transaction("student-2", { studentId: "student-2" }),
+    transaction("refund-only", { sourceType: "tuition_refund", studentId: "student-4", direction: "out", amount: 10000 }),
     transaction("cash-student", { studentId: "student-3", paymentMethod: "cash" }),
   ], "2026-10-01", "2026-11-01", null);
   const summary = summarizePrivacyTransactions(rows);
   assert.equal(summary.studentCount, 2);
   assert.deepEqual(summary.studentIds, new Set(["student-1", "student-2"]));
   assert.equal(summary.income, 1100000);
-  assert.equal(summary.expense, 50000);
+  assert.equal(summary.expense, 60000);
+});
+
+test("ledger rows resolve through transfer sources, never the bank account", () => {
+  const ledger = (id: string, source_type: string, source_id: string | null, overrides: Partial<PrivacyLedgerRow> = {}): PrivacyLedgerRow => ({
+    id, business_date: "2026-10-15", direction: "in", amount: 500000,
+    description: id, branch_id: "cs1", source_type, source_id, reversal_of: null, ...overrides,
+  });
+  const sources = new Map<string, PrivacyTransaction>([
+    ["tuition_payment:transfer", transaction("transfer")],
+    ["expense:expense", transaction("expense", { sourceType: "expense", studentId: null, direction: "out", amount: 100000 })],
+    ["expense:effective-expense", transaction("effective-expense", { sourceType: "expense", studentId: null, direction: "out", amount: 40000 })],
+    ["other_revenue:cash", transaction("cash", { sourceType: "other_revenue", paymentMethod: "cash", studentId: null })],
+  ]);
+  const rows = resolveTransferLedgerRows([
+    ledger("payment-ledger", "tuition_payment", "transfer"),
+    ledger("expense-ledger", "expense", "expense", { direction: "out", amount: 100000 }),
+    ledger("effective-expense-ledger", "expense", "effective-expense", { direction: "out", amount: 40000 }),
+    ledger("cash-in-bank", "other_revenue", "cash"),
+    ledger("opening", "opening_balance", "opening-id"),
+    ledger("internal-transfer", "account_transfer", "transfer-id"),
+    ledger("expense-reversal", "reversal", "expense-ledger", { reversal_of: "expense-ledger", direction: "in", amount: 100000 }),
+    ledger("opening-reversal", "reversal", "opening", { reversal_of: "opening", direction: "out" }),
+  ], sources);
+  assert.deepEqual(rows.map((row) => row.id), ["payment-ledger", "effective-expense-ledger"]);
+  assert.deepEqual(summarizePrivacyTransactions(rows), {
+    income: 500000, expense: 40000, net: 460000,
+    studentCount: 1, studentIds: new Set(["student-1"]),
+  });
 });
 
 test("a corrected transfer expense or revenue no longer contributes to the visible total", () => {

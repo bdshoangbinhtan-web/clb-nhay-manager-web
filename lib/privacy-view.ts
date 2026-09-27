@@ -33,6 +33,43 @@ export function excludeReversedPrivacySources(
   return transactions.filter((row) => !reversed.has(`${row.sourceType}:${row.id}`));
 }
 
+export type PrivacyLedgerRow = {
+  id: string;
+  business_date: string;
+  direction: "in" | "out";
+  amount: number;
+  description: string;
+  branch_id: string | null;
+  source_type: string;
+  source_id: string | null;
+  reversal_of: string | null;
+};
+
+export function resolveTransferLedgerRows(
+  ledgerRows: PrivacyLedgerRow[],
+  transferSources: Map<string, PrivacyTransaction>,
+) {
+  const reversedIds = new Set(ledgerRows.map((row) => row.reversal_of).filter((id): id is string => Boolean(id)));
+  return ledgerRows.flatMap((row) => {
+    if (row.reversal_of || reversedIds.has(row.id)) return [];
+    if (!row.source_id || !["tuition_payment", "tuition_refund", "expense", "other_revenue"].includes(row.source_type)) return [];
+    const source = transferSources.get(`${row.source_type}:${row.source_id}`);
+    if (source?.paymentMethod !== "transfer") return [];
+    return [{
+      id: row.id,
+      sourceType: source.sourceType,
+      paymentMethod: "transfer",
+      date: row.business_date,
+      amount: Number(row.amount),
+      direction: row.direction,
+      branchId: row.branch_id,
+      studentId: source.studentId,
+      classId: source.classId,
+      description: row.description,
+    }];
+  });
+}
+
 export function summarizePrivacyTransactions(transactions: PrivacyTransaction[]) {
   let income = 0;
   let expense = 0;
@@ -42,8 +79,7 @@ export function summarizePrivacyTransactions(transactions: PrivacyTransaction[])
     if (transaction.paymentMethod !== "transfer") continue;
     if (transaction.direction === "in") income += transaction.amount;
     else expense += transaction.amount;
-    if (transaction.studentId &&
-      (transaction.sourceType === "tuition_payment" || transaction.sourceType === "tuition_refund")) {
+    if (transaction.studentId && transaction.sourceType === "tuition_payment") {
       studentIds.add(transaction.studentId);
     }
   }
