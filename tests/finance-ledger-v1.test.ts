@@ -10,7 +10,7 @@ import {
 } from "../lib/finance/ledger.ts";
 
 const migration = readFileSync(
-  new URL("../supabase/migrations/20260927100000_finance_ledger_v1.sql", import.meta.url),
+  new URL("../supabase/migrations/20260927170749_finance_ledger_v1.sql", import.meta.url),
   "utf8",
 );
 
