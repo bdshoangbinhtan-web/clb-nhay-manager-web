@@ -15,7 +15,6 @@ const adminManagerMenus = [
   ["🏆", "Học viên", "/students"],
   ["✨", "Đăng ký từ WEB", "/dashboard/trial-leads"],
   ["👨‍🏫", "Giáo viên", "/teachers"],
-  ["📋", "Điểm danh", "/attendance"],
   ["🎟️", "Quản lý học thử", "/trial-students"],
   ["💰", "Học phí", "/tuition"],
   ["💵", "Thu khác", "/other-revenue"],
@@ -122,8 +121,7 @@ export default function Sidebar({
           {menus.map(([icon, label, href]) => {
             const active =
               pathname === href ||
-              (href === "/attendance" &&
-                pathname === "/attendance-history") ||
+              (href === "/students" && pathname.startsWith("/students/")) ||
               (href === "/teachers" &&
                 pathname === "/teacher-attendance") ||
               (href === "/branches" &&

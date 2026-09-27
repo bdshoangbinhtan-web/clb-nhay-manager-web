@@ -11,7 +11,6 @@ type Role = "admin" | "manager" | "teacher" | "";
 const primaryItems = [
   { label: "Trang chủ", icon: "⌂", href: "/dashboard", match: ["/dashboard"] },
   { label: "Học viên", icon: "♙", href: "/students", match: ["/students"] },
-  { label: "Điểm danh", icon: "✓", href: "/attendance", match: ["/attendance", "/attendance-history"] },
   { label: "Học phí", icon: "₫", href: "/tuition", match: ["/tuition"] },
 ] as const;
 const moreItems = [
