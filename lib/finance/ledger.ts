@@ -13,6 +13,7 @@ export type LedgerEntry = {
   created_by_name: string | null;
   reversal_of: string | null;
   metadata: Record<string, unknown> | null;
+  is_reversed_source?: boolean;
   account?: { id: string; name: string; account_type: "cash" | "bank" } | null;
 };
 
@@ -23,6 +24,19 @@ export type LedgerSummary = {
   transactions: number;
   adjustments: number;
 };
+
+export type SourceReversal = { source_type: string; source_id: string };
+
+export function filterEffectiveSources<T extends { id: string }>(
+  sourceType: string,
+  rows: T[],
+  reversals: SourceReversal[],
+) {
+  const reversedIds = new Set(
+    reversals.filter((item) => item.source_type === sourceType).map((item) => item.source_id),
+  );
+  return rows.filter((row) => !reversedIds.has(row.id));
+}
 
 export function businessDateFromTimestamp(value: string | Date) {
   const date = value instanceof Date ? value : new Date(value);
@@ -38,7 +52,17 @@ export function businessDateFromTimestamp(value: string | Date) {
 }
 
 export function summarizeLedger(entries: LedgerEntry[]): LedgerSummary {
-  const operating = entries.filter((entry) => entry.source_type !== "account_transfer");
+  const reversedLedgerIds = new Set(
+    entries.flatMap((entry) => entry.reversal_of ? [entry.reversal_of] : [])
+  );
+  const operating = entries.filter((entry) =>
+    entry.source_type !== "account_transfer" &&
+    entry.source_type !== "opening_balance" &&
+    entry.source_type !== "reversal" &&
+    !entry.reversal_of &&
+    !entry.is_reversed_source &&
+    !reversedLedgerIds.has(entry.id)
+  );
   const income = operating.reduce(
     (total, entry) => total + (entry.direction === "in" ? Number(entry.amount) : 0),
     0,

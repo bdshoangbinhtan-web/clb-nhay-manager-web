@@ -61,6 +61,23 @@ create index cash_ledger_branch_date_idx on public.cash_ledger (branch_id, busin
 create index cash_ledger_source_idx on public.cash_ledger (source_type, source_id);
 create index cash_ledger_created_at_idx on public.cash_ledger (created_at desc);
 
+-- A source is marked reversed in a separate append-only table. Reports exclude
+-- the marked business row while the cash ledger retains both original and reversal.
+create table public.finance_source_reversals (
+  id uuid primary key default gen_random_uuid(),
+  source_type text not null check (source_type in ('expense','other_revenue','account_transfer','opening_balance')),
+  source_id uuid not null,
+  original_ledger_ids uuid[] not null check (cardinality(original_ledger_ids) > 0),
+  reversal_ledger_ids uuid[] not null check (cardinality(reversal_ledger_ids) = cardinality(original_ledger_ids)),
+  branch_id uuid references public.branches(id) on delete restrict,
+  reason text not null check (length(trim(reason)) > 0),
+  reversed_by uuid not null references public.profiles(id) on delete restrict,
+  reversed_by_name text,
+  reversed_at timestamptz not null default now(),
+  constraint finance_source_reversals_source_key unique (source_type, source_id)
+);
+create index finance_source_reversals_branch_idx on public.finance_source_reversals (branch_id, reversed_at desc);
+
 create table public.cash_transfers (
   id uuid primary key default gen_random_uuid(),
   from_account_id uuid not null references public.cash_accounts(id) on delete restrict,
@@ -428,10 +445,21 @@ create or replace function private.finance_reject_source_mutation()
 returns trigger language plpgsql security definer set search_path = '' as $function$
 declare
   v_type text := case tg_table_name when 'tuition_payments' then 'tuition_payment' when 'other_revenues' then 'other_revenue' else 'expense' end;
-  v_id uuid := case when tg_op = 'DELETE' then old.id else new.id end;
+  v_id uuid := old.id;
+  v_go_live timestamptz;
 begin
+  if tg_op = 'UPDATE' and new.id is distinct from old.id
+     and exists (select 1 from public.cash_ledger l where l.source_type=v_type and l.source_id=old.id) then
+    raise exception using errcode='55000', message='Không thể đổi mã giao dịch đã có trong sổ quỹ.';
+  end if;
   if exists (select 1 from public.cash_ledger l where l.source_type = v_type and l.source_id = v_id) then
     raise exception using errcode = '55000', message = 'Giao dịch đã vào sổ quỹ; hãy lập bút toán đảo để giữ lịch sử.';
+  end if;
+  if tg_table_name in ('expenses','other_revenues') then
+    select s.ledger_go_live_at into v_go_live from public.finance_ledger_settings s where s.singleton;
+    if old.created_at < v_go_live then
+      raise exception using errcode='55000', message='Dữ liệu tài chính trước ngày mở sổ chỉ được xem, không thể sửa hoặc xóa.';
+    end if;
   end if;
   return case when tg_op = 'DELETE' then old else new end;
 end;
@@ -464,35 +492,145 @@ for each row execute function private.finance_reject_ledger_mutation();
 create trigger cash_openings_reject_truncate before truncate on public.cash_account_openings
 for each statement execute function private.finance_reject_ledger_mutation();
 
+create or replace function private.finance_insert_reversal(p_original public.cash_ledger, p_note text)
+returns uuid language plpgsql security definer set search_path = '' as $function$
+declare
+  v_id uuid;
+begin
+  insert into public.cash_ledger (
+    business_date,account_id,direction,amount,category,description,branch_id,
+    source_type,source_id,created_by,created_by_name,reversal_of,metadata
+  ) values (
+    (now() at time zone 'Asia/Ho_Chi_Minh')::date,p_original.account_id,
+    case p_original.direction when 'in' then 'out' else 'in' end,p_original.amount,
+    'reversal','Đảo: ' || p_original.description,p_original.branch_id,
+    'reversal',p_original.id,auth.uid(),(select p.full_name from public.profiles p where p.id=auth.uid()),
+    p_original.id,jsonb_build_object('original_source_type',p_original.source_type,
+      'original_source_id',p_original.source_id,'note',trim(p_note))
+  ) returning id into v_id;
+  return v_id;
+end;
+$function$;
+revoke all on function private.finance_insert_reversal(public.cash_ledger,text) from public, anon, authenticated;
+
 create or replace function public.reverse_cash_ledger(p_ledger_id uuid, p_note text)
 returns jsonb language plpgsql security definer set search_path = '' as $function$
 declare
   v_original public.cash_ledger%rowtype;
-  v_id uuid;
+  v_reversal_id uuid;
 begin
   select * into v_original from public.cash_ledger where id = p_ledger_id for update;
   if not found then raise exception 'Không tìm thấy giao dịch sổ quỹ.'; end if;
   perform private.finance_require_actor(v_original.branch_id, true);
   if v_original.reversal_of is not null then raise exception 'Không thể đảo một giao dịch đảo.'; end if;
-  if exists (select 1 from public.cash_ledger where reversal_of = p_ledger_id) then
+  if exists (select 1 from public.finance_source_reversals r where r.source_type=v_original.source_type and r.source_id=v_original.source_id)
+     or exists (select 1 from public.cash_ledger where reversal_of = p_ledger_id) then
     raise exception 'Giao dịch này đã được đảo trước đó.';
   end if;
   if nullif(trim(coalesce(p_note, '')), '') is null then raise exception 'Cần ghi lý do đảo giao dịch.'; end if;
-  insert into public.cash_ledger (
-    business_date, account_id, direction, amount, category, description, branch_id,
-    source_type, source_id, created_by, created_by_name, reversal_of, metadata
+  if v_original.source_type='account_transfer' then
+    raise exception 'Không thể đảo một phía của giao dịch chuyển quỹ; hãy đảo cả giao dịch chuyển quỹ.';
+  elsif v_original.source_type='opening_balance' then
+    raise exception 'Hãy đảo số dư đầu kỳ qua thao tác chuyên biệt.';
+  elsif v_original.source_type in ('tuition_payment','tuition_refund') then
+    raise exception 'Không đảo ledger riêng cho học phí. Dùng nghiệp vụ hoàn tiền/thu học phí để báo cáo nguồn được cập nhật.';
+  elsif v_original.source_type not in ('expense','other_revenue') then
+    raise exception 'Nguồn giao dịch không hỗ trợ đảo qua RPC này.';
+  end if;
+  if v_original.source_id is null then raise exception 'Giao dịch nguồn không có mã liên kết.'; end if;
+  if v_original.source_type='expense' and not exists(select 1 from public.expenses e where e.id=v_original.source_id) then
+    raise exception 'Không tìm thấy khoản chi gốc.';
+  elsif v_original.source_type='other_revenue' and not exists(select 1 from public.other_revenues r where r.id=v_original.source_id) then
+    raise exception 'Không tìm thấy khoản thu gốc.';
+  end if;
+  v_reversal_id := private.finance_insert_reversal(v_original,p_note);
+  insert into public.finance_source_reversals(
+    source_type,source_id,original_ledger_ids,reversal_ledger_ids,branch_id,reason,reversed_by,reversed_by_name
   ) values (
-    (now() at time zone 'Asia/Ho_Chi_Minh')::date, v_original.account_id,
-    case v_original.direction when 'in' then 'out' else 'in' end, v_original.amount,
-    'reversal', 'Đảo: ' || v_original.description, v_original.branch_id,
-    'reversal', v_original.id, auth.uid(), (select p.full_name from public.profiles p where p.id=auth.uid()), v_original.id,
-    jsonb_build_object('original_source_type', v_original.source_type, 'original_source_id', v_original.source_id, 'note', trim(p_note))
-  ) returning id into v_id;
-  return jsonb_build_object('success', true, 'reversal_id', v_id, 'original_id', v_original.id, 'amount', v_original.amount);
+    v_original.source_type,v_original.source_id,array[v_original.id],array[v_reversal_id],v_original.branch_id,
+    trim(p_note),auth.uid(),(select p.full_name from public.profiles p where p.id=auth.uid())
+  );
+  return jsonb_build_object('success',true,'reversal_ids',jsonb_build_array(v_reversal_id),
+    'original_ids',jsonb_build_array(v_original.id),'amount',v_original.amount,'source_type',v_original.source_type,'source_id',v_original.source_id);
 end;
 $function$;
 revoke all on function public.reverse_cash_ledger(uuid, text) from public, anon;
 grant execute on function public.reverse_cash_ledger(uuid, text) to authenticated;
+
+create or replace function public.reverse_cash_transfer(p_transfer_id uuid,p_note text)
+returns jsonb language plpgsql security definer set search_path = '' as $function$
+declare
+  v_transfer public.cash_transfers%rowtype;
+  v_originals public.cash_ledger[];
+  v_first uuid;
+  v_second uuid;
+begin
+  select * into v_transfer from public.cash_transfers where id=p_transfer_id for update;
+  if not found then raise exception 'Không tìm thấy giao dịch chuyển quỹ.'; end if;
+  perform private.finance_require_actor(v_transfer.branch_id,true);
+  if nullif(trim(coalesce(p_note,'')),'') is null then raise exception 'Cần ghi lý do đảo giao dịch.'; end if;
+  if exists(select 1 from public.finance_source_reversals r where r.source_type='account_transfer' and r.source_id=p_transfer_id) then
+    raise exception 'Giao dịch chuyển quỹ này đã được đảo.';
+  end if;
+  perform 1 from public.cash_ledger l
+    where l.source_type='account_transfer' and l.source_id=p_transfer_id order by l.id for update;
+  select array_agg(l order by l.id) into v_originals from public.cash_ledger l
+    where l.source_type='account_transfer' and l.source_id=p_transfer_id;
+  if coalesce(cardinality(v_originals),0)<>2 then raise exception 'Chuyển quỹ phải có đủ hai phía trong sổ.'; end if;
+  if exists(select 1 from unnest(v_originals) l where l.reversal_of is not null)
+     or exists(select 1 from public.cash_ledger l where l.reversal_of=any(array[(v_originals[1]).id,(v_originals[2]).id])) then
+    raise exception 'Một phía của giao dịch đã được đảo; cần rà soát sổ quỹ trước khi tiếp tục.';
+  end if;
+  if (v_originals[1]).direction=(v_originals[2]).direction
+     or abs((v_originals[1]).amount-(v_originals[2]).amount)>0.01
+     or (v_originals[1]).account_id=(v_originals[2]).account_id
+     or not exists(select 1 from unnest(v_originals) l where l.direction='out' and l.account_id=v_transfer.from_account_id and abs(l.amount-v_transfer.amount)<=0.01)
+     or not exists(select 1 from unnest(v_originals) l where l.direction='in' and l.account_id=v_transfer.to_account_id and abs(l.amount-v_transfer.amount)<=0.01) then
+    raise exception 'Hai phía của giao dịch chuyển quỹ không khớp nhau.';
+  end if;
+  v_first := private.finance_insert_reversal(v_originals[1],p_note);
+  v_second := private.finance_insert_reversal(v_originals[2],p_note);
+  insert into public.finance_source_reversals(
+    source_type,source_id,original_ledger_ids,reversal_ledger_ids,branch_id,reason,reversed_by,reversed_by_name
+  ) values (
+    'account_transfer',p_transfer_id,array[(v_originals[1]).id,(v_originals[2]).id],array[v_first,v_second],
+    v_transfer.branch_id,trim(p_note),auth.uid(),(select p.full_name from public.profiles p where p.id=auth.uid())
+  );
+  return jsonb_build_object('success',true,'transfer_id',p_transfer_id,'reversal_ids',jsonb_build_array(v_first,v_second));
+end;
+$function$;
+revoke all on function public.reverse_cash_transfer(uuid,text) from public,anon;
+grant execute on function public.reverse_cash_transfer(uuid,text) to authenticated;
+
+create or replace function public.reverse_cash_opening_balance(p_opening_id uuid,p_note text)
+returns jsonb language plpgsql security definer set search_path = '' as $function$
+declare
+  v_opening public.cash_account_openings%rowtype;
+  v_original public.cash_ledger%rowtype;
+  v_reversal_id uuid;
+begin
+  select * into v_opening from public.cash_account_openings where id=p_opening_id for update;
+  if not found then raise exception 'Không tìm thấy số dư đầu kỳ.'; end if;
+  perform private.finance_require_actor(v_opening.branch_id,false);
+  if nullif(trim(coalesce(p_note,'')),'') is null then raise exception 'Cần ghi lý do đảo số dư đầu kỳ.'; end if;
+  if exists(select 1 from public.finance_source_reversals r where r.source_type='opening_balance' and r.source_id=p_opening_id) then
+    raise exception 'Số dư đầu kỳ này đã được đảo.';
+  end if;
+  select * into v_original from public.cash_ledger l where l.source_type='opening_balance' and l.source_id=p_opening_id for update;
+  if not found then raise exception 'Số dư đầu kỳ không có bút toán tiền để đảo.'; end if;
+  perform private.finance_require_actor(v_original.branch_id,true);
+  v_reversal_id := private.finance_insert_reversal(v_original,p_note);
+  insert into public.finance_source_reversals(
+    source_type,source_id,original_ledger_ids,reversal_ledger_ids,branch_id,reason,reversed_by,reversed_by_name
+  ) values (
+    'opening_balance',p_opening_id,array[v_original.id],array[v_reversal_id],v_opening.branch_id,
+    trim(p_note),auth.uid(),(select p.full_name from public.profiles p where p.id=auth.uid())
+  );
+  return jsonb_build_object('success',true,'opening_id',p_opening_id,'reversal_id',v_reversal_id);
+end;
+$function$;
+revoke all on function public.reverse_cash_opening_balance(uuid,text) from public,anon;
+grant execute on function public.reverse_cash_opening_balance(uuid,text) to authenticated;
 
 create or replace function public.collect_tuition_payment_idempotent_atomic(
   p_student_id uuid, p_class_id uuid, p_billing_month date, p_amount_due numeric,
@@ -585,7 +723,7 @@ declare
   v_opening public.cash_account_openings%rowtype;
 begin
   perform private.finance_require_actor(p_branch_id, false);
-  if p_balance is null or p_balance < 0 or p_business_date is null then raise exception 'Số dư đầu kỳ không hợp lệ.'; end if;
+  if p_balance is null or p_balance <= 0 or p_business_date is null then raise exception 'Số dư đầu kỳ phải lớn hơn 0; khi chưa có tiền hãy ghi số dư sau khi kiểm đếm.'; end if;
   select * into v_account from public.cash_accounts where id=p_account_id and is_active for update;
   if not found or (v_account.branch_id is not null and v_account.branch_id is distinct from p_branch_id) then
     raise exception 'Tài khoản đầu kỳ không hợp lệ.';
@@ -593,10 +731,10 @@ begin
   if exists (
     select 1 from public.cash_account_openings o
     where o.account_id=p_account_id and o.branch_id is not distinct from p_branch_id
-      and (o.balance=0 or exists (
+      and exists (
         select 1 from public.cash_ledger l where l.source_type='opening_balance' and l.source_id=o.id
-          and not exists (select 1 from public.cash_ledger r where r.reversal_of=l.id)
-      ))
+          and not exists (select 1 from public.finance_source_reversals r where r.source_type='opening_balance' and r.source_id=o.id)
+      )
   ) then raise exception 'Tài khoản này đã có số dư đầu kỳ chưa được đảo.'; end if;
   insert into public.cash_account_openings(account_id,branch_id,business_date,balance,note,created_by)
   values(p_account_id,p_branch_id,p_business_date,p_balance,nullif(trim(p_note),''),auth.uid()) returning * into v_opening;
@@ -787,6 +925,7 @@ alter table public.cash_transfers enable row level security;
 alter table public.cash_account_openings enable row level security;
 alter table public.daily_cash_closings enable row level security;
 alter table public.finance_ledger_settings enable row level security;
+alter table public.finance_source_reversals enable row level security;
 
 create policy cash_accounts_finance_read on public.cash_accounts for select to authenticated
 using (exists (select 1 from public.profiles p where p.id=auth.uid() and p.is_active and (p.role='admin' or (p.role='manager' and (cash_accounts.branch_id is null or cash_accounts.branch_id=p.branch_id)))));
@@ -800,6 +939,8 @@ create policy cash_closings_finance_read on public.daily_cash_closings for selec
 using (private.finance_actor_can_access_branch(branch_id));
 create policy finance_settings_admin_read on public.finance_ledger_settings for select to authenticated
 using (exists (select 1 from public.profiles p where p.id=auth.uid() and p.is_active and p.role='admin'));
+create policy finance_source_reversals_read on public.finance_source_reversals for select to authenticated
+using (private.finance_actor_can_access_branch(branch_id));
 
 drop policy if exists other_revenues_staff_select on public.other_revenues;
 drop policy if exists other_revenues_staff_insert on public.other_revenues;
@@ -812,8 +953,13 @@ create policy other_revenues_finance_update on public.other_revenues for update 
 using (private.finance_actor_can_access_branch(branch_id))
 with check (private.finance_actor_can_access_branch(branch_id));
 
-revoke all on public.cash_accounts, public.cash_ledger, public.cash_transfers, public.cash_account_openings, public.daily_cash_closings, public.finance_ledger_settings from anon, authenticated;
-grant select on public.cash_accounts, public.cash_ledger, public.cash_transfers, public.cash_account_openings, public.daily_cash_closings to authenticated;
+revoke all on public.cash_accounts, public.cash_ledger, public.cash_transfers, public.cash_account_openings, public.daily_cash_closings, public.finance_ledger_settings, public.finance_source_reversals from anon, authenticated;
+grant select on public.cash_accounts, public.cash_ledger, public.cash_transfers, public.cash_account_openings, public.daily_cash_closings, public.finance_source_reversals to authenticated;
+
+create trigger finance_source_reversals_reject_update_delete before update or delete on public.finance_source_reversals
+for each row execute function private.finance_reject_ledger_mutation();
+create trigger finance_source_reversals_reject_truncate before truncate on public.finance_source_reversals
+for each statement execute function private.finance_reject_ledger_mutation();
 
 create or replace function private.finance_log_ledger_insert()
 returns trigger language plpgsql security definer set search_path = '' as $function$
@@ -849,7 +995,7 @@ do $realtime$
 declare
   v_table text;
 begin
-  foreach v_table in array array['cash_accounts','cash_ledger','cash_transfers','cash_account_openings','daily_cash_closings']
+  foreach v_table in array array['cash_accounts','cash_ledger','cash_transfers','cash_account_openings','daily_cash_closings','finance_source_reversals']
   loop
     if exists (select 1 from pg_publication where pubname='supabase_realtime')
        and not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=v_table) then

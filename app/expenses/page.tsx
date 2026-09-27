@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
+import { filterEffectiveSources } from "@/lib/finance/ledger";
 
 type Branch = {
   id: string;
@@ -61,6 +62,7 @@ export default function ExpensesPage() {
   const [note, setNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
   const [ledgerSourceIds, setLedgerSourceIds] = useState<Set<string>>(new Set());
+  const [reversedSourceIds, setReversedSourceIds] = useState<Set<string>>(new Set());
 
   const [filterBranch, setFilterBranch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
@@ -77,6 +79,7 @@ export default function ExpensesPage() {
       { data: branchData, error: branchError },
       { data: expenseData, error: expenseError },
       { data: ledgerData, error: ledgerError },
+      { data: reversalData, error: reversalError },
     ] = await Promise.all([
       supabase.from("branches").select("id,name").order("name"),
       supabase
@@ -86,6 +89,7 @@ export default function ExpensesPage() {
         )
         .order("expense_date", { ascending: false }),
       supabase.from("cash_ledger").select("source_id").eq("source_type", "expense"),
+      supabase.from("finance_source_reversals").select("source_id").eq("source_type", "expense"),
     ]);
 
     if (requestId !== loadRequestRef.current) return;
@@ -107,10 +111,16 @@ export default function ExpensesPage() {
       setLoading(false);
       return;
     }
+    if (reversalError) {
+      alert(reversalError.message);
+      setLoading(false);
+      return;
+    }
 
     setBranches(branchData ?? []);
     setExpenses(expenseData ?? []);
     setLedgerSourceIds(new Set((ledgerData ?? []).map((row) => row.source_id).filter((id): id is string => Boolean(id))));
+    setReversedSourceIds(new Set((reversalData ?? []).map((row) => row.source_id).filter((id): id is string => Boolean(id))));
     setLoading(false);
   }, [supabase]);
 
@@ -268,7 +278,8 @@ export default function ExpensesPage() {
     });
   }, [expenses, filterBranch, filterCategory, filterMonth, search]);
 
-  const totalExpense = filteredExpenses.reduce(
+  const effectiveExpenses = filterEffectiveSources("expense", filteredExpenses, [...reversedSourceIds].map((source_id) => ({ source_type: "expense", source_id })));
+  const totalExpense = effectiveExpenses.reduce(
     (sum, item) => sum + Number(item.amount),
     0
   );
@@ -574,7 +585,9 @@ export default function ExpensesPage() {
 
                     <td className="p-4">
                       <div className="flex justify-end gap-2">
-                        {ledgerSourceIds.has(item.id) ? (
+                        {reversedSourceIds.has(item.id) ? (
+                          <span className="self-center text-xs font-bold text-rose-700">Đã đảo · không tính vào tổng</span>
+                        ) : ledgerSourceIds.has(item.id) ? (
                           <span className="self-center text-xs font-bold text-amber-700">Đã ghi sổ · điều chỉnh tại Tài chính</span>
                         ) : <>
                         <button

@@ -52,14 +52,15 @@ export default function FinancePage() {
     const nextBranch = nextRole === "manager" ? profile.branch_id : branchFilter || null;
     let closingQuery = supabase.from("daily_cash_closings").select("id,account_id,version,expected_balance,counted_balance,variance,closed_by_name,closed_at,note").eq("business_date", date).order("version", { ascending: false });
     closingQuery = nextBranch ? closingQuery.eq("branch_id", nextBranch) : closingQuery.is("branch_id", null);
-    const [branchRes, accountRes, ledgerRes, closingRes, balanceRes] = await Promise.all([
+    const [branchRes, accountRes, ledgerRes, reversalRes, closingRes, balanceRes] = await Promise.all([
       supabase.from("branches").select("id,name").order("name"),
       supabase.from("cash_accounts").select("id,name,account_type,is_active").order("account_type").order("name"),
       supabase.from("cash_ledger").select("id,occurred_at,business_date,account_id,direction,amount,category,description,branch_id,source_type,source_id,created_by_name,reversal_of,metadata,account:cash_accounts!cash_ledger_account_id_fkey(id,name,account_type)").eq("business_date", date).order("occurred_at", { ascending: false }).limit(1000),
+      supabase.from("finance_source_reversals").select("source_type,source_id"),
       closingQuery,
       supabase.rpc("get_cash_balances_as_of", { p_business_date: date, p_branch_id: nextBranch }),
     ]);
-    const error = branchRes.error ?? accountRes.error ?? ledgerRes.error ?? closingRes.error ?? balanceRes.error;
+    const error = branchRes.error ?? accountRes.error ?? ledgerRes.error ?? reversalRes.error ?? closingRes.error ?? balanceRes.error;
     if (error) { alert("Không tải được sổ quỹ: " + error.message); setLoading(false); return; }
     setBranches(branchRes.data ?? []);
     const allAccounts = (accountRes.data ?? []) as Account[];
@@ -67,6 +68,11 @@ export default function FinancePage() {
     const balanceMap = new Map(balances.map((item) => [item.account_id, Number(item.balance)]));
     setAccounts(allAccounts.map((account) => ({ ...account, balance: balanceMap.get(account.id) ?? 0 })).filter((account) => account.is_active));
     let nextEntries = (ledgerRes.data ?? []) as unknown as LedgerEntry[];
+    const reversedSources = new Set((reversalRes.data ?? []).map((item) => `${item.source_type}:${item.source_id}`));
+    nextEntries = nextEntries.map((entry) => ({
+      ...entry,
+      is_reversed_source: Boolean(entry.source_id && reversedSources.has(`${entry.source_type}:${entry.source_id}`)),
+    }));
     if (nextBranch) nextEntries = nextEntries.filter((entry) => entry.branch_id === nextBranch);
     setEntries(nextEntries);
     const latestClosings = new Map<string, Closing>();
@@ -104,7 +110,8 @@ export default function FinancePage() {
 
   async function recordOpening(event: React.FormEvent) {
     event.preventDefault();
-    if (!openingAccount || openingBalance === "" || Number(openingBalance) < 0) { alert("Chọn tài khoản và nhập số dư đầu kỳ."); return; }
+    if (!activeBranchId) { alert("Chọn một cơ sở cụ thể trước khi ghi số dư đầu kỳ."); return; }
+    if (!openingAccount || openingBalance === "" || Number(openingBalance) <= 0) { alert("Chọn tài khoản và nhập số dư đầu kỳ lớn hơn 0."); return; }
     setSaving(true);
     const { error } = await supabase.rpc("record_cash_opening_balance", {
       p_account_id: openingAccount, p_branch_id: activeBranchId, p_business_date: date,
@@ -118,7 +125,12 @@ export default function FinancePage() {
   async function reverse(entry: LedgerEntry) {
     const reason = window.prompt(`Lý do đảo giao dịch “${entry.description}” · ${money(Number(entry.amount))}:`);
     if (!reason?.trim()) return;
-    const { error } = await supabase.rpc("reverse_cash_ledger", { p_ledger_id: entry.id, p_note: reason.trim() });
+    const result = entry.source_type === "account_transfer"
+      ? await supabase.rpc("reverse_cash_transfer", { p_transfer_id: entry.source_id, p_note: reason.trim() })
+      : entry.source_type === "opening_balance"
+        ? await supabase.rpc("reverse_cash_opening_balance", { p_opening_id: entry.source_id, p_note: reason.trim() })
+        : await supabase.rpc("reverse_cash_ledger", { p_ledger_id: entry.id, p_note: reason.trim() });
+    const { error } = result;
     if (error) { alert("Không thể đảo giao dịch: " + error.message); return; }
     await loadData();
   }
@@ -162,16 +174,21 @@ export default function FinancePage() {
 
       <section className="ui-card overflow-hidden">
         <div className="flex flex-col gap-2 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-black">Giao dịch ngày {date}</h2><p className="text-sm text-slate-500">Sắp xếp giao dịch mới nhất trước.</p></div><span className="text-sm font-bold text-slate-500">{entries.length} dòng</span></div>
-        {loading ? <p className="p-8 text-center text-slate-400">Đang tải sổ quỹ…</p> : entries.length === 0 ? <p className="p-8 text-center text-slate-400">Chưa có dòng tiền trong ngày này.</p> : <ul className="divide-y divide-slate-100">{entries.map((entry) => <li key={entry.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong>{entry.description}</strong>{entry.reversal_of && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">Điều chỉnh</span>}<span className="text-xs text-slate-400">{new Date(entry.occurred_at).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })}</span></div><div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500"><span>{entry.account?.name ?? "Tài khoản"}</span><span>{branches.find((branch) => branch.id === entry.branch_id)?.name ?? (entry.branch_id ? "Cơ sở" : "Toàn CLB")}</span><span>{entry.created_by_name ?? "Không rõ người nhập"}</span><span>Nguồn: {sourceLabel(entry.source_type)}</span>{entry.source_type === "tuition_payment" && entry.source_id && <Link className="font-bold text-blue-700" href={`/tuition/receipt/${entry.source_id}`}>Biên nhận</Link>}</div>{typeof entry.metadata?.student_name === "string" && <div className="mt-1 text-xs text-slate-500">{entry.metadata.student_name}{typeof entry.metadata.class_name === "string" ? ` · ${entry.metadata.class_name}` : ""}</div>}</div><div className="flex items-center justify-between gap-3 sm:justify-end"><strong className={entry.direction === "in" ? "text-emerald-700" : "text-rose-700"}>{entry.direction === "in" ? "+" : "−"}{money(Number(entry.amount))}</strong>{!entry.reversal_of && <button className="ui-btn min-h-9 px-3 text-xs" onClick={() => void reverse(entry)}>Đảo</button>}</div></li>)}</ul>}
+        {loading ? <p className="p-8 text-center text-slate-400">Đang tải sổ quỹ…</p> : entries.length === 0 ? <p className="p-8 text-center text-slate-400">Chưa có dòng tiền trong ngày này.</p> : <ul className="divide-y divide-slate-100">{entries.map((entry) => {
+          const canReverse = !entry.reversal_of && !entry.is_reversed_source && ["expense", "other_revenue", "account_transfer", "opening_balance"].includes(entry.source_type);
+          return <li key={entry.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong>{entry.description}</strong>{entry.reversal_of && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">Điều chỉnh</span>}{entry.is_reversed_source && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-800">Nguồn đã đảo</span>}<span className="text-xs text-slate-400">{new Date(entry.occurred_at).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })}</span></div><div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500"><span>{entry.account?.name ?? "Tài khoản"}</span><span>{branches.find((branch) => branch.id === entry.branch_id)?.name ?? (entry.branch_id ? "Cơ sở" : "Toàn CLB")}</span><span>{entry.created_by_name ?? "Không rõ người nhập"}</span><span>Nguồn: {sourceLabel(entry.source_type)}</span>{entry.source_type === "tuition_payment" && entry.source_id && <Link className="font-bold text-blue-700" href={`/tuition/receipt/${entry.source_id}`}>Biên nhận</Link>}{["tuition_payment", "tuition_refund"].includes(entry.source_type) && <span className="text-amber-700">Dùng luồng hoàn tiền/thu học phí để điều chỉnh</span>}</div>{typeof entry.metadata?.student_name === "string" && <div className="mt-1 text-xs text-slate-500">{entry.metadata.student_name}{typeof entry.metadata.class_name === "string" ? ` · ${entry.metadata.class_name}` : ""}</div>}</div><div className="flex items-center justify-between gap-3 sm:justify-end"><strong className={entry.direction === "in" ? "text-emerald-700" : "text-rose-700"}>{entry.direction === "in" ? "+" : "−"}{money(Number(entry.amount))}</strong>{canReverse && <button className="ui-btn min-h-9 px-3 text-xs" onClick={() => void reverse(entry)}>{entry.source_type === "account_transfer" ? "Đảo chuyển quỹ" : "Đảo"}</button>}</div></li>;
+        })}</ul>}
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
         <form onSubmit={recordOpening} className="ui-card space-y-3 p-4 sm:p-5">
-          <div><h2 className="text-lg font-black">Ghi số dư đầu kỳ</h2><p className="text-sm text-slate-500">Dùng một lần để mở số dư cho sổ quỹ mới. Việc ghi sổ không tạo dữ liệu học phí cũ.</p></div>
+          <div><h2 className="text-lg font-black">Ghi số dư đầu kỳ</h2><p className="text-sm text-slate-500">Dùng một lần để mở số dư cho sổ quỹ mới. Việc ghi sổ không tạo dữ liệu học phí cũ.</p>{role === "admin" && !activeBranchId && <p className="mt-2 font-bold text-amber-700">Chọn một cơ sở cụ thể ở bộ lọc phía trên để mở biểu mẫu.</p>}</div>
+          <fieldset disabled={saving || !activeBranchId} className="space-y-3 disabled:opacity-50">
           <select className="ui-input w-full" value={openingAccount} onChange={(event) => setOpeningAccount(event.target.value)} required><option value="">Chọn tài khoản</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
-          <input className="ui-input w-full" type="number" min="0" step="1" placeholder="Số dư thực đếm" value={openingBalance} onChange={(event) => setOpeningBalance(event.target.value)} required />
+          <input className="ui-input w-full" type="number" min="1" step="1" placeholder="Số dư thực đếm" value={openingBalance} onChange={(event) => setOpeningBalance(event.target.value)} required />
           <input className="ui-input w-full" placeholder="Ghi chú / căn cứ số dư" value={openingNote} onChange={(event) => setOpeningNote(event.target.value)} />
           <button className="ui-btn ui-btn-blue" disabled={saving}>{saving ? "Đang lưu…" : "Ghi số dư đầu kỳ"}</button>
+          </fieldset>
         </form>
 
         <form onSubmit={closeDay} className="ui-card space-y-3 p-4 sm:p-5">

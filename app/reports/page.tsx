@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { filterEffectiveSources } from "@/lib/finance/ledger";
 import { vietnamCurrentMonth, toVietnamDateKey } from "@/lib/vietnam-date";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
@@ -127,6 +128,7 @@ export default function ReportsPage() {
       { data: expenseData, error: expenseError },
       { data: adjustmentData, error: adjustmentError },
       { data: otherRevenueData, error: otherRevenueError },
+      { data: sourceReversalData, error: sourceReversalError },
     ] = await Promise.all([
       supabase.from("branches").select("id,name").order("name"),
 
@@ -171,6 +173,8 @@ export default function ReportsPage() {
         .gte("revenue_date", range.start)
         .lt("revenue_date", range.end)
         .order("revenue_date", { ascending: false }),
+
+      supabase.from("finance_source_reversals").select("source_type,source_id").in("source_type", ["expense", "other_revenue"]),
     ]);
 
     if (requestId !== loadRequestRef.current) return;
@@ -205,10 +209,16 @@ export default function ReportsPage() {
       return;
     }
 
+    if (sourceReversalError) {
+      alert(sourceReversalError.message);
+      setLoading(false);
+      return;
+    }
+
     setBranches(branchData ?? []);
     setPayments((paymentData ?? []) as unknown as Payment[]);
-    setExpenses(expenseData ?? []);
-    setOtherRevenues((otherRevenueData ?? []) as OtherRevenue[]);
+    setExpenses(filterEffectiveSources("expense", expenseData ?? [], sourceReversalData ?? []));
+    setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenueData ?? []) as OtherRevenue[], sourceReversalData ?? []));
     setAdjustments((adjustmentData ?? []) as unknown as Adjustment[]);
     setLoading(false);
   }, [mode, period, supabase]);
