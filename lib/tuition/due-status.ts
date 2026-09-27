@@ -26,12 +26,15 @@ export type TuitionAdjustmentAmount = {
 };
 
 export type TuitionDueStatus =
+  | "PRE_LAUNCH"
   | "PAID_CURRENT"
   | "DUE"
   | "OVERDUE"
   | "PARTIAL"
   | "PAID_AHEAD"
   | "INACTIVE";
+
+export const TUITION_TRACKING_START_MONTH = "2026-10";
 
 export type MembershipTuitionStatus = {
   status: TuitionDueStatus;
@@ -131,7 +134,10 @@ export function getFirstUnpaidMonth(
   const start = monthKey(membership.start_date);
   const firstKnownPast = history.find((item) => item.period! <= current)?.period;
   // Missing/incomplete enrollment start dates must not create assumed debt.
-  const anchor = start ?? firstKnownPast ?? current;
+  const naturalAnchor = start ?? firstKnownPast ?? current;
+  const anchor = naturalAnchor < TUITION_TRACKING_START_MONTH
+    ? TUITION_TRACKING_START_MONTH
+    : naturalAnchor;
   let month = anchor;
 
   while (month <= current) {
@@ -176,6 +182,17 @@ export function getMembershipTuitionStatus(
     };
   }
 
+  if (current < TUITION_TRACKING_START_MONTH) {
+    return {
+      status: "PRE_LAUNCH",
+      firstUnpaidMonth: null,
+      paidThroughMonth: null,
+      amountDue: 0,
+      amountPaid: 0,
+      remaining: 0,
+    };
+  }
+
   const history = recordsForMembership(membership, records);
   const firstUnpaidMonth = getFirstUnpaidMonth(membership, records, current);
   const firstUnpaidRecord = history.find(
@@ -190,8 +207,11 @@ export function getMembershipTuitionStatus(
   const remaining = Math.max(amountDue - amountPaid, 0);
 
   let paidThroughMonth: string | null = null;
-  const anchor = monthKey(membership.start_date) ??
+  const naturalAnchor = monthKey(membership.start_date) ??
     history.find((item) => item.period! <= current)?.period ?? current;
+  const anchor = naturalAnchor < TUITION_TRACKING_START_MONTH
+    ? TUITION_TRACKING_START_MONTH
+    : naturalAnchor;
   for (let month = anchor; month < firstUnpaidMonth; month = addMonth(month)) {
     const row = history.find((item) => item.period === month);
     if (!row || Number(row.effective_amount_paid ?? row.amount_paid) < Number(row.effective_amount_due ?? row.amount_due)) break;

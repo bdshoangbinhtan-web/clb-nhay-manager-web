@@ -17,6 +17,7 @@ const adminManagerMenus = [
   ["👨‍🏫", "Giáo viên", "/teachers"],
   ["🎟️", "Quản lý học thử", "/trial-students"],
   ["💰", "Học phí", "/tuition"],
+  ["📒", "Tài chính", "/finance"],
   ["💵", "Thu khác", "/other-revenue"],
   ["💵", "Lương giáo viên", "/teacher-payroll"],
   ["💸", "Chi phí", "/expenses"],
@@ -149,6 +150,19 @@ export default function Sidebar({
           {role === "admin" && (
             <>
               <div className="my-2 border-t border-slate-200" />
+
+              <Link
+                href="/finance/monitor"
+                onClick={onClose}
+                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition-[transform,box-shadow,background-color,color] duration-150 ease-out hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-[0_2px_0_rgba(148,163,184,0.18),0_4px_8px_rgba(15,23,42,0.05)] ${
+                  pathname.startsWith("/finance/monitor")
+                    ? "bg-white text-slate-900 ring-1 ring-slate-200/70 shadow-[0_7px_0_rgba(148,163,184,0.30),0_12px_22px_rgba(15,23,42,0.08)] active:translate-y-[3px]"
+                    : "bg-transparent text-slate-800 hover:bg-white hover:text-slate-900 hover:shadow-[0_5px_0_rgba(148,163,184,0.20),0_9px_18px_rgba(15,23,42,0.06)]"
+                }`}
+              >
+                <span className="text-lg">🔎</span>
+                <span>Giám sát tài chính</span>
+              </Link>
 
               <Link
                 href="/activity-log"

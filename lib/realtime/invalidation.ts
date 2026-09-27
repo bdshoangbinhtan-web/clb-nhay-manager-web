@@ -1,11 +1,17 @@
 export const REALTIME_TABLES = [
   "attendance",
   "branches",
+  "cash_account_openings",
+  "cash_accounts",
+  "cash_ledger",
+  "cash_transfers",
   "class_sessions",
   "class_students",
   "class_teachers",
   "classes",
+  "daily_cash_closings",
   "expenses",
+  "finance_source_reversals",
   "other_revenues",
   "profiles",
   "students",
@@ -31,6 +37,7 @@ export type RealtimeTopic =
   | "classes"
   | "dashboard"
   | "expenses"
+  | "finance"
   | "payroll"
   | "reports"
   | "settings"
@@ -43,12 +50,18 @@ export type RealtimeTopic =
 export const REALTIME_TOPICS_BY_TABLE: Record<RealtimeTable, readonly RealtimeTopic[]> = {
   attendance: ["attendance", "classes", "dashboard", "payroll", "reports", "students"],
   branches: ["attendance", "branches", "classes", "dashboard", "expenses", "reports", "settings", "students", "trials", "tuition"],
+  cash_account_openings: ["finance"],
+  cash_accounts: ["finance"],
+  cash_ledger: ["activity-log", "dashboard", "finance", "reports"],
+  finance_source_reversals: ["expenses", "finance", "reports"],
+  cash_transfers: ["activity-log", "finance"],
   class_sessions: ["attendance", "classes", "dashboard", "payroll", "reports", "substitutions"],
   class_students: ["attendance", "classes", "dashboard", "reports", "students", "tuition"],
   class_teachers: ["attendance", "classes", "dashboard", "payroll", "reports", "substitutions", "teachers"],
   classes: ["attendance", "branches", "classes", "dashboard", "payroll", "reports", "students", "substitutions", "trials", "tuition"],
-  expenses: ["dashboard", "expenses", "reports"],
-  other_revenues: ["dashboard", "expenses", "reports"],
+  daily_cash_closings: ["activity-log", "finance"],
+  expenses: ["dashboard", "expenses", "finance", "reports"],
+  other_revenues: ["dashboard", "expenses", "finance", "reports"],
   profiles: ["dashboard", "reports", "settings", "teachers"],
   students: ["attendance", "classes", "dashboard", "reports", "students", "tuition"],
   teacher_attendance: ["attendance", "dashboard", "payroll", "reports", "teachers"],
@@ -61,7 +74,7 @@ export const REALTIME_TOPICS_BY_TABLE: Record<RealtimeTable, readonly RealtimeTo
   trial_students: ["dashboard", "reports", "students", "trials"],
   tuition: ["dashboard", "reports", "students", "tuition"],
   tuition_adjustments: ["dashboard", "reports", "students", "tuition"],
-  tuition_payments: ["dashboard", "reports", "students", "tuition"],
+  tuition_payments: ["dashboard", "finance", "reports", "students", "tuition"],
 };
 
 export function realtimeTopicsForTables(tables: Iterable<string>) {

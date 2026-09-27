@@ -15,9 +15,11 @@ const primaryItems = [
 ] as const;
 const moreItems = [
   ["Cơ sở & lớp", "Lịch và danh sách lớp", "🏢", "/branches"],
+  ["Tài chính", "Sổ quỹ và chốt quỹ theo ngày", "📒", "/finance"],
   ["Giáo viên", "Quản lý đội ngũ", "👨‍🏫", "/teachers"], ["Lương", "Bảng lương giáo viên", "💵", "/teacher-payroll"],
   ["Chi phí", "Theo dõi khoản chi", "💸", "/expenses"], ["Thu khác", "Các khoản thu ngoài học phí", "💰", "/other-revenue"],
   ["Báo cáo", "Tổng hợp hoạt động", "📊", "/reports"],
+  ["Giám sát tài chính", "Cảnh báo sai lệch · Admin", "🔎", "/finance/monitor"],
   ["Đăng ký từ WEB", "Gia đình đăng ký trên website", "✨", "/dashboard/trial-leads"],
   ["Học thử", "Quản lý học viên học thử", "🎟️", "/trial-students"], ["Sức khỏe dữ liệu", "Kiểm tra tính toàn vẹn", "🛡️", "/system-integrity"],
   ["Cài đặt", "Thiết lập hệ thống", "⚙️", "/settings"],
@@ -49,7 +51,7 @@ export default function MobileBottomNav() {
   const isTeacher = role === "teacher";
   const visibleMoreItems = role === "admin"
     ? moreItems
-    : moreItems.filter((item) => item[3] !== "/system-integrity" && item[3] !== "/teacher-payroll");
+    : moreItems.filter((item) => item[3] !== "/system-integrity" && item[3] !== "/teacher-payroll" && item[3] !== "/finance/monitor");
   const isMoreActive = !isTeacher && visibleMoreItems.some((item) => pathname.startsWith(item[3]));
   async function logout() {
     closeMore();

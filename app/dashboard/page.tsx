@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { filterEffectiveSources } from "@/lib/finance/ledger";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import { activeStaffRole } from "@/lib/active-staff-role";
 import {
@@ -214,6 +215,7 @@ export default function DashboardPage() {
       payrollAlertsRes,
       substitutionRequestsRes,
       otherRevenuesRes,
+      sourceReversalsRes,
       todayAttendanceRes,
     ] = await Promise.all([
         supabase
@@ -281,6 +283,7 @@ export default function DashboardPage() {
           .gte("revenue_date", previousMonthStart)
           .lt("revenue_date", nextMonthStart)
           .order("revenue_date", { ascending: false }),
+        supabase.from("finance_source_reversals").select("source_type,source_id").in("source_type", ["expense", "other_revenue"]),
         supabase
           .from("attendance")
           .select("class_id")
@@ -301,6 +304,7 @@ export default function DashboardPage() {
       console.error(substitutionRequestsRes.error);
     }
     if (otherRevenuesRes.error) console.error(otherRevenuesRes.error);
+    if (sourceReversalsRes.error) console.error(sourceReversalsRes.error);
     if (todayAttendanceRes.error) console.error(todayAttendanceRes.error);
 
     setPendingSubstitutionCount(substitutionRequestsRes.count ?? 0);
@@ -315,8 +319,8 @@ export default function DashboardPage() {
     setPayrollAlerts((payrollAlertsRes.data ?? []) as PayrollForAlert[]);
     
     setPayments(paymentsRes.data ?? []);
-    setExpenses(expensesRes.data ?? []);
-    setOtherRevenues((otherRevenuesRes.data ?? []) as OtherRevenue[]);
+    setExpenses(filterEffectiveSources("expense", expensesRes.data ?? [], sourceReversalsRes.data ?? []));
+    setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenuesRes.data ?? []) as OtherRevenue[], sourceReversalsRes.data ?? []));
     setAdjustments((adjustmentsRes.data ?? []) as TuitionAdjustment[]);
     setLoading(false);
   }, [supabase]);

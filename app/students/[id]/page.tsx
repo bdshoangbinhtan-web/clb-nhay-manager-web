@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { StudentAvatar } from "@/components/students/student-avatar";
@@ -105,7 +105,9 @@ function StudentDetailContent() {
   const [adjustmentAmount, setAdjustmentAmount] = useState("");
   const [adjustmentMonth, setAdjustmentMonth] = useState("");
   const [adjustmentNote, setAdjustmentNote] = useState("");
+  const [refundPaymentMethod, setRefundPaymentMethod] = useState<"cash" | "transfer">("cash");
   const [processingAdjustment, setProcessingAdjustment] = useState(false);
+  const refundBatchIdRef = useRef<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [canEditAvatar, setCanEditAvatar] = useState(false);
@@ -340,6 +342,8 @@ function StudentDetailContent() {
     setAdjustmentAmount("");
     setAdjustmentMonth("");
     setAdjustmentNote("");
+    setRefundPaymentMethod("cash");
+    refundBatchIdRef.current = null;
     setSuspendModal(true);
   }
 
@@ -400,6 +404,11 @@ function StudentDetailContent() {
       return;
     }
 
+    if (adjustmentAction === "refund" && !["cash", "transfer"].includes(refundPaymentMethod)) {
+      alert("Vui lòng chọn phương thức hoàn tiền.");
+      return;
+    }
+
     setProcessingAdjustment(true);
 
     try {
@@ -445,7 +454,13 @@ function StudentDetailContent() {
         target_tuition_id: string | null;
         target_month: string | null;
         note: string | null;
+        refund_batch_id?: string | null;
+        refund_payment_method?: "cash" | "transfer" | null;
       }> = [];
+
+      const refundBatchId = adjustmentAction === "refund"
+        ? (refundBatchIdRef.current ??= crypto.randomUUID())
+        : null;
 
       for (const row of sourceRows) {
         if (remaining <= 0) break;
@@ -461,6 +476,9 @@ function StudentDetailContent() {
           target_month:
             adjustmentAction === "carry_forward" ? adjustmentMonth : null,
           note: adjustmentNote.trim() || null,
+          ...(refundBatchId
+            ? { refund_batch_id: refundBatchId, refund_payment_method: refundPaymentMethod }
+            : {}),
         });
 
         remaining -= applied;
@@ -490,10 +508,27 @@ function StudentDetailContent() {
         .insert(rowsWithProcessor);
 
       if (insertError) {
-        throw new Error(insertError.message);
+        if (adjustmentAction !== "refund" || insertError.code !== "23505" || !refundBatchId) {
+          throw new Error(insertError.message);
+        }
+
+        const [{ data: priorAdjustments, error: priorAdjustmentsError }, { data: priorLedger, error: priorLedgerError }] = await Promise.all([
+          supabase.from("tuition_adjustments").select("amount,refund_payment_method")
+            .eq("refund_batch_id", refundBatchId).eq("student_id", id).eq("action", "refund"),
+          supabase.from("cash_ledger").select("id,amount,metadata")
+            .eq("source_type", "tuition_refund").eq("source_id", refundBatchId).maybeSingle(),
+        ]);
+        if (priorAdjustmentsError || priorLedgerError || !priorLedger || !priorAdjustments?.length) {
+          throw new Error(insertError.message);
+        }
+        const priorTotal = priorAdjustments.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        if (Math.abs(priorTotal - amount) > 0.01 || Math.abs(Number(priorLedger.amount) - amount) > 0.01 || priorAdjustments.some((row) => row.refund_payment_method !== refundPaymentMethod)) {
+          throw new Error("Mã hoàn tiền đã được dùng cho số tiền hoặc phương thức khác. Vui lòng kiểm tra sổ quỹ.");
+        }
       }
 
-      await updateStudentStatusOnly();
+      const statusUpdated = await updateStudentStatusOnly();
+      if (statusUpdated && adjustmentAction === "refund") refundBatchIdRef.current = null;
     } catch (error) {
       alert(
         error instanceof Error ? error.message : "Có lỗi xảy ra khi xử lý."
@@ -1264,6 +1299,20 @@ function StudentDetailContent() {
                       placeholder="Nhập số tiền"
                       className="ui-input"
                     />
+
+                    {adjustmentAction === "refund" && (
+                      <label className="block">
+                        <div className="mb-2 text-sm font-bold">Hoàn tiền bằng</div>
+                        <select
+                          value={refundPaymentMethod}
+                          onChange={(event) => setRefundPaymentMethod(event.target.value as "cash" | "transfer")}
+                          className="ui-input"
+                        >
+                          <option value="cash">Tiền mặt</option>
+                          <option value="transfer">Chuyển khoản / Ngân hàng</option>
+                        </select>
+                      </label>
+                    )}
 
                     {adjustmentAction === "carry_forward" && (
                       <label className="block">

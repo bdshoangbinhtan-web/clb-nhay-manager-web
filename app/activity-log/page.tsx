@@ -53,6 +53,9 @@ const entityNames: Record<string, string> = {
   tuition: "Học phí",
   tuition_payments: "Thu học phí",
   tuition_adjustments: "Điều chỉnh học phí",
+  cash_ledger: "Sổ quỹ · giao dịch",
+  cash_transfers: "Chuyển quỹ",
+  daily_cash_closings: "Chốt quỹ cuối ngày",
   profiles: "Tài khoản",
 };
 
@@ -342,6 +345,7 @@ export default function ActivityLogPage() {
       const item = tuitionMap.get(String(data.tuition_id ?? ""));
       return studentMap.get(item?.student_id || "") || "Thu học phí";
     }
+    if (log.entity_type === "cash_ledger") return String(data.description ?? entityNames[log.entity_type]);
     if (log.entity_type === "expenses" || log.entity_type === "other_revenues") return String(data.description ?? data.category ?? entityNames[log.entity_type]);
     if (log.entity_type === "profiles") return profileMap.get(log.entity_id || "")?.full_name || String(data.full_name ?? "Tài khoản");
     return entityNames[log.entity_type] || log.entity_type;
