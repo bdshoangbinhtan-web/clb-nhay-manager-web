@@ -59,22 +59,29 @@ test("due, overdue, partial, paid current, and paid ahead are distinguished", ()
 });
 
 test("pre-launch periods do not create automatic debt; October starts tracking at October", () => {
-  const septemberHistory = [record("2026-09", 0)];
+  const septemberHistory = [record("2026-09", 600000)];
   const preLaunch = getMembershipTuitionStatus(membership, "active", "active", septemberHistory, "2026-09");
   assert.equal(preLaunch.status, "PRE_LAUNCH");
   assert.equal(preLaunch.firstUnpaidMonth, null);
   assert.equal(preLaunch.remaining, 0);
+  assert.equal(septemberHistory[0].amount_paid, 600000, "historical payment remains available unchanged");
   assert.equal(getFirstUnpaidMonth(membership, septemberHistory, "2026-09"), "2026-10");
 
   const october = getMembershipTuitionStatus(membership, "active", "active", septemberHistory, "2026-10");
   assert.equal(october.status, "DUE");
   assert.equal(october.firstUnpaidMonth, "2026-10");
+
+  const november = getMembershipTuitionStatus(membership, "active", "active", septemberHistory, "2026-11");
+  assert.equal(november.status, "OVERDUE");
+  assert.equal(november.firstUnpaidMonth, "2026-10");
 });
 
 test("ended and inactive memberships are excluded and start month is respected", () => {
   assert.equal(getMembershipTuitionStatus({ ...membership, end_date: "2026-09-30" }, "active", "active", [], "2026-10").status, "INACTIVE");
   assert.equal(getMembershipTuitionStatus({ ...membership, status: "inactive" }, "active", "active", [], "2026-10").status, "INACTIVE");
-  assert.equal(getFirstUnpaidMonth({ ...membership, start_date: "2026-12-24" }, [], "2027-01"), "2026-12");
+  const lateEnrollment = { ...membership, start_date: "2026-12-24" };
+  assert.equal(getFirstUnpaidMonth(lateEnrollment, [], "2027-01"), "2026-12");
+  assert.equal(getMembershipTuitionStatus(lateEnrollment, "active", "active", [], "2026-12").status, "DUE");
 });
 
 test("missing start date anchors obligations at the earliest known period, never earlier", () => {

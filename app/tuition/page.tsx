@@ -197,6 +197,7 @@ export default function TuitionPage() {
   const supabase = useMemo(() => createClient(), []);
   const loadRequestRef = useRef(0);
   const collectionRequestIdRef = useRef<string | null>(null);
+  const amountToCollectInputRef = useRef<HTMLInputElement | null>(null);
   const newStudentPrefillRef = useRef(false);
   const urlContextAppliedRef = useRef(false);
 
@@ -525,6 +526,9 @@ export default function TuitionPage() {
     }
 
     return rows.sort((a, b) => {
+      const statusPriority = (status: string) => status === "OVERDUE" ? 0 : status === "PARTIAL" ? 1 : status === "DUE" ? 2 : 3;
+      const priorityDifference = statusPriority(a.due.status) - statusPriority(b.due.status);
+      if (priorityDifference !== 0) return priorityDifference;
       const aMonth = a.due.firstUnpaidMonth ?? "9999-12";
       const bMonth = b.due.firstUnpaidMonth ?? "9999-12";
       return aMonth.localeCompare(bMonth) || a.student.full_name.localeCompare(b.student.full_name, "vi");
@@ -539,12 +543,10 @@ export default function TuitionPage() {
     [membershipTuitionRows]
   );
 
-  const dueCount = actionableDueRows.filter(
-    (row) => row.due.firstUnpaidMonth === currentMonth
-  ).length;
-  const overdueCount = actionableDueRows.filter(
-    (row) => !!row.due.firstUnpaidMonth && row.due.firstUnpaidMonth < currentMonth
-  ).length;
+  const dueCount = new Set(actionableDueRows.map((row) => row.student.id)).size;
+  const overdueCount = new Set(actionableDueRows
+    .filter((row) => !!row.due.firstUnpaidMonth && row.due.firstUnpaidMonth < currentMonth)
+    .map((row) => row.student.id)).size;
   const collectedThisMonth = useMemo(
     () => payments
       .filter((payment) => monthKey(payment.payment_date) === currentMonth)
@@ -704,33 +706,41 @@ export default function TuitionPage() {
     >();
 
     for (const classItem of activeClasses) {
-      const studentIds = activeStudentIdsByClass.get(classItem.id) ?? [];
+      const memberships = activeMemberships.filter((membership) => membership.class_id === classItem.id);
+      let total = 0;
       let paid = 0;
       let debt = 0;
       let debtAmount = 0;
 
-      for (const studentId of studentIds) {
-        const item = tuitionByStudentClass.get(
-          `${studentId}__${classItem.id}`
+      for (const membership of memberships) {
+        const student = studentById.get(membership.student_id);
+        if (!student || student.status !== "active") continue;
+        const joinedMonth = monthKey(membership.start_date) ?? currentMonth;
+        const endedMonth = monthKey(membership.end_date);
+        if (billingMonth < joinedMonth || (endedMonth && billingMonth > endedMonth)) continue;
+        total++;
+
+        const item = tuitionForDueStatus.find((record) =>
+          record.student_id === student.id &&
+          record.class_id === classItem.id &&
+          monthKey(record.billing_month) === billingMonth
         );
-
-        if (!item) continue;
-
-        const amountDue = Number(item.amount_due);
-        const amountPaid = Number(item.amount_paid);
+        const amountDue = Number(item?.effective_amount_due ?? item?.amount_due ??
+          suggestedTuitionAmount(student, classItem, billingMonth, membership.start_date));
+        const amountPaid = Number(item?.effective_amount_paid ?? item?.amount_paid ?? 0);
 
         if (amountDue > 0 && amountPaid >= amountDue) {
           paid++;
         }
 
-        if (amountDue > amountPaid) {
+        if (billingMonth >= TUITION_TRACKING_START_MONTH && billingMonth <= currentMonth && amountDue > amountPaid) {
           debt++;
           debtAmount += Math.max(amountDue - amountPaid, 0);
         }
       }
 
       result.set(classItem.id, {
-        total: studentIds.length,
+        total,
         paid,
         debt,
         debtAmount,
@@ -738,7 +748,7 @@ export default function TuitionPage() {
     }
 
     return result;
-  }, [activeClasses, activeStudentIdsByClass, tuitionByStudentClass]);
+  }, [activeClasses, activeMemberships, billingMonth, currentMonth, studentById, tuitionForDueStatus]);
 
   function classStats(classId: string) {
     return (
@@ -1046,14 +1056,24 @@ export default function TuitionPage() {
     const expectedAmount = existing
       ? Number(existing.amount_due)
       : suggestedTuitionAmount(selectedStudent, classItem, collectionMonth, membership.start_date);
+    const effectiveExisting = existing
+      ? tuitionForDueStatus.find((item) => item.id === existing.id)
+      : undefined;
+    const remainingAmount = existing
+      ? Math.max(
+          Number(effectiveExisting?.effective_amount_due ?? existing.amount_due) -
+            Number(effectiveExisting?.effective_amount_paid ?? existing.amount_paid),
+          0
+        )
+      : dueAmount;
     const noteParts = [note.trim()];
     if (manualPeriod) noteParts.push(`Kỳ được chọn thủ công: ${collectionMonth}`);
     if (Math.abs(dueAmount - expectedAmount) > 0.01) {
       noteParts.push(`Điều chỉnh số học phí thủ công: đề xuất ${expectedAmount}, áp dụng ${dueAmount}`);
     }
 
-    if (amount > dueAmount) {
-      alert("Số tiền thực thu không được lớn hơn số học phí của kỳ.");
+    if (amount > remainingAmount) {
+      alert("Số tiền thực thu không được lớn hơn số còn lại của kỳ.");
       return;
     }
 
@@ -1201,7 +1221,7 @@ export default function TuitionPage() {
     setNote("");
     collectionRequestIdRef.current = null;
     setShowForm(true);
-    window.setTimeout(() => document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+    focusCollectionForm();
   }
 
   function markPaid(item: Tuition) {
@@ -1284,12 +1304,14 @@ export default function TuitionPage() {
   );
 
   const filteredStudents = useMemo(() => {
-    const q = studentSearch.trim().toLowerCase();
+    const q = studentSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
 
     return students
       .filter((student) =>
         `${student.student_code} ${student.full_name}`
           .toLowerCase()
+          .normalize("NFD")
+          .replace(/\p{Diacritic}/gu, "")
           .includes(q)
       )
       .slice(0, 12);
@@ -1330,26 +1352,69 @@ export default function TuitionPage() {
     ? tuitionForDueStatus.find((item) => item.id === selectedCollectionRecord.id)
     : undefined;
 
-  function selectStudentForCollection(student: Student) {
+  function focusCollectionForm() {
+    window.setTimeout(() => {
+      document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      amountToCollectInputRef.current?.focus({ preventScroll: true });
+    }, 100);
+  }
+
+  function openCollectionForPeriod(
+    student: Student,
+    classItem: ClassItem,
+    period: string,
+    amountOverride?: number
+  ) {
+    const membership = activeMemberships.find((item) =>
+      item.student_id === student.id && item.class_id === classItem.id
+    );
+    if (!membership || student.status !== "active" || classItem.status !== "active") {
+      alert("Học viên hiện không có lớp đang học.");
+      return;
+    }
+    const existing = tuition.find((item) =>
+      item.student_id === student.id &&
+      item.class_id === classItem.id &&
+      monthKey(item.billing_month) === period
+    );
+    const effective = existing && tuitionForDueStatus.find((item) => item.id === existing.id);
+    const amountDue = Number(existing?.amount_due ?? suggestedTuitionAmount(student, classItem, period, membership.start_date));
+    const effectiveDue = Number(effective?.effective_amount_due ?? amountDue);
+    const effectivePaid = Number(effective?.effective_amount_paid ?? existing?.amount_paid ?? 0);
+    const remaining = Math.max(effectiveDue - effectivePaid, 0);
+    const amount = amountOverride ?? remaining;
+    if (amount <= 0 || amount > remaining) {
+      alert("Số tiền thu không hợp lệ hoặc kỳ này đã được thanh toán đủ.");
+      return;
+    }
+    const assigned = determineActiveClasses(
+      student.id,
+      classes.filter((item) => item.status === "active"),
+      activeMemberships
+    );
+    const nextPeriod = getFirstUnpaidMonth(membership, tuitionForDueStatus, currentMonth);
     setStudentId(student.id);
     setStudentSearch(student.full_name);
     setShowStudentSearch(false);
-    setStudentClassIds(
-      activeMemberships
-        .filter((membership) => membership.student_id === student.id)
-        .map((membership) => membership.class_id)
-    );
-    setClassId("");
-    setAmountDue("");
-    setAmountToCollect("");
-    setManualPeriod(false);
+    setStudentClassIds(assigned.classes.map((item) => item.id));
+    setClassId(classItem.id);
+    setCollectionMonth(period);
+    setManualPeriod(period !== nextPeriod);
+    setAmountDue(String(amountDue));
+    setAmountToCollect(String(amount));
+    setPaymentMethod("cash");
     setNote("");
     collectionRequestIdRef.current = null;
     setIsNewStudentFlow(false);
     setShowForm(true);
-    window.setTimeout(() => {
-      document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 100);
+    focusCollectionForm();
+  }
+
+  function openCollectionForDueRow(row: (typeof membershipTuitionRows)[number]) {
+    const period = row.due.firstUnpaidMonth;
+    if (!period) return;
+    const remaining = Math.max(row.due.remaining || row.suggestedAmount, 0);
+    openCollectionForPeriod(row.student, row.classItem, period, remaining);
   }
 
   return (
@@ -1368,13 +1433,13 @@ export default function TuitionPage() {
 
       <section className="rounded-3xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-sm sm:p-7">
         <label className="block">
-          <span className="text-xs font-black uppercase tracking-widest text-blue-700">THU HỌC PHÍ THEO HỌC VIÊN</span>
-          <span className="mt-1 block text-xl font-black text-slate-900">Tìm học viên để ghi nhận khoản thu</span>
+          <span className="text-xs font-black uppercase tracking-widest text-blue-700">TRUNG TÂM KIỂM SOÁT HỌC PHÍ</span>
+          <span className="mt-1 block text-xl font-black text-slate-900">Tìm học viên và kỳ cần thu</span>
           <span className="relative mt-4 block">
             <input
               autoComplete="off"
-              className="ui-input min-h-14 w-full border-blue-200 bg-white text-lg shadow-sm"
-              placeholder="Nhập tên hoặc mã học viên..."
+              className="ui-input min-h-14 w-full border-blue-200 bg-white text-lg shadow-sm sm:min-h-16 sm:text-xl"
+              placeholder="🔎 Tìm tên hoặc mã học viên..."
               value={studentSearch}
               onChange={(event) => {
                 setStudentSearch(event.target.value);
@@ -1385,21 +1450,53 @@ export default function TuitionPage() {
               onBlur={() => window.setTimeout(() => setShowStudentSearch(false), 150)}
             />
             {showStudentSearch && studentSearch.trim() && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-2xl">
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[min(70vh,34rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl">
                 {filteredStudents.length === 0 ? (
                   <div className="p-3 text-sm text-slate-400">Không tìm thấy học viên</div>
-                ) : filteredStudents.map((student) => (
-                  <button
-                    key={student.id}
-                    type="button"
-                    className="block min-h-12 w-full rounded-lg px-3 py-2 text-left hover:bg-blue-50"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => selectStudentForCollection(student)}
-                  >
-                    <span className="font-bold">{student.full_name}</span>
-                    <span className="ml-2 text-sm font-bold text-blue-700">{student.student_code}</span>
-                  </button>
-                ))}
+                ) : filteredStudents.map((student) => {
+                  const obligations = membershipTuitionRows.filter((row) => row.student.id === student.id);
+                  return (
+                    <div key={student.id} className="border-b border-slate-100 p-3 last:border-0">
+                      <div className="font-black text-slate-900">{student.full_name}</div>
+                      <div className="mt-0.5 text-sm font-bold text-blue-700">{student.student_code}</div>
+                      {obligations.length === 0 ? (
+                        <div className="mt-2 rounded-xl bg-slate-50 p-3 text-sm text-slate-500">
+                          {currentMonth < TUITION_TRACKING_START_MONTH
+                            ? "Theo dõi công nợ tự động bắt đầu từ tháng 10/2026."
+                            : "Không có lớp đang học cần xử lý."}
+                        </div>
+                      ) : (
+                        <div className="mt-2 space-y-2">
+                          {obligations.map((row) => {
+                            const canCollect = ["DUE", "OVERDUE", "PARTIAL"].includes(row.due.status) &&
+                              (row.due.remaining > 0 || row.suggestedAmount > 0);
+                            const amountDue = row.due.amountDue > 0 ? row.due.amountDue : row.suggestedAmount;
+                            const remaining = row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount;
+                            const statusLabel = row.due.status === "OVERDUE" ? "Quá hạn"
+                              : row.due.status === "PARTIAL" ? "Đóng một phần"
+                              : row.due.status === "DUE" ? "Chưa đóng kỳ hiện tại"
+                              : row.due.status === "PRE_LAUNCH" ? "Dữ liệu nháp · chưa theo dõi nợ"
+                              : row.due.status === "PAID_AHEAD" ? "Đã đóng trước"
+                              : "Đã đóng đủ";
+                            return (
+                              <div key={row.classItem.id} className="flex flex-col gap-3 rounded-2xl bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="min-w-0 text-sm">
+                                  <div className="font-bold">{row.classItem.name}</div>
+                                  <div className="mt-0.5 text-xs text-slate-500">{row.due.firstUnpaidMonth ? monthLabel(row.due.firstUnpaidMonth) : monthLabel(currentMonth)}</div>
+                                  {canCollect && <div className="mt-1 text-xs text-slate-600">Phải thu {money(amountDue)} · Đã thu {money(row.due.amountPaid)} · Còn {money(remaining)}</div>}
+                                  <span className={`mt-1 inline-block rounded-full px-2.5 py-1 text-xs font-bold ${canCollect ? row.due.status === "OVERDUE" ? "bg-rose-100 text-rose-700" : row.due.status === "PARTIAL" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
+                                    {statusLabel}
+                                  </span>
+                                </div>
+                                {canCollect && <button type="button" className="ui-btn ui-btn-primary min-h-11 shrink-0" onMouseDown={(event) => event.preventDefault()} onClick={() => openCollectionForDueRow(row)}>Thu tiền</button>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </span>
@@ -1519,7 +1616,7 @@ export default function TuitionPage() {
 
             <label className="block">
               <div className="mb-2 text-sm font-bold">Số tiền thực thu</div>
-              <input type="number" min="1" step="1000" value={amountToCollect} onChange={(e) => setAmountToCollect(e.target.value)} className="ui-input" />
+              <input ref={amountToCollectInputRef} type="number" min="1" step="1000" value={amountToCollect} onChange={(e) => setAmountToCollect(e.target.value)} className="ui-input" />
             </label>
 
             <label className="block">
@@ -1554,12 +1651,6 @@ export default function TuitionPage() {
         </section>
       )}
 
-      {currentMonth < TUITION_TRACKING_START_MONTH && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-          Giai đoạn trước khai trương: theo dõi công nợ tự động bắt đầu từ tháng 10/2026. Dữ liệu tháng 9 và các tháng trước vẫn được giữ để tra cứu lịch sử.
-        </div>
-      )}
-
       <section className="grid gap-4 md:grid-cols-3">
         <div className="ui-card p-6">
           <div className="text-sm font-bold text-slate-400">ĐÃ THU THÁNG NÀY</div>
@@ -1567,19 +1658,25 @@ export default function TuitionPage() {
         </div>
 
         <div className="ui-card p-6">
-          <div className="text-sm font-bold text-slate-400">CẦN THU</div>
+          <div className="text-sm font-bold text-slate-400">HỌC VIÊN CẦN THU</div>
           <div className="mt-2 text-3xl font-black">{dueCount}</div>
         </div>
 
         <div className="ui-card p-6">
-          <div className="text-sm font-bold text-slate-400">QUÁ HẠN</div>
+          <div className="text-sm font-bold text-slate-400">HỌC VIÊN QUÁ HẠN</div>
           <div className="mt-2 text-3xl font-black text-rose-500">{overdueCount}</div>
         </div>
       </section>
 
+      {currentMonth < TUITION_TRACKING_START_MONTH && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+          Giai đoạn trước khai trương: theo dõi công nợ tự động bắt đầu từ tháng 10/2026. Dữ liệu tháng 9 và các tháng trước vẫn được giữ để tra cứu lịch sử.
+        </div>
+      )}
+
       <section className="ui-card overflow-hidden">
         <div className="border-b border-slate-100 p-5 sm:p-6">
-          <h2 className="text-2xl font-black">Cần thu</h2>
+          <h2 className="text-2xl font-black">Danh sách cần xử lý</h2>
           <p className="mt-1 text-sm text-slate-500">Danh sách được tính từ lớp đang học và lịch sử học phí; chưa thu thì chưa tạo phiếu.</p>
         </div>
         {loading ? (
@@ -1599,25 +1696,18 @@ export default function TuitionPage() {
                     <div className="mt-1 text-sm text-slate-500">{row.classItem.name} · {branch} · Kỳ {monthLabel(period)}</div>
                     <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
                       <span className={`rounded-full px-3 py-1 ${row.due.status === "PARTIAL" ? "bg-amber-100 text-amber-800" : overdue ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"}`}>
-                        {row.due.status === "PARTIAL" ? "Còn thiếu" : overdue ? "Quá hạn" : "Đến hạn"}
+                        {row.due.status === "PARTIAL" ? "Đóng một phần" : overdue ? "Quá hạn" : "Chưa đóng kỳ hiện tại"}
                       </span>
                       {row.due.paidThroughMonth && <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Đã đóng đến {monthLabel(row.due.paidThroughMonth)}</span>}
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center justify-between gap-4 sm:justify-end">
-                    <strong>{money(row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount)}</strong>
-                    <button type="button" className="ui-btn ui-btn-primary" onClick={() => {
-                      setStudentId(row.student.id);
-                      setStudentSearch(row.student.full_name);
-                      setStudentClassIds([row.classItem.id]);
-                      setClassId(row.classItem.id);
-                      setCollectionMonth(period);
-                      setManualPeriod(false);
-                      setNote("");
-                      collectionRequestIdRef.current = null;
-                      setShowForm(true);
-                      window.setTimeout(() => document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
-                    }}>Thu học phí</button>
+                  <div className="grid grid-cols-3 gap-2 text-xs sm:min-w-[330px]">
+                    <div><div className="text-slate-400">Phải thu</div><strong className="mt-1 block text-sm">{money(row.suggestedAmount)}</strong></div>
+                    <div><div className="text-slate-400">Đã thu</div><strong className="mt-1 block text-sm text-emerald-700">{money(row.due.amountPaid)}</strong></div>
+                    <div><div className="text-slate-400">Còn lại</div><strong className="mt-1 block text-sm text-rose-700">{money(row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount)}</strong></div>
+                  </div>
+                  <div className="flex shrink-0 justify-end">
+                    <button type="button" className="ui-btn ui-btn-primary min-h-11" onClick={() => openCollectionForDueRow(row)}>Thu tiền</button>
                   </div>
                 </div>
               );
@@ -1721,10 +1811,8 @@ export default function TuitionPage() {
 
                         <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
                           <div className="rounded-2xl bg-emerald-50 p-3">
-                            <div className="text-slate-400">Đã đóng</div>
-                            <div className="mt-1 font-black text-emerald-600">
-                              {stats.paid}
-                            </div>
+                            <div className="font-black text-emerald-700">{stats.paid}/{stats.total} đã đóng</div>
+                            <div className="mt-1 text-slate-500">{billingMonth < TUITION_TRACKING_START_MONTH ? "Giai đoạn nháp · không tính công nợ" : stats.debt > 0 ? `Còn ${stats.debt} học viên` : "Đã đủ"}</div>
                           </div>
 
                           <div className="rounded-2xl bg-rose-50 p-3">
@@ -1896,10 +1984,16 @@ export default function TuitionPage() {
                   student.id,
                   selectedTuitionClass.id
                 );
-
-                const due = Number(item?.amount_due || 0);
-                const paid = Number(item?.amount_paid || 0);
+                const membership = activeMemberships.find((entry) =>
+                  entry.student_id === student.id && entry.class_id === selectedTuitionClass.id
+                );
+                const effectiveItem = item && tuitionForDueStatus.find((entry) => entry.id === item.id);
+                const due = Number(effectiveItem?.effective_amount_due ?? item?.amount_due ?? (
+                  membership ? suggestedTuitionAmount(student, selectedTuitionClass, billingMonth, membership.start_date) : 0
+                ));
+                const paid = Number(effectiveItem?.effective_amount_paid ?? item?.amount_paid ?? 0);
                 const remain = Math.max(due - paid, 0);
+                const autoTracking = billingMonth >= TUITION_TRACKING_START_MONTH && billingMonth <= currentMonth;
                 const fullyPaid = !!item && remain <= 0 && due > 0;
 
                 return (
@@ -1917,7 +2011,9 @@ export default function TuitionPage() {
                       <div className="mt-1 text-xs text-slate-400">
                         {item
                           ? `Kỳ ${monthLabel(billingMonth)}`
-                          : "Chưa tạo học phí"}
+                          : viewingPreLaunchMonth
+                            ? "Dữ liệu lịch sử · không tự tính công nợ"
+                            : `Kỳ ${monthLabel(billingMonth)} · chưa phát sinh thanh toán`}
                       </div>
                     </div>
 
@@ -1947,19 +2043,27 @@ export default function TuitionPage() {
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       {fullyPaid ? (
                         <span className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-black text-emerald-700">
-                          🟢 Đã đóng
+                          🟢 Đã đóng đủ
                         </span>
                       ) : item ? (
                         <button
                           type="button"
-                          onClick={() => markPaid(item)}
+                          onClick={() => openCollectionForPeriod(student, selectedTuitionClass, billingMonth)}
+                          className="ui-btn ui-btn-primary"
+                        >
+                          💰 Thu tiền
+                        </button>
+                      ) : autoTracking ? (
+                        <button
+                          type="button"
+                          onClick={() => openCollectionForPeriod(student, selectedTuitionClass, billingMonth)}
                           className="ui-btn ui-btn-primary"
                         >
                           💰 Thu tiền
                         </button>
                       ) : (
                         <span className="rounded-full bg-amber-100 px-4 py-2 text-sm font-black text-amber-700">
-                          🟡 Chưa tạo
+                          🟡 Chưa theo dõi
                         </span>
                       )}
 
