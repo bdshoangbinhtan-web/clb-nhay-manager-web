@@ -1,6 +1,8 @@
 -- Keep the append-only audit trail intact while making the Admin activity feed useful.
 -- No activity_logs rows are deleted or modified by this migration.
 
+begin;
+
 create or replace function public.get_activity_log_page(
   p_month date default null,
   p_branch_id uuid default null,
@@ -162,3 +164,5 @@ revoke all on function public.get_activity_log_page(
 grant execute on function public.get_activity_log_page(
   date, uuid, uuid, text, text, text, boolean, integer, integer
 ) to authenticated;
+
+commit;
