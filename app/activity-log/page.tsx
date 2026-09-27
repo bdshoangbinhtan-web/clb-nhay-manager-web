@@ -43,7 +43,6 @@ const entityNames: Record<string, string> = {
   class_students: "Xếp lớp học viên",
   class_teachers: "Phân công giáo viên",
   branches: "Cơ sở",
-  attendance: "Điểm danh học viên",
   teacher_attendance: "Điểm danh giáo viên",
   teacher_work_sessions: "Buổi công giáo viên",
   teacher_substitution_requests: "Yêu cầu dạy thay",
@@ -61,7 +60,7 @@ const groupInfo: Record<BusinessGroup, { label: string; icon: string }> = {
   finance: { label: "Tài chính", icon: "💰" },
   teachers: { label: "Giáo viên", icon: "🧑‍🏫" },
   students: { label: "Học viên", icon: "🧒" },
-  classes: { label: "Lớp & điểm danh", icon: "📚" },
+  classes: { label: "Lớp học", icon: "📚" },
   system: { label: "Hệ thống", icon: "⚙️" },
 };
 
@@ -328,11 +327,6 @@ export default function ActivityLogPage() {
     if (log.entity_type === "students") return studentMap.get(log.entity_id || "") || "Học viên";
     if (log.entity_type === "teachers") return teacherMap.get(log.entity_id || "") || "Giáo viên";
     if (log.entity_type === "classes") return classMap.get(log.entity_id || "") || "Lớp học";
-    if (log.entity_type === "attendance") {
-      const studentName = studentMap.get(String(data.student_id ?? ""));
-      const className = classMap.get(String(data.class_id ?? ""));
-      return studentName && className ? `${studentName} — ${className}` : "Bản ghi điểm danh";
-    }
     if (log.entity_type === "teacher_attendance" || log.entity_type === "teacher_work_sessions") {
       const teacherName = teacherMap.get(String(data.teacher_id ?? data.actual_teacher_id ?? ""));
       const className = classMap.get(String(data.class_id ?? ""));
@@ -368,7 +362,7 @@ export default function ActivityLogPage() {
         <div className="mt-1 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">Lịch sử hoạt động</h1>
-            <p className="mt-2 text-sm text-slate-500 sm:text-base">Nhật ký dài hạn, lọc và thống kê trên toàn bộ dữ liệu hệ thống.</p>
+            <p className="mt-2 text-sm text-slate-500 sm:text-base">Theo dõi những thay đổi vận hành quan trọng theo thời gian. Điểm danh học viên được ẩn để nhật ký gọn và dễ kiểm tra hơn.</p>
           </div>
           <button type="button" onClick={toggleFinancialMode} className={`rounded-2xl px-5 py-3 text-sm font-black transition ${financialMode ? "bg-emerald-600 text-white shadow-lg shadow-emerald-200" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}>
             {financialMode ? "✓ Đang kiểm tra tài chính" : "💰 Kiểm tra tài chính"}
