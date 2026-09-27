@@ -1,5 +1,3 @@
-begin;
-
 create or replace function public.collect_tuition_payment_atomic(
   p_student_id uuid,
   p_class_id uuid,
@@ -18,6 +16,7 @@ as $function$
 declare
   v_role text;
   v_profile_branch uuid;
+  v_profile_active boolean;
   v_student public.students%rowtype;
   v_class public.classes%rowtype;
   v_tuition public.tuition%rowtype;
@@ -33,12 +32,13 @@ begin
     raise exception 'Bạn chưa đăng nhập.';
   end if;
 
-  select p.role, p.branch_id
-    into v_role, v_profile_branch
+  select p.role, p.branch_id, p.is_active
+    into v_role, v_profile_branch, v_profile_active
   from public.profiles p
   where p.id = auth.uid();
 
-  if coalesce(v_role, '') not in ('admin', 'manager') then
+  if coalesce(v_profile_active, false) is not true
+     or coalesce(v_role, '') not in ('admin', 'manager') then
     raise exception 'Bạn không có quyền thu học phí.';
   end if;
 
@@ -244,4 +244,3 @@ grant execute on function public.collect_tuition_payment_atomic(
   uuid, uuid, date, numeric, numeric, text, date, text
 ) to authenticated;
 
-commit;
