@@ -1056,14 +1056,24 @@ export default function TuitionPage() {
     const expectedAmount = existing
       ? Number(existing.amount_due)
       : suggestedTuitionAmount(selectedStudent, classItem, collectionMonth, membership.start_date);
+    const effectiveExisting = existing
+      ? tuitionForDueStatus.find((item) => item.id === existing.id)
+      : undefined;
+    const remainingAmount = existing
+      ? Math.max(
+          Number(effectiveExisting?.effective_amount_due ?? existing.amount_due) -
+            Number(effectiveExisting?.effective_amount_paid ?? existing.amount_paid),
+          0
+        )
+      : dueAmount;
     const noteParts = [note.trim()];
     if (manualPeriod) noteParts.push(`Kỳ được chọn thủ công: ${collectionMonth}`);
     if (Math.abs(dueAmount - expectedAmount) > 0.01) {
       noteParts.push(`Điều chỉnh số học phí thủ công: đề xuất ${expectedAmount}, áp dụng ${dueAmount}`);
     }
 
-    if (amount > dueAmount) {
-      alert("Số tiền thực thu không được lớn hơn số học phí của kỳ.");
+    if (amount > remainingAmount) {
+      alert("Số tiền thực thu không được lớn hơn số còn lại của kỳ.");
       return;
     }
 
