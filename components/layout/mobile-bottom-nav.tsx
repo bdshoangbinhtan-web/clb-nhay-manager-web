@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { BottomSheet } from "@/components/ui/mobile-ui";
+import { usePrivacyView } from "./privacy-view-context";
+import { usePrivacyLogoGesture } from "./use-privacy-logo-gesture";
 
 type Role = "admin" | "manager" | "teacher" | "";
 const primaryItems = [
@@ -33,6 +36,8 @@ export default function MobileBottomNav() {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const { privacyView } = usePrivacyView();
+  const logoGesture = usePrivacyLogoGesture();
   const [role, setRole] = useState<Role>("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -49,7 +54,9 @@ export default function MobileBottomNav() {
   }, [supabase]);
   if (!role) return null;
   const isTeacher = role === "teacher";
-  const visibleMoreItems = role === "admin"
+  const visibleMoreItems = privacyView
+    ? moreItems.filter((item) => item[3] === "/branches" || item[3] === "/finance")
+    : role === "admin"
     ? moreItems
     : moreItems.filter((item) => item[3] !== "/system-integrity" && item[3] !== "/teacher-payroll" && item[3] !== "/finance/monitor");
   const isMoreActive = !isTeacher && visibleMoreItems.some((item) => pathname.startsWith(item[3]));
@@ -65,16 +72,16 @@ export default function MobileBottomNav() {
         return <Link key={href} href={href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}><span className="abk-nav-icon" aria-hidden="true">{icon}</span><span>{label}</span></Link>;
       }) : primaryItems.map((item) => {
         const active = item.match.some((prefix) => pathname.startsWith(prefix));
-        return <Link key={item.href} href={item.href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}><span className="abk-nav-icon" aria-hidden="true">{item.icon}</span><span>{item.label}</span></Link>;
+        return <Link key={item.href} href={item.href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}><span {...(item.href === "/dashboard" ? logoGesture : {})} className={item.href === "/dashboard" ? "abk-nav-icon h-9 select-none touch-manipulation" : "abk-nav-icon"} style={item.href === "/dashboard" ? { WebkitTouchCallout: "none" } : undefined} aria-hidden="true">{item.href === "/dashboard" ? <Image src="/angelbk-logo.jpg" alt="" width={30} height={30} unoptimized draggable={false} className="h-[30px] w-[30px] rounded-md object-contain" /> : item.icon}</span><span>{item.label}</span></Link>;
       })}
       <button type="button" onClick={() => setMoreOpen(true)} className={isMoreActive || moreOpen ? "is-active" : ""} aria-expanded={moreOpen}><span className="abk-nav-icon" aria-hidden="true">•••</span><span>Thêm</span></button>
     </nav>
-    <BottomSheet open={moreOpen} onClose={closeMore} title="Thêm" description="Các khu vực ít dùng hơn">
+    <BottomSheet open={moreOpen} onClose={closeMore} title="Thêm" description={privacyView ? undefined : "Các khu vực ít dùng hơn"}>
       <div className="grid grid-cols-2 gap-2">
         {(isTeacher ? [["Tất cả lớp", "Xem tất cả lớp được phân công", "🗓️", "/teacher-classes?view=all"], ["Dạy thay", "Lịch dạy thay", "🔄", "/teacher-substitution"], ["Lương của tôi", "Xem bảng lương", "💰", "/teacher-salary"]] as const : visibleMoreItems).map(([label, description, icon, href]) => <Link key={href} href={href} onClick={closeMore} className="abk-more-link"><span className="text-xl" aria-hidden="true">{icon}</span><span className="font-extrabold text-slate-900">{label}</span><span className="text-xs leading-4 text-slate-500">{description}</span></Link>)}
       </div>
       <div className="mt-4 border-t border-slate-200 px-1 pt-4">
-        <div className="px-2 pb-3"><div className="text-xs font-black uppercase tracking-wide text-slate-400">Tài khoản</div>{email ? <div className="mt-1 truncate text-sm font-semibold text-slate-700">{email}</div> : null}</div>
+        {!privacyView && <div className="px-2 pb-3"><div className="text-xs font-black uppercase tracking-wide text-slate-400">Tài khoản</div>{email ? <div className="mt-1 truncate text-sm font-semibold text-slate-700">{email}</div> : null}</div>}
         <button type="button" onClick={logout} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 font-extrabold text-slate-800">🚪 Đăng xuất</button>
       </div>
     </BottomSheet>

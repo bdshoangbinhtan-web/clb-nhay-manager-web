@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { managerPayrollRouteBlocked } from "@/lib/teacher-payroll-access";
+import { entryRedirect } from "@/lib/middleware-entry";
 
 const ADMIN_MANAGER_ROUTES = [
   "/dashboard",
@@ -68,31 +69,25 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
+  // Trang chủ công khai cho mọi người, kể cả khi đã đăng nhập.
+  if (pathname === "/") return response;
+
   // Chưa đăng nhập
-  if (!user && pathname !== "/login" && pathname !== "/") {
-    return NextResponse.redirect(new URL("/login", request.url));
+  if (!user) {
+    const destination = entryRedirect(pathname, null);
+    return destination ? NextResponse.redirect(new URL(destination, request.url)) : response;
   }
 
   // Đã đăng nhập nhưng quay lại login
-  if (user && (pathname === "/login" || pathname === "/")) {
+  if (pathname === "/login") {
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
       .single();
 
-    if (profile?.role === "teacher") {
-      return NextResponse.redirect(
-        new URL("/teacher-classes", request.url)
-      );
-    }
-
-    return NextResponse.redirect(new URL("/dashboard", request.url));
-  }
-
-  // Nếu chưa có user thì các đoạn dưới không cần chạy
-  if (!user) {
-    return response;
+    const destination = entryRedirect(pathname, profile?.role ?? "");
+    if (destination) return NextResponse.redirect(new URL(destination, request.url));
   }
 
   // Lấy role hiện tại

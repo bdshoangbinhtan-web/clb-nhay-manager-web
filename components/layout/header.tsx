@@ -5,6 +5,7 @@ import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
+import { usePrivacyView } from "./privacy-view-context";
 
 type TeacherSalarySummaryRow = {
   payroll_status: "draft" | "locked" | "paid" | null;
@@ -19,6 +20,7 @@ type TeacherAttendanceSummaryRow = {
 
 export default function Header({ onMenu }: { onMenu: () => void }) {
   const router = useRouter();
+  const { privacyView } = usePrivacyView();
   const supabase = useMemo(() => createClient(), []);
   const [teacherSummary, setTeacherSummary] = useState<{
     sessions: number;
@@ -26,6 +28,7 @@ export default function Header({ onMenu }: { onMenu: () => void }) {
   } | null>(null);
 
   const loadTeacherSummary = useCallback(async () => {
+    if (privacyView) return;
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -106,9 +109,10 @@ export default function Header({ onMenu }: { onMenu: () => void }) {
       sessions: attendanceResult.error ? savedSessions : liveSessionKeys.size,
       status: first?.payroll_status ?? null,
     });
-  }, [supabase]);
+  }, [privacyView, supabase]);
 
   useEffect(() => {
+    if (privacyView) return;
     void loadTeacherSummary();
 
     const refresh = () => void loadTeacherSummary();
@@ -119,7 +123,7 @@ export default function Header({ onMenu }: { onMenu: () => void }) {
       window.removeEventListener("teacher-attendance-updated", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, [loadTeacherSummary]);
+  }, [loadTeacherSummary, privacyView]);
 
   useRealtimeRefresh(["attendance", "payroll"], loadTeacherSummary);
 
@@ -131,6 +135,12 @@ export default function Header({ onMenu }: { onMenu: () => void }) {
   const payrollIsLocked =
     teacherSummary?.status === "locked" || teacherSummary?.status === "paid";
   const currentMonth = Number(vietnamCurrentMonth().slice(5, 7));
+
+  if (privacyView) {
+    return <header className="sticky top-0 z-30 hidden min-h-[66px] items-center justify-end border-b border-white/80 bg-white/70 px-8 backdrop-blur-xl lg:flex">
+      <button onClick={logout} className="ui-btn ui-btn-light">Đăng xuất</button>
+    </header>;
+  }
 
   return (
     <header className="sticky top-0 z-30 hidden min-h-[82px] items-center justify-between gap-2 border-b border-white/80 bg-white/70 px-3 py-2 backdrop-blur-xl sm:px-5 lg:flex lg:px-8">
