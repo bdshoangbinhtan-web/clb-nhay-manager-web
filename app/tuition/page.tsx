@@ -1413,7 +1413,7 @@ export default function TuitionPage() {
   function openCollectionForDueRow(row: (typeof membershipTuitionRows)[number]) {
     const period = row.due.firstUnpaidMonth;
     if (!period) return;
-    const remaining = Math.max(row.due.remaining || row.suggestedAmount, 0);
+    const remaining = Math.max(row.due.amountDue > 0 ? row.due.remaining : row.suggestedAmount, 0);
     openCollectionForPeriod(row.student, row.classItem, period, remaining);
   }
 
@@ -1468,27 +1468,33 @@ export default function TuitionPage() {
                       ) : (
                         <div className="mt-2 space-y-2">
                           {obligations.map((row) => {
-                            const canCollect = ["DUE", "OVERDUE", "PARTIAL"].includes(row.due.status) &&
-                              (row.due.remaining > 0 || row.suggestedAmount > 0);
+                            const period = row.due.firstUnpaidMonth;
+                            const isAdvance = !!period && period > currentMonth;
+                            const coversPeriod = !!period &&
+                              (monthKey(row.membership.end_date) ?? "9999-12") >= period;
+                            const canCollect = coversPeriod &&
+                              (row.due.amountDue > 0 ? row.due.remaining > 0 : row.suggestedAmount > 0);
                             const amountDue = row.due.amountDue > 0 ? row.due.amountDue : row.suggestedAmount;
-                            const remaining = row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount;
+                            const remaining = row.due.amountDue > 0 ? row.due.remaining : row.suggestedAmount;
                             const statusLabel = row.due.status === "OVERDUE" ? "Quá hạn"
                               : row.due.status === "PARTIAL" ? "Đóng một phần"
                               : row.due.status === "DUE" ? "Chưa đóng kỳ hiện tại"
-                              : row.due.status === "PRE_LAUNCH" ? "Dữ liệu nháp · chưa theo dõi nợ"
-                              : row.due.status === "PAID_AHEAD" ? "Đã đóng trước"
+                              : !coversPeriod ? "Ngoài thời gian học"
+                              : isAdvance && row.due.amountPaid > 0 ? "Đã đóng một phần · Có thể đóng tiếp"
+                              : isAdvance ? "Chưa đến kỳ · Có thể đóng trước"
                               : "Đã đóng đủ";
                             return (
                               <div key={row.classItem.id} className="flex flex-col gap-3 rounded-2xl bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="min-w-0 text-sm">
                                   <div className="font-bold">{row.classItem.name}</div>
-                                  <div className="mt-0.5 text-xs text-slate-500">{row.due.firstUnpaidMonth ? monthLabel(row.due.firstUnpaidMonth) : monthLabel(currentMonth)}</div>
+                                  <div className="mt-0.5 text-xs text-slate-500">{monthLabel(period ?? currentMonth)}</div>
+                                  {row.due.paidThroughMonth && <div className="mt-1 text-xs font-semibold text-emerald-700">Đã đóng {monthLabel(row.due.paidThroughMonth)}{row.due.paidThroughMonth > currentMonth ? " trước hạn" : ""}</div>}
                                   {canCollect && <div className="mt-1 text-xs text-slate-600">Phải thu {money(amountDue)} · Đã thu {money(row.due.amountPaid)} · Còn {money(remaining)}</div>}
                                   <span className={`mt-1 inline-block rounded-full px-2.5 py-1 text-xs font-bold ${canCollect ? row.due.status === "OVERDUE" ? "bg-rose-100 text-rose-700" : row.due.status === "PARTIAL" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
                                     {statusLabel}
                                   </span>
                                 </div>
-                                {canCollect && <button type="button" className="ui-btn ui-btn-primary min-h-11 shrink-0" onMouseDown={(event) => event.preventDefault()} onClick={() => openCollectionForDueRow(row)}>Thu tiền</button>}
+                                {canCollect && <button type="button" className="ui-btn ui-btn-primary min-h-11 shrink-0" onMouseDown={(event) => event.preventDefault()} onClick={() => openCollectionForDueRow(row)}>{isAdvance ? `Thu trước tháng ${Number(period.slice(5, 7))}` : "Thu tiền"}</button>}
                               </div>
                             );
                           })}
@@ -1993,7 +1999,9 @@ export default function TuitionPage() {
                 ));
                 const paid = Number(effectiveItem?.effective_amount_paid ?? item?.amount_paid ?? 0);
                 const remain = Math.max(due - paid, 0);
-                const autoTracking = billingMonth >= TUITION_TRACKING_START_MONTH && billingMonth <= currentMonth;
+                const canCollectPeriod = billingMonth >= TUITION_TRACKING_START_MONTH &&
+                  !!membership && student.status === "active" &&
+                  (monthKey(membership.end_date) ?? "9999-12") >= billingMonth;
                 const fullyPaid = !!item && remain <= 0 && due > 0;
 
                 return (
@@ -2043,23 +2051,23 @@ export default function TuitionPage() {
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       {fullyPaid ? (
                         <span className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-black text-emerald-700">
-                          🟢 Đã đóng đủ
+                          🟢 {billingMonth > currentMonth ? "Đã đóng trước" : "Đã đóng đủ"}
                         </span>
-                      ) : item ? (
+                      ) : item && (billingMonth <= currentMonth || canCollectPeriod) ? (
                         <button
                           type="button"
                           onClick={() => openCollectionForPeriod(student, selectedTuitionClass, billingMonth)}
                           className="ui-btn ui-btn-primary"
                         >
-                          💰 Thu tiền
+                          💰 {billingMonth > currentMonth ? `Thu trước tháng ${Number(billingMonth.slice(5, 7))}` : "Thu tiền"}
                         </button>
-                      ) : autoTracking ? (
+                      ) : canCollectPeriod && remain > 0 ? (
                         <button
                           type="button"
                           onClick={() => openCollectionForPeriod(student, selectedTuitionClass, billingMonth)}
                           className="ui-btn ui-btn-primary"
                         >
-                          💰 Thu tiền
+                          💰 {billingMonth > currentMonth ? `Thu trước tháng ${Number(billingMonth.slice(5, 7))}` : "Thu tiền"}
                         </button>
                       ) : (
                         <span className="rounded-full bg-amber-100 px-4 py-2 text-sm font-black text-amber-700">

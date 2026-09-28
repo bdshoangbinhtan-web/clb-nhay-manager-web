@@ -55,14 +55,21 @@ test("due, overdue, partial, paid current, and paid ahead are distinguished", ()
   assert.equal(partial.status, "PARTIAL");
   assert.equal(partial.remaining, 500000);
   assert.equal(getMembershipTuitionStatus(membership, "active", "active", [record("2026-10", 600000)], "2026-10").status, "PAID_CURRENT");
-  assert.equal(getMembershipTuitionStatus(membership, "active", "active", [record("2026-10", 600000), record("2026-11", 600000)], "2026-10").status, "PAID_AHEAD");
+  const paidAhead = getMembershipTuitionStatus(membership, "active", "active", [record("2026-10", 600000), record("2026-11", 600000)], "2026-10");
+  assert.equal(paidAhead.status, "PAID_AHEAD");
+  assert.equal(paidAhead.firstUnpaidMonth, "2026-12");
+  assert.equal(paidAhead.paidThroughMonth, "2026-11");
+  const partialFuture = getMembershipTuitionStatus(membership, "active", "active", [record("2026-10", 600000), record("2026-11", 200000)], "2026-10");
+  assert.equal(partialFuture.status, "PAID_CURRENT", "future partial payment is not current debt");
+  assert.equal(partialFuture.firstUnpaidMonth, "2026-11");
+  assert.equal(partialFuture.remaining, 400000);
 });
 
 test("pre-launch periods do not create automatic debt; October starts tracking at October", () => {
   const septemberHistory = [record("2026-09", 600000)];
   const preLaunch = getMembershipTuitionStatus(membership, "active", "active", septemberHistory, "2026-09");
   assert.equal(preLaunch.status, "PRE_LAUNCH");
-  assert.equal(preLaunch.firstUnpaidMonth, null);
+  assert.equal(preLaunch.firstUnpaidMonth, "2026-10");
   assert.equal(preLaunch.remaining, 0);
   assert.equal(septemberHistory[0].amount_paid, 600000, "historical payment remains available unchanged");
   assert.equal(getFirstUnpaidMonth(membership, septemberHistory, "2026-09"), "2026-10");
@@ -74,6 +81,37 @@ test("pre-launch periods do not create automatic debt; October starts tracking a
   const november = getMembershipTuitionStatus(membership, "active", "active", septemberHistory, "2026-11");
   assert.equal(november.status, "OVERDUE");
   assert.equal(november.firstUnpaidMonth, "2026-10");
+});
+
+test("advance payments move the collectible period forward without September debt", () => {
+  const october = [record("2026-10", 600000)];
+  const afterOctober = getMembershipTuitionStatus(membership, "active", "active", october, "2026-09");
+  assert.equal(afterOctober.status, "PRE_LAUNCH");
+  assert.equal(afterOctober.paidThroughMonth, "2026-10");
+  assert.equal(afterOctober.firstUnpaidMonth, "2026-11");
+  assert.equal(getFirstUnpaidMonth(membership, october, "2026-09"), "2026-11");
+
+  const afterNovember = getMembershipTuitionStatus(
+    membership, "active", "active", [...october, record("2026-11", 600000)], "2026-09"
+  );
+  assert.equal(afterNovember.status, "PRE_LAUNCH");
+  assert.equal(afterNovember.paidThroughMonth, "2026-11");
+  assert.equal(afterNovember.firstUnpaidMonth, "2026-12");
+
+  const partialDecember = getMembershipTuitionStatus(
+    membership, "active", "active",
+    [...october, record("2026-11", 600000), record("2026-12", 200000)], "2026-09"
+  );
+  assert.equal(partialDecember.firstUnpaidMonth, "2026-12");
+  assert.equal(partialDecember.amountDue, 600000);
+  assert.equal(partialDecember.amountPaid, 200000);
+  assert.equal(partialDecember.remaining, 400000);
+
+  const gap = getMembershipTuitionStatus(
+    membership, "active", "active", [record("2026-10", 600000), record("2026-12", 600000)], "2026-09"
+  );
+  assert.equal(gap.firstUnpaidMonth, "2026-11");
+  assert.equal(gap.paidThroughMonth, "2026-10");
 });
 
 test("ended and inactive memberships are excluded and start month is respected", () => {

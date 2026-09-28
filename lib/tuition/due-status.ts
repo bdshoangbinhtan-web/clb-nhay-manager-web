@@ -138,9 +138,15 @@ export function getFirstUnpaidMonth(
   const anchor = naturalAnchor < TUITION_TRACKING_START_MONTH
     ? TUITION_TRACKING_START_MONTH
     : naturalAnchor;
+  // Walk through existing advance payments so the next collectible period
+  // moves from October to November, December, and onward.
+  const through = history.reduce(
+    (latest, item) => item.period! >= anchor && item.period! > latest ? item.period! : latest,
+    current > anchor ? current : anchor
+  );
   let month = anchor;
 
-  while (month <= current) {
+  while (month <= through) {
     const row = history.find((item) => item.period === month);
     if (!row) return month;
     const due = Number(row.effective_amount_due ?? row.amount_due);
@@ -182,17 +188,6 @@ export function getMembershipTuitionStatus(
     };
   }
 
-  if (current < TUITION_TRACKING_START_MONTH) {
-    return {
-      status: "PRE_LAUNCH",
-      firstUnpaidMonth: null,
-      paidThroughMonth: null,
-      amountDue: 0,
-      amountPaid: 0,
-      remaining: 0,
-    };
-  }
-
   const history = recordsForMembership(membership, records);
   const firstUnpaidMonth = getFirstUnpaidMonth(membership, records, current);
   const firstUnpaidRecord = history.find(
@@ -218,8 +213,19 @@ export function getMembershipTuitionStatus(
     paidThroughMonth = month;
   }
 
+  if (current < TUITION_TRACKING_START_MONTH) {
+    return {
+      status: "PRE_LAUNCH",
+      firstUnpaidMonth,
+      paidThroughMonth,
+      amountDue,
+      amountPaid,
+      remaining,
+    };
+  }
+
   let status: TuitionDueStatus;
-  if (firstUnpaidRecord && amountPaid > 0 && remaining > 0) {
+  if (firstUnpaidMonth <= current && firstUnpaidRecord && amountPaid > 0 && remaining > 0) {
     status = "PARTIAL";
   } else if (firstUnpaidMonth < current) {
     status = "OVERDUE";
