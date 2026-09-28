@@ -1622,7 +1622,7 @@ export default function TuitionPage() {
 
             <label className="block">
               <div className="mb-2 text-sm font-bold">Số tiền thực thu</div>
-              <input ref={amountToCollectInputRef} type="number" min="1" step="1000" value={amountToCollect} onChange={(e) => setAmountToCollect(e.target.value)} className="ui-input" />
+              <input ref={amountToCollectInputRef} type="number" min="1000" step="1000" value={amountToCollect} onChange={(e) => setAmountToCollect(e.target.value)} className="ui-input" />
             </label>
 
             <label className="block">
