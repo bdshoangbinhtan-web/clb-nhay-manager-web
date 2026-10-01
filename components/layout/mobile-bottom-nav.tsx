@@ -54,11 +54,13 @@ export default function MobileBottomNav() {
   }, [supabase]);
   if (!role) return null;
   const isTeacher = role === "teacher";
-  const visibleMoreItems = privacyView
-    ? moreItems.filter((item) => item[3] === "/branches" || item[3] === "/finance")
-    : role === "admin"
-    ? moreItems
-    : moreItems.filter((item) => item[3] !== "/system-integrity" && item[3] !== "/teacher-payroll" && item[3] !== "/finance/monitor");
+  const visibleMoreItems = (
+    privacyView
+      ? moreItems.filter((item) => item[3] === "/branches" || item[3] === "/finance")
+      : role === "admin"
+        ? moreItems
+        : moreItems.filter((item) => item[3] !== "/system-integrity" && item[3] !== "/teacher-payroll" && item[3] !== "/finance/monitor")
+  ).filter((item) => role !== "manager" || item[3] !== "/finance");
   const isMoreActive = !isTeacher && visibleMoreItems.some((item) => pathname.startsWith(item[3]));
   async function logout() {
     closeMore();

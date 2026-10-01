@@ -74,7 +74,7 @@ export default function Sidebar({
     loadRole();
   }, [supabase]);
 
-  const menus =
+  const menus = (
     privacyView
       ? adminManagerMenus.filter((item) => ["/dashboard", "/branches", "/students", "/tuition", "/finance"].includes(item[2]))
       : role === "teacher"
@@ -83,7 +83,8 @@ export default function Sidebar({
         ? adminManagerMenus
         : role === "manager"
           ? adminManagerMenus.filter((item) => item[2] !== "/teacher-payroll")
-        : [];
+        : []
+  ).filter((item) => role !== "manager" || item[2] !== "/finance");
 
   return (
     <>
