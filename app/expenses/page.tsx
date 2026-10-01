@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
+import { usePrivacyView } from "@/components/layout/privacy-view-context";
 import { filterEffectiveSources } from "@/lib/finance/ledger";
+import { buildExpenseDisplayView, filterExpensesByPeriod } from "@/lib/expenses/display-view";
 
 type Branch = {
   id: string;
@@ -41,6 +43,7 @@ function categoryLabel(value: string) {
 
 export default function ExpensesPage() {
   const supabase = useMemo(() => createClient(), []);
+  const { role } = usePrivacyView();
   const loadRequestRef = useRef(0);
   const createRequestIdRef = useRef<string | null>(null);
 
@@ -247,42 +250,25 @@ export default function ExpensesPage() {
     await loadData();
   }
 
-  const filteredExpenses = useMemo(() => {
-    return expenses.filter((item) => {
-      if (filterBranch && item.branch_id !== filterBranch) {
-        return false;
-      }
-
-      if (filterCategory && item.category !== filterCategory) {
-        return false;
-      }
-
-      if (
-        filterMonth &&
-        !item.expense_date.startsWith(filterMonth)
-      ) {
-        return false;
-      }
-
-      const q = search.trim().toLowerCase();
-
-      if (
-        q &&
-        !item.description.toLowerCase().includes(q) &&
-        !(item.note ?? "").toLowerCase().includes(q)
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [expenses, filterBranch, filterCategory, filterMonth, search]);
-
-  const effectiveExpenses = filterEffectiveSources("expense", filteredExpenses, [...reversedSourceIds].map((source_id) => ({ source_type: "expense", source_id })));
-  const totalExpense = effectiveExpenses.reduce(
-    (sum, item) => sum + Number(item.amount),
-    0
+  const periodExpenses = useMemo(
+    () => filterExpensesByPeriod(expenses, filterBranch, filterCategory, filterMonth),
+    [expenses, filterBranch, filterCategory, filterMonth],
   );
+  const effectivePeriodExpenses = useMemo(
+    () => filterEffectiveSources("expense", periodExpenses, [...reversedSourceIds].map((source_id) => ({ source_type: "expense", source_id }))),
+    [periodExpenses, reversedSourceIds],
+  );
+  const expenseView = useMemo(() => buildExpenseDisplayView({
+    role,
+    expenses: periodExpenses,
+    effectiveExpenses: effectivePeriodExpenses,
+    search,
+    filterMonth,
+    salaryBranchLabel: filterBranch
+      ? branches.find((branch) => branch.id === filterBranch)?.name ?? "Chưa gán cơ sở"
+      : "Toàn CLB",
+  }), [role, periodExpenses, effectivePeriodExpenses, search, filterMonth, filterBranch, branches]);
+  const { rows: displayRows, total: totalExpense } = expenseView;
 
   function branchName(id: string | null) {
     return (
@@ -328,7 +314,7 @@ export default function ExpensesPage() {
             SỐ KHOẢN CHI
           </div>
           <div className="mt-2 text-3xl font-black">
-            {filteredExpenses.length}
+            {displayRows.length}
           </div>
         </div>
 
@@ -529,7 +515,7 @@ export default function ExpensesPage() {
           <div className="p-12 text-center text-slate-400">
             Đang tải dữ liệu...
           </div>
-        ) : filteredExpenses.length === 0 ? (
+        ) : displayRows.length === 0 ? (
           <div className="p-12 text-center text-slate-400">
             Chưa có khoản chi trong bộ lọc hiện tại.
           </div>
@@ -548,7 +534,22 @@ export default function ExpensesPage() {
               </thead>
 
               <tbody>
-                {filteredExpenses.map((item) => (
+                {displayRows.map((row) => {
+                  if (row.type === "salary-summary") {
+                    return (
+                      <tr key="manager-salary-summary" className="border-b border-slate-50">
+                        <td className="p-4 whitespace-nowrap">{row.dateLabel}</td>
+                        <td className="p-4">{row.branchLabel}</td>
+                        <td className="p-4 whitespace-nowrap">{row.categoryLabel}</td>
+                        <td className="p-4"><div className="font-bold">{row.description}</div></td>
+                        <td className="p-4 text-right font-black text-rose-500 whitespace-nowrap">{money(row.amount)}</td>
+                        <td className="p-4 text-right text-xs font-bold text-amber-700">{row.statusLabel}</td>
+                      </tr>
+                    );
+                  }
+
+                  const item = row.item;
+                  return (
                   <tr
                     key={item.id}
                     className="border-b border-slate-50"
@@ -607,7 +608,8 @@ export default function ExpensesPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
 
               <tfoot>
