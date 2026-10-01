@@ -50,6 +50,7 @@ type Payroll = {
   salary_rate: number;
   total_amount: number;
   status: "draft" | "locked" | "paid";
+  note: string | null;
 };
 
 type PayrollDetail = {
@@ -66,6 +67,7 @@ type PayrollDetail = {
   calculated_amount: number | null;
   is_substitute: boolean;
   amount_override: boolean;
+  note: string | null;
 };
 
 type DisplaySession = {
@@ -82,12 +84,15 @@ type DisplaySession = {
   calculatedAmount: number;
   actualAmount: number;
   override: boolean;
+  adjustmentNote: string;
 };
 
 type CalculatedTeacher = {
   teacher: Teacher;
   totalSessions: number;
   totalAmount: number;
+  allowance: number;
+  allowanceNote: string;
   sessions: DisplaySession[];
 };
 
@@ -107,6 +112,36 @@ function getLocalMonth() {
 function formatDate(value: string) {
   const [year, month, day] = value.split("-");
   return `${day}/${month}/${year}`;
+}
+
+function parsePayrollMeta(note: string | null | undefined) {
+  const empty = { allowance: 0, allowanceNote: "" };
+
+  if (!note) return empty;
+
+  try {
+    const value = JSON.parse(note);
+
+    if (
+      !value ||
+      typeof value !== "object" ||
+      value.kind !== "abk_payroll_meta_v1"
+    ) {
+      return empty;
+    }
+
+    const allowance = Number(value.allowance ?? 0);
+
+    return {
+      allowance: Number.isFinite(allowance) && allowance > 0 ? allowance : 0,
+      allowanceNote:
+        typeof value.allowance_note === "string"
+          ? value.allowance_note
+          : "",
+    };
+  } catch {
+    return empty;
+  }
 }
 
 function sortSessionsForDisplay(
@@ -187,6 +222,16 @@ export default function TeacherPayrollPage() {
 
   // Tiền Admin chỉnh riêng từng buổi.
   const [amountEdits, setAmountEdits] = useState<Record<string, string>>({});
+  const [sessionNoteEdits, setSessionNoteEdits] = useState<Record<string, string>>({});
+  const [allowanceEdits, setAllowanceEdits] = useState<Record<string, string>>({});
+  const [allowanceNoteEdits, setAllowanceNoteEdits] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setAmountEdits({});
+    setSessionNoteEdits({});
+    setAllowanceEdits({});
+    setAllowanceNoteEdits({});
+  }, [month]);
 
   useEffect(() => {
     async function loadRole() {
@@ -277,7 +322,7 @@ export default function TeacherPayrollPage() {
         supabase
           .from("teacher_payrolls")
           .select(
-            "id,teacher_id,payroll_month,total_sessions,salary_rate,total_amount,status"
+            "id,teacher_id,payroll_month,total_sessions,salary_rate,total_amount,status,note"
           )
           .eq("payroll_month", start),
       ]);
@@ -353,7 +398,8 @@ export default function TeacherPayrollPage() {
             duration_multiplier,
             calculated_amount,
             is_substitute,
-            amount_override
+            amount_override,
+            note
           `
         )
         .in("payroll_id", payrollIds);
@@ -502,6 +548,11 @@ export default function TeacherPayrollPage() {
             ? Number(savedDetail.amount)
             : calculatedAmount;
 
+      const override = Math.abs(actualAmount - calculatedAmount) > 0.01;
+      const adjustmentNote = override
+        ? sessionNoteEdits[session.id] ?? savedDetail?.note ?? ""
+        : "";
+
       const displaySession: DisplaySession = {
         id: session.id,
         classId: session.class_id,
@@ -519,16 +570,25 @@ export default function TeacherPayrollPage() {
         multiplier,
         calculatedAmount,
         actualAmount,
-        override:
-          editValue !== undefined ||
-          Boolean(savedDetail?.amount_override),
+        override,
+        adjustmentNote,
       };
 
       if (!map.has(teacher.id)) {
+        const savedMeta = parsePayrollMeta(payroll?.note);
+        const allowance =
+          allowanceEdits[teacher.id] !== undefined
+            ? Number(allowanceEdits[teacher.id] || 0)
+            : savedMeta.allowance;
+        const allowanceNote =
+          allowanceNoteEdits[teacher.id] ?? savedMeta.allowanceNote;
+
         map.set(teacher.id, {
           teacher,
           totalSessions: 0,
-          totalAmount: 0,
+          totalAmount: allowance,
+          allowance,
+          allowanceNote,
           sessions: [],
         });
       }
@@ -550,6 +610,9 @@ export default function TeacherPayrollPage() {
     payrollMap,
     detailMap,
     amountEdits,
+    sessionNoteEdits,
+    allowanceEdits,
+    allowanceNoteEdits,
     teacherMap,
   ]);
 
@@ -596,13 +659,18 @@ export default function TeacherPayrollPage() {
                 Number(detail.duration_multiplier || 1),
             actualAmount: Number(detail.amount || 0),
             override: Boolean(detail.amount_override),
+            adjustmentNote: detail.note ?? "",
           })
         );
+
+        const savedMeta = parsePayrollMeta(payroll.note);
 
         return {
           teacher,
           totalSessions: payroll.total_sessions,
           totalAmount: payroll.total_amount,
+          allowance: savedMeta.allowance,
+          allowanceNote: savedMeta.allowanceNote,
           sessions,
           payroll,
         };
@@ -638,6 +706,27 @@ export default function TeacherPayrollPage() {
     }));
   }
 
+  function setEditedSessionNote(sessionId: string, value: string) {
+    setSessionNoteEdits((current) => ({
+      ...current,
+      [sessionId]: value,
+    }));
+  }
+
+  function setEditedAllowance(teacherId: string, value: string) {
+    setAllowanceEdits((current) => ({
+      ...current,
+      [teacherId]: value,
+    }));
+  }
+
+  function setEditedAllowanceNote(teacherId: string, value: string) {
+    setAllowanceNoteEdits((current) => ({
+      ...current,
+      [teacherId]: value,
+    }));
+  }
+
   async function savePayroll(
     item: CalculatedTeacher,
     targetStatus: "draft" | "locked"
@@ -645,14 +734,19 @@ export default function TeacherPayrollPage() {
     setWorking(true);
 
     try {
-      const { data, error } = await supabase.rpc("save_teacher_payroll_atomic", {
+      const { data, error } = await supabase.rpc("save_teacher_payroll_with_meta_atomic", {
         p_teacher_id: item.teacher.id,
         p_payroll_month: `${month}-01`,
         p_target_status: targetStatus,
+        p_allowance: item.allowance,
+        p_allowance_note: item.allowanceNote.trim() || null,
         p_details: item.sessions.map((session) => ({
           class_id: session.classId,
           attendance_date: session.date,
           amount: session.actualAmount,
+          note: session.override
+            ? session.adjustmentNote.trim() || null
+            : null,
         })),
       });
 
@@ -706,6 +800,9 @@ export default function TeacherPayrollPage() {
     const ok = window.confirm(
       `🔒 CHỐT LƯƠNG ${item.teacher.full_name}?\n\n` +
         `${item.totalSessions} buổi\n` +
+        (item.allowance > 0
+          ? `Phụ cấp: ${money(item.allowance)}\n`
+          : "") +
         `Tổng: ${money(item.totalAmount)}\n\n` +
         `Sau khi chốt, giáo viên mới được xem số tiền lương.`
     );
@@ -810,7 +907,7 @@ export default function TeacherPayrollPage() {
 
     setWorking(true);
 
-    const { data, error } = await supabase.rpc("pay_teacher_payroll", {
+    const { data, error } = await supabase.rpc("pay_teacher_payroll_with_allowance", {
       p_payroll_id: payroll.id,
       p_payment_method: paymentMethod,
     });
@@ -1245,14 +1342,110 @@ export default function TeacherPayrollPage() {
                                 )}
 
                                 {session.override && (
-                                  <div className="mt-1 text-xs font-bold text-amber-600">
-                                    ✏️ Admin đã chỉnh riêng buổi này
+                                  <div className="mt-3 space-y-2">
+                                    <div className="text-xs font-bold text-amber-600">
+                                      ✏️ Đã chỉnh: {money(session.calculatedAmount)} → {money(session.actualAmount)}
+                                    </div>
+
+                                    {locked ? (
+                                      session.adjustmentNote ? (
+                                        <div className="rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+                                          📝 {session.adjustmentNote}
+                                        </div>
+                                      ) : null
+                                    ) : (
+                                      <div>
+                                        <div className="mb-1 text-xs font-black text-slate-400">
+                                          GHI CHÚ ĐIỀU CHỈNH
+                                        </div>
+                                        <input
+                                          type="text"
+                                          value={session.adjustmentNote}
+                                          onChange={(e) =>
+                                            setEditedSessionNote(
+                                              session.id,
+                                              e.target.value
+                                            )
+                                          }
+                                          placeholder="Ví dụ: dạy thêm 30 phút, hỗ trợ quay..."
+                                          className="w-full rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm font-semibold outline-none focus:border-amber-400"
+                                        />
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>
                             </div>
                           </div>
                         ))}
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                          <div>
+                            <div className="text-sm font-black text-emerald-800">
+                              🎁 PHỤ CẤP
+                            </div>
+                            <div className="mt-1 text-xs font-semibold text-emerald-700/80">
+                              Cộng riêng cho giáo viên trong kỳ lương này.
+                            </div>
+                          </div>
+
+                          <div className="min-w-[220px]">
+                            <div className="text-xs font-black text-slate-400">
+                              SỐ TIỀN PHỤ CẤP
+                            </div>
+
+                            {locked ? (
+                              <div className="mt-1 text-xl font-black text-emerald-700">
+                                {money(item.allowance)}
+                              </div>
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                step="1000"
+                                value={
+                                  allowanceEdits[item.teacher.id] ??
+                                  String(item.allowance)
+                                }
+                                onChange={(e) =>
+                                  setEditedAllowance(
+                                    item.teacher.id,
+                                    e.target.value
+                                  )
+                                }
+                                className="mt-1 w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 font-black outline-none focus:border-emerald-500"
+                              />
+                            )}
+                          </div>
+                        </div>
+
+                        {locked ? (
+                          item.allowanceNote ? (
+                            <div className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-emerald-900">
+                              📝 {item.allowanceNote}
+                            </div>
+                          ) : null
+                        ) : item.allowance > 0 || item.allowanceNote ? (
+                          <div className="mt-3">
+                            <div className="mb-1 text-xs font-black text-slate-400">
+                              GHI CHÚ PHỤ CẤP
+                            </div>
+                            <input
+                              type="text"
+                              value={item.allowanceNote}
+                              onChange={(e) =>
+                                setEditedAllowanceNote(
+                                  item.teacher.id,
+                                  e.target.value
+                                )
+                              }
+                              placeholder="Ví dụ: dạy đủ buổi, hỗ trợ sự kiện..."
+                              className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   )}
