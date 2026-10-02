@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import { usePrivacyView } from "@/components/layout/privacy-view-context";
-import { PaymentMethodFields, type TransferAccount } from "@/components/payment-method-fields";
+import { PaymentMethodFields, type PaymentMethod, type TransferAccount } from "@/components/payment-method-fields";
 import { normalizeTransferAccount } from "@/lib/payment-method";
 import {
   applyTuitionAdjustments,
@@ -232,7 +232,7 @@ export default function TuitionPage() {
   const [studentClassIds, setStudentClassIds] = useState<string[]>([]);
   const [amountDue, setAmountDue] = useState("");
   const [amountToCollect, setAmountToCollect] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
   const [transferAccount, setTransferAccount] = useState<TransferAccount | "">("");
   const [collectionMonth, setCollectionMonth] = useState(defaultTrackedMonth);
   const [manualPeriod, setManualPeriod] = useState(false);
@@ -1024,6 +1024,11 @@ export default function TuitionPage() {
   async function addTuition(e: React.FormEvent) {
     e.preventDefault();
 
+    if (!paymentMethod) {
+      alert("Hãy chọn phương thức thanh toán.");
+      return;
+    }
+
     if (paymentMethod === "transfer" && !transferAccount) {
       alert("Chọn tài khoản chuyển khoản H, A, S hoặc V.");
       return;
@@ -1087,6 +1092,20 @@ export default function TuitionPage() {
       return;
     }
 
+    const paymentLabel = paymentMethod === "transfer"
+      ? `Chuyển khoản · ${transferAccount}`
+      : "Tiền mặt";
+    const confirmed = window.confirm(
+      `XÁC NHẬN THU HỌC PHÍ\n\n` +
+      `Học viên: ${selectedStudent?.full_name ?? "Không rõ"}\n` +
+      `Lớp: ${classItem.name}\n` +
+      `Kỳ: ${monthLabel(collectionMonth)}\n` +
+      `Số tiền: ${money(amount)}\n` +
+      `Thanh toán: ${paymentLabel}\n\n` +
+      "Chỉ bấm OK khi đã nhận tiền thực tế."
+    );
+    if (!confirmed) return;
+
     setSaving(true);
     collectionRequestIdRef.current ??= crypto.randomUUID();
     const receiptWindow = window.open("", "_blank");
@@ -1139,6 +1158,7 @@ export default function TuitionPage() {
     setClassId("");
     setAmountDue("");
     setAmountToCollect("");
+    setPaymentMethod("");
     setTransferAccount("");
     setNote("");
     await loadData();
@@ -1192,7 +1212,7 @@ export default function TuitionPage() {
   function openCollectionForTuition(
     item: Tuition,
     amountOverride?: number,
-    method: "cash" | "transfer" = "cash"
+    method?: PaymentMethod
   ) {
     const student = studentById.get(item.student_id);
     const classItem = item.class_id ? classById.get(item.class_id) : undefined;
@@ -1229,7 +1249,7 @@ export default function TuitionPage() {
     setManualPeriod(period !== nextPeriod);
     setAmountDue(String(item.amount_due));
     setAmountToCollect(String(amount));
-    setPaymentMethod(privacyView ? "transfer" : method);
+    setPaymentMethod(privacyView ? "transfer" : method ?? "");
     setTransferAccount("");
     setNote("");
     collectionRequestIdRef.current = null;
@@ -1368,7 +1388,7 @@ export default function TuitionPage() {
   function focusCollectionForm() {
     window.setTimeout(() => {
       document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      amountToCollectInputRef.current?.focus({ preventScroll: true });
+      // Do not autofocus a form control: opening the collection form must never make an Enter key press submit accidentally.
     }, 100);
   }
 
@@ -1415,7 +1435,7 @@ export default function TuitionPage() {
     setManualPeriod(period !== nextPeriod);
     setAmountDue(String(amountDue));
     setAmountToCollect(String(amount));
-    setPaymentMethod(privacyView ? "transfer" : "cash");
+    setPaymentMethod(privacyView ? "transfer" : "");
     setTransferAccount("");
     setNote("");
     collectionRequestIdRef.current = null;
@@ -1727,7 +1747,7 @@ export default function TuitionPage() {
               <button
                 className="ui-btn ui-btn-primary"
                 type="submit"
-                disabled={saving || !studentId || !classId || studentClasses.length === 0 || Number(amountToCollect) <= 0 || (paymentMethod === "transfer" && !transferAccount)}
+                disabled={saving || !studentId || !classId || studentClasses.length === 0 || !paymentMethod || Number(amountToCollect) <= 0 || (paymentMethod === "transfer" && !transferAccount)}
               >
                 {saving ? "Đang ghi nhận..." : "✅ Xác nhận thu học phí"}
               </button>
