@@ -53,7 +53,7 @@ test("normal tuition UI no longer exposes bulk creation and collects through the
   assert.ok(tuitionPage.indexOf("HỌC VIÊN CẦN THU") < tuitionPage.indexOf("Danh sách cần xử lý"));
   assert.ok(tuitionPage.indexOf("Danh sách cần xử lý") < tuitionPage.indexOf("QUẢN LÝ HỌC PHÍ THEO LỚP"));
   assert.match(tuitionPage, /function openCollectionForDueRow/);
-  assert.match(tuitionPage, /amountToCollectInputRef\.current\?\.focus/);
-  assert.match(tuitionPage, /ref=\{amountToCollectInputRef\}/);
+  assert.doesNotMatch(tuitionPage, /amountToCollectInputRef\.current\?\.focus/);
+  assert.doesNotMatch(tuitionPage, /ref=\{amountToCollectInputRef\}/);
   assert.match(dueStatus, /TUITION_TRACKING_START_MONTH = "2026-10"/);
 });
