@@ -12,7 +12,7 @@ export function PaymentMethodFields({
   onMethodChange,
   onTransferAccountChange,
 }: {
-  method: PaymentMethod;
+  method: PaymentMethod | "";
   transferAccount: TransferAccount | "";
   onMethodChange: (method: PaymentMethod) => void;
   onTransferAccountChange: (account: TransferAccount | "") => void;
@@ -30,6 +30,7 @@ export function PaymentMethodFields({
             if (next === "cash") onTransferAccountChange("");
           }}
         >
+          <option value="" disabled>Chọn phương thức</option>
           <option value="cash">Tiền mặt</option>
           <option value="transfer">Chuyển khoản</option>
         </select>
