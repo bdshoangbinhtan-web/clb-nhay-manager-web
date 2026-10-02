@@ -14,6 +14,10 @@ const dueStatus = readFileSync(
   new URL("../lib/tuition/due-status.ts", import.meta.url),
   "utf8"
 );
+const paymentFields = readFileSync(
+  new URL("../components/payment-method-fields.tsx", import.meta.url),
+  "utf8"
+);
 
 test("collection migration reuses the unique tuition period and old payment RPC atomically", () => {
   assert.match(migration, /on conflict \(student_id, class_id, billing_month\) do nothing/i);
@@ -41,7 +45,8 @@ test("normal tuition UI no longer exposes bulk creation and collects through the
   assert.match(tuitionPage, /p_payment_date: null/);
   assert.match(tuitionPage, /if \(amount > remainingAmount\)/);
   assert.match(tuitionPage, /p_payment_method: paymentMethod/);
-  assert.match(tuitionPage, /<option value="cash">[\s\S]*?<option value="transfer">/);
+  assert.match(tuitionPage, /PaymentMethodFields method=\{paymentMethod\}/);
+  assert.match(paymentFields, /<option value="cash">Tiền mặt<\/option>[\s\S]*?<option value="transfer">Chuyển khoản<\/option>/);
   assert.match(tuitionPage, /placeholder="🔎 Tìm tên hoặc mã học viên\.\.\."/);
   assert.ok(tuitionPage.indexOf("placeholder=\"🔎 Tìm tên hoặc mã học viên...\"") < tuitionPage.indexOf("ĐÃ THU THÁNG NÀY"));
   assert.ok(tuitionPage.indexOf("ĐÃ THU THÁNG NÀY") < tuitionPage.indexOf("HỌC VIÊN CẦN THU"));

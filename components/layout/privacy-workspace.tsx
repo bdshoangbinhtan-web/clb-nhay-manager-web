@@ -5,15 +5,15 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
-import { buildTransferLedgerSourceBatches, excludeReversedPrivacySources, filterPrivacyTransactions, matchedTransferRefundBatchIds, resolveTransferLedgerRows, summarizePrivacyTransactions, type PrivacyLedgerRow, type PrivacyTransaction } from "@/lib/privacy-view";
+import { buildTransferLedgerSourceBatches, excludeReversedPrivacySources, filterPrivacyTransactions, matchedTransferRefundBatchIds, resolveTransferLedgerRows, summarizePrivacyTransactions, summarizeTransferAccounts, type PrivacyLedgerRow, type PrivacyTransaction } from "@/lib/privacy-view";
 import { toVietnamDateKey, vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { usePrivacyView } from "./privacy-view-context";
 
 type TuitionRef = { student_id: string; class_id: string | null; branch_id: string | null; billing_month: string };
-type PaymentRow = { id: string; amount: number; payment_method: string | null; payment_date: string; tuition: TuitionRef | TuitionRef[] | null };
+type PaymentRow = { id: string; amount: number; payment_method: string | null; transfer_account: string | null; payment_date: string; tuition: TuitionRef | TuitionRef[] | null };
 type RefundRow = { id: string; refund_batch_id: string | null; amount: number; refund_payment_method: string | null; created_at: string; tuition: TuitionRef | TuitionRef[] | null };
-type ExpenseRow = { id: string; amount: number; payment_method: string | null; expense_date: string; description: string; branch_id: string | null };
-type RevenueRow = { id: string; amount: number; payment_method: string | null; revenue_date: string; description: string; branch_id: string | null };
+type ExpenseRow = { id: string; amount: number; payment_method: string | null; transfer_account: string | null; expense_date: string; description: string; branch_id: string | null };
+type RevenueRow = { id: string; amount: number; payment_method: string | null; transfer_account: string | null; revenue_date: string; description: string; branch_id: string | null };
 type ReversalRow = { source_type: string; source_id: string };
 type Student = { id: string; student_code: string; full_name: string; status: string | null };
 type DanceClass = { id: string; name: string; branch_id: string; status: string };
@@ -49,7 +49,7 @@ function transactionRows(
   for (const payment of payments) {
     const tuition = tuitionRef(payment.tuition);
     if (!tuition) continue;
-    rows.push({ id: payment.id, sourceType: "tuition_payment", paymentMethod: payment.payment_method,
+    rows.push({ id: payment.id, sourceType: "tuition_payment", paymentMethod: payment.payment_method, transferAccount: payment.transfer_account,
       date: payment.payment_date, amount: Number(payment.amount), direction: "in", branchId: tuition.branch_id,
       studentId: tuition.student_id, classId: tuition.class_id, description: "Thu học phí" });
   }
@@ -61,12 +61,12 @@ function transactionRows(
       studentId: tuition.student_id, classId: tuition.class_id, description: "Hoàn học phí" });
   }
   for (const expense of expenses) {
-    rows.push({ id: expense.id, sourceType: "expense", paymentMethod: expense.payment_method,
+    rows.push({ id: expense.id, sourceType: "expense", paymentMethod: expense.payment_method, transferAccount: expense.transfer_account,
       date: expense.expense_date, amount: Number(expense.amount), direction: "out", branchId: expense.branch_id,
       studentId: null, classId: null, description: expense.description });
   }
   for (const revenue of revenues) {
-    rows.push({ id: revenue.id, sourceType: "other_revenue", paymentMethod: revenue.payment_method,
+    rows.push({ id: revenue.id, sourceType: "other_revenue", paymentMethod: revenue.payment_method, transferAccount: revenue.transfer_account,
       date: revenue.revenue_date, amount: Number(revenue.amount), direction: "in", branchId: revenue.branch_id,
       studentId: null, classId: null, description: revenue.description });
   }
@@ -103,6 +103,7 @@ export default function PrivacyWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const [showTransferBreakdown, setShowTransferBreakdown] = useState(false);
   const isFinance = pathname === "/finance";
   const startDate = isFinance ? date : `${month}-01`;
   const endDate = isFinance ? new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10) : `${nextMonth(month)}-01`;
@@ -123,7 +124,7 @@ export default function PrivacyWorkspace() {
         const [payments, refunds, expenses, revenues, branchesResult, classesResult] = await Promise.all([
           readAll<PaymentRow>(async (from, to) => {
             let query = supabase.from("tuition_payments")
-              .select("id,amount,payment_method,payment_date,tuition:tuition_id!inner(student_id,class_id,branch_id,billing_month)")
+              .select("id,amount,payment_method,transfer_account,payment_date,tuition:tuition_id!inner(student_id,class_id,branch_id,billing_month)")
               .eq("payment_method", "transfer").gte("payment_date", start).lt("payment_date", end)
               .order("payment_date", { ascending: false }).order("id");
             if (role === "manager" && branchId) query = query.eq("tuition.branch_id", branchId);
@@ -142,7 +143,7 @@ export default function PrivacyWorkspace() {
           }),
           readAll<ExpenseRow>(async (from, to) => {
             let query = supabase.from("expenses")
-              .select("id,amount,payment_method,expense_date,description,branch_id")
+              .select("id,amount,payment_method,transfer_account,expense_date,description,branch_id")
               .eq("payment_method", "transfer").gte("expense_date", start).lt("expense_date", end)
               .order("expense_date", { ascending: false }).order("id");
             if (role === "manager" && branchId) query = query.eq("branch_id", branchId);
@@ -151,7 +152,7 @@ export default function PrivacyWorkspace() {
           }),
           readAll<RevenueRow>(async (from, to) => {
             let query = supabase.from("other_revenues")
-              .select("id,amount,payment_method,revenue_date,description,branch_id")
+              .select("id,amount,payment_method,transfer_account,revenue_date,description,branch_id")
               .eq("payment_method", "transfer").gte("revenue_date", start).lt("revenue_date", end)
               .order("revenue_date", { ascending: false }).order("id");
             if (role === "manager" && branchId) query = query.eq("branch_id", branchId);
@@ -252,6 +253,7 @@ export default function PrivacyWorkspace() {
   const eligibleStudentIds = new Set(paymentRows.map((row) => row.studentId).filter((id): id is string => Boolean(id)));
   const summaryRows = pathname === "/finance" || pathname === "/dashboard" ? visibleFinanceTransactions : tuitionRows;
   const summary = summarizePrivacyTransactions(summaryRows);
+  const transferAccountTotals = summarizeTransferAccounts(visibleFinanceTransactions);
   const studentById = useMemo(() => new Map(students.map((student) => [student.id, student])), [students]);
   const classById = useMemo(() => new Map(classes.map((item) => [item.id, item])), [classes]);
   const visibleStudents = students.filter((student) => eligibleStudentIds.has(student.id));
@@ -269,6 +271,7 @@ export default function PrivacyWorkspace() {
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <h1 className="text-3xl font-black">{title}</h1>
       <div className="flex flex-wrap gap-2">
+        {pathname !== "/tuition" && <Link href="/tuition" className="ui-btn ui-btn-blue">Thu học phí</Link>}
         <label className="sr-only" htmlFor="privacy-period">{isFinance ? "Ngày xem" : "Tháng xem"}</label>
         <input id="privacy-period" className="ui-input w-auto" type={isFinance ? "date" : "month"} value={isFinance ? date : month}
           onChange={(event) => { const value = event.target.value; if (!value) return; if (isFinance) { setDate(value); setMonth(value.slice(0, 7)); } else setMonth(value); }} />
@@ -277,6 +280,21 @@ export default function PrivacyWorkspace() {
         </select>}
       </div>
     </header>
+
+    {(pathname === "/dashboard" || pathname === "/finance") && <section className="ui-card p-4">
+      <button type="button" className="flex w-full items-center justify-between gap-3 text-left" aria-expanded={showTransferBreakdown}
+        onClick={() => setShowTransferBreakdown((value) => !value)}>
+        <span className="font-bold">Chuyển khoản</span><strong>{money(summary.net)} {showTransferBreakdown ? "−" : "+"}</strong>
+      </button>
+      {showTransferBreakdown && <div className="mt-3 grid gap-2 border-t border-slate-100 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+        {(["H", "A", "S", "V"] as const).map((account) => {
+          const total = transferAccountTotals[account];
+          return <div key={account} className="rounded-xl bg-slate-50 p-3 text-sm"><strong>{account}</strong>
+            <div className="mt-1 text-slate-500">Thu {money(total.income)}</div><div className="text-slate-500">Chi {money(total.expense)}</div>
+          </div>;
+        })}
+      </div>}
+    </section>}
 
     {loading ? <div className="ui-card p-8 text-slate-500">Đang tải dữ liệu…</div> : error ?
       <div className="ui-card p-8 text-rose-700">Không tải được dữ liệu: {error}</div> : <>

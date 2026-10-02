@@ -12,6 +12,7 @@ type Payment = {
   id: string;
   amount: number;
   payment_method: string | null;
+  transfer_account: "H" | "A" | "S" | "V" | null;
   payment_date: string | null;
   tuition: {
     branch_id: string | null;
@@ -110,6 +111,7 @@ export default function ReportsPage() {
   const [otherRevenues, setOtherRevenues] = useState<OtherRevenue[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showTransferBreakdown, setShowTransferBreakdown] = useState(false);
 
   const loadData = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
@@ -138,6 +140,7 @@ export default function ReportsPage() {
           id,
           amount,
           payment_method,
+          transfer_account,
           payment_date,
           tuition:tuition_id (
             branch_id
@@ -340,6 +343,12 @@ export default function ReportsPage() {
   const transfer = filteredPayments
     .filter((item) => item.payment_method === "transfer")
     .reduce((sum, item) => sum + Number(item.amount), 0);
+
+  const transferBreakdown = (["H", "A", "S", "V"] as const).map((account) => ({
+    account,
+    amount: filteredPayments.filter((item) => item.payment_method === "transfer" && (item.transfer_account ?? "H") === account)
+      .reduce((sum, item) => sum + Number(item.amount), 0),
+  }));
 
   const unclassified = filteredPayments
     .filter(
@@ -663,10 +672,12 @@ export default function ReportsPage() {
                   <strong>{money(cash)}</strong>
                 </div>
 
-                <div className="flex justify-between rounded-xl bg-slate-50 p-4">
-                  <span>🏦 Chuyển khoản</span>
-                  <strong>{money(transfer)}</strong>
-                </div>
+                <button type="button" className="flex w-full justify-between rounded-xl bg-slate-50 p-4 text-left" aria-expanded={showTransferBreakdown} onClick={() => setShowTransferBreakdown((value) => !value)}>
+                  <span>🏦 Chuyển khoản</span><strong>{money(transfer)}</strong>
+                </button>
+                {showTransferBreakdown && <div className="grid gap-2 sm:grid-cols-2">
+                  {transferBreakdown.map((item) => <div key={item.account} className="flex justify-between rounded-xl bg-blue-50 p-3"><span>{item.account}</span><strong>{money(item.amount)}</strong></div>)}
+                </div>}
 
                 <div className="flex justify-between rounded-xl bg-slate-50 p-4">
                   <span>⚪ Chưa phân loại</span>

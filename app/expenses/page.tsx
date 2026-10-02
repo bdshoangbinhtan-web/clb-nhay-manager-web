@@ -7,6 +7,8 @@ import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provid
 import { usePrivacyView } from "@/components/layout/privacy-view-context";
 import { filterEffectiveSources } from "@/lib/finance/ledger";
 import { buildExpenseDisplayView, filterExpensesByPeriod } from "@/lib/expenses/display-view";
+import { PaymentMethodFields, type TransferAccount } from "@/components/payment-method-fields";
+import { normalizeTransferAccount } from "@/lib/payment-method";
 
 type Branch = {
   id: string;
@@ -21,6 +23,7 @@ type Expense = {
   description: string;
   amount: number;
   payment_method: "cash" | "transfer" | null;
+  transfer_account: TransferAccount | null;
   note: string | null;
 };
 
@@ -64,6 +67,7 @@ export default function ExpensesPage() {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
+  const [transferAccount, setTransferAccount] = useState<TransferAccount | "">("");
   const [ledgerSourceIds, setLedgerSourceIds] = useState<Set<string>>(new Set());
   const [reversedSourceIds, setReversedSourceIds] = useState<Set<string>>(new Set());
 
@@ -88,7 +92,7 @@ export default function ExpensesPage() {
       supabase
         .from("expenses")
         .select(
-          "id,branch_id,expense_date,category,description,amount,payment_method,note"
+          "id,branch_id,expense_date,category,description,amount,payment_method,transfer_account,note"
         )
         .order("expense_date", { ascending: false }),
       supabase.from("cash_ledger").select("source_id").eq("source_type", "expense"),
@@ -143,6 +147,7 @@ export default function ExpensesPage() {
     setAmount("");
     setNote("");
     setPaymentMethod("cash");
+    setTransferAccount("");
   }
 
   function openAdd() {
@@ -159,6 +164,7 @@ export default function ExpensesPage() {
     setAmount(String(item.amount));
     setNote(item.note ?? "");
     setPaymentMethod(item.payment_method === "transfer" ? "transfer" : "cash");
+    setTransferAccount(item.payment_method === "transfer" ? item.transfer_account ?? "H" : "");
     setShowForm(true);
   }
 
@@ -175,6 +181,11 @@ export default function ExpensesPage() {
       return;
     }
 
+    if (paymentMethod === "transfer" && !transferAccount) {
+      alert("Chọn tài khoản chuyển khoản H, A, S hoặc V.");
+      return;
+    }
+
     setSaving(true);
 
     const payload = {
@@ -184,6 +195,7 @@ export default function ExpensesPage() {
       description: description.trim(),
       amount: Number(amount),
       payment_method: paymentMethod,
+      transfer_account: normalizeTransferAccount(paymentMethod, transferAccount),
       note: note.trim() || null,
     };
 
@@ -380,13 +392,10 @@ export default function ExpensesPage() {
               </select>
             </label>
 
-            <label>
-              <div className="mb-2 text-sm font-bold">Tài khoản tiền</div>
-              <select className="ui-input" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as "cash" | "transfer")}>
-                <option value="cash">💵 Tiền mặt</option>
-                <option value="transfer">🏦 Chuyển khoản / Ngân hàng</option>
-              </select>
-            </label>
+            <div className="md:col-span-2">
+              <PaymentMethodFields method={paymentMethod} transferAccount={transferAccount}
+                onMethodChange={setPaymentMethod} onTransferAccountChange={setTransferAccount} />
+            </div>
 
             <label>
               <div className="mb-2 text-sm font-bold">Ngày chi</div>

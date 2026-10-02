@@ -5,6 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
+import { usePrivacyView } from "@/components/layout/privacy-view-context";
+import { PaymentMethodFields, type TransferAccount } from "@/components/payment-method-fields";
+import { normalizeTransferAccount } from "@/lib/payment-method";
 import {
   applyTuitionAdjustments,
   determineActiveClasses,
@@ -195,6 +198,7 @@ function suggestedTuitionAmount(
 
 export default function TuitionPage() {
   const supabase = useMemo(() => createClient(), []);
+  const { privacyView } = usePrivacyView();
   const loadRequestRef = useRef(0);
   const collectionRequestIdRef = useRef<string | null>(null);
   const amountToCollectInputRef = useRef<HTMLInputElement | null>(null);
@@ -229,6 +233,7 @@ export default function TuitionPage() {
   const [amountDue, setAmountDue] = useState("");
   const [amountToCollect, setAmountToCollect] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
+  const [transferAccount, setTransferAccount] = useState<TransferAccount | "">("");
   const [collectionMonth, setCollectionMonth] = useState(defaultTrackedMonth);
   const [manualPeriod, setManualPeriod] = useState(false);
   const [note, setNote] = useState("");
@@ -369,15 +374,15 @@ export default function TuitionPage() {
       }
 
       const paymentResults = await Promise.all(
-        chunks.map((ids) =>
-          supabase
+        chunks.map((ids) => {
+          let query = supabase
             .from("tuition_payments")
-            .select(
-              "id,tuition_id,amount,payment_method,payment_date,receipt_no"
-            )
+            .select("id,tuition_id,amount,payment_method,payment_date,receipt_no")
             .in("tuition_id", ids)
-            .order("payment_date", { ascending: false })
-        )
+            .order("payment_date", { ascending: false });
+          if (privacyView) query = query.eq("payment_method", "transfer");
+          return query;
+        })
       );
 
       if (requestId !== loadRequestRef.current) return;
@@ -405,7 +410,7 @@ export default function TuitionPage() {
     setClasses(classData ?? []);
     setClassMemberships(membershipData ?? []);
     setLoading(false);
-  }, [supabase]);
+  }, [privacyView, supabase]);
 
   useEffect(() => {
     void loadData();
@@ -1019,6 +1024,11 @@ export default function TuitionPage() {
   async function addTuition(e: React.FormEvent) {
     e.preventDefault();
 
+    if (paymentMethod === "transfer" && !transferAccount) {
+      alert("Chọn tài khoản chuyển khoản H, A, S hoặc V.");
+      return;
+    }
+
     if (!studentId) {
       alert("Hãy chọn học viên.");
       return;
@@ -1090,6 +1100,7 @@ export default function TuitionPage() {
       p_client_request_id: collectionRequestIdRef.current,
       p_payment_date: null,
       p_note: noteParts.filter(Boolean).join(" · ") || null,
+      p_transfer_account: normalizeTransferAccount(paymentMethod, transferAccount),
     });
 
     setSaving(false);
@@ -1128,6 +1139,7 @@ export default function TuitionPage() {
     setClassId("");
     setAmountDue("");
     setAmountToCollect("");
+    setTransferAccount("");
     setNote("");
     await loadData();
     if (paymentId && receiptWindow) {
@@ -1217,7 +1229,8 @@ export default function TuitionPage() {
     setManualPeriod(period !== nextPeriod);
     setAmountDue(String(item.amount_due));
     setAmountToCollect(String(amount));
-    setPaymentMethod(method);
+    setPaymentMethod(privacyView ? "transfer" : method);
+    setTransferAccount("");
     setNote("");
     collectionRequestIdRef.current = null;
     setShowForm(true);
@@ -1402,7 +1415,8 @@ export default function TuitionPage() {
     setManualPeriod(period !== nextPeriod);
     setAmountDue(String(amountDue));
     setAmountToCollect(String(amount));
-    setPaymentMethod("cash");
+    setPaymentMethod(privacyView ? "transfer" : "cash");
+    setTransferAccount("");
     setNote("");
     collectionRequestIdRef.current = null;
     setIsNewStudentFlow(false);
@@ -1415,6 +1429,74 @@ export default function TuitionPage() {
     if (!period) return;
     const remaining = Math.max(row.due.amountDue > 0 ? row.due.remaining : row.suggestedAmount, 0);
     openCollectionForPeriod(row.student, row.classItem, period, remaining);
+  }
+
+  if (privacyView) {
+    return (
+      <div className="space-y-5">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-black uppercase tracking-widest text-blue-600">THU HỌC PHÍ</div>
+            <h1 className="mt-1 text-3xl font-black">Tìm học viên và thu tiền</h1>
+          </div>
+          <div className="rounded-xl bg-blue-50 px-3 py-2 text-sm font-bold text-blue-800">Chuyển khoản</div>
+        </header>
+        <section className="ui-card space-y-4 p-5">
+          <input autoComplete="off" className="ui-input min-h-12 w-full" placeholder="Tìm tên hoặc mã học viên..."
+            value={studentSearch} onChange={(event) => { setStudentSearch(event.target.value); setShowStudentSearch(true); }} />
+          {studentSearch.trim() && (loading ? <p className="text-sm text-slate-500">Đang tải học viên…</p> :
+            filteredStudents.length === 0 ? <p className="text-sm text-slate-500">Không tìm thấy học viên.</p> :
+              <div className="space-y-3">{filteredStudents.map((student) => {
+                const obligations = membershipTuitionRows.filter((row) => row.student.id === student.id);
+                return <div key={student.id} className="rounded-xl border border-slate-100 p-3">
+                  <div className="font-black">{student.full_name} <span className="text-sm text-blue-700">{student.student_code}</span></div>
+                  {obligations.length === 0 ? <p className="mt-2 text-sm text-slate-500">Không có lớp đang học cần xử lý.</p> :
+                    <div className="mt-2 space-y-2">{obligations.map((row) => {
+                      const period = row.due.firstUnpaidMonth;
+                      const canCollect = Boolean(period) && (monthKey(row.membership.end_date) ?? "9999-12") >= period! &&
+                        (row.due.amountDue > 0 ? row.due.remaining > 0 : row.suggestedAmount > 0);
+                      return <div key={row.classItem.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-3">
+                        <span className="text-sm">{row.classItem.name} · {period ? monthLabel(period) : "Đã đóng đủ"}</span>
+                        {canCollect && <button type="button" className="ui-btn ui-btn-blue" onClick={() => openCollectionForDueRow(row)}>Thu học phí</button>}
+                      </div>;
+                    })}</div>}
+                </div>;
+              })}</div>)}
+        </section>
+        {showForm && <section className="ui-card p-5">
+          <h2 className="mb-4 text-xl font-black">Xác nhận thu học phí</h2>
+          <form onSubmit={addTuition} className="grid gap-4 sm:grid-cols-2">
+            {selectedStudent && <div className="sm:col-span-2 rounded-xl bg-blue-50 p-3 font-bold">{selectedStudent.full_name} · {selectedStudent.student_code}</div>}
+            {studentClasses.length > 1 && <label className="text-sm font-bold sm:col-span-2">Lớp
+              <select value={classId} onChange={(event) => setClassId(event.target.value)} className="ui-input mt-1 w-full" required>
+                <option value="">Chọn lớp</option>{studentClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {branchName(item.branch_id)}</option>)}
+              </select>
+            </label>}
+            <label className="text-sm font-bold">Kỳ học phí
+              <input type="month" value={collectionMonth} onChange={(event) => { setCollectionMonth(event.target.value); setManualPeriod(true); }} className="ui-input mt-1 w-full" required />
+            </label>
+            <label className="text-sm font-bold">Số tiền học phí
+              <input type="number" min="0" step="1000" value={amountDue} onChange={(event) => setAmountDue(event.target.value)} className="ui-input mt-1 w-full" required />
+            </label>
+            <label className="text-sm font-bold">Số tiền thực thu
+              <input ref={amountToCollectInputRef} type="number" min="1000" step="1000" value={amountToCollect} onChange={(event) => setAmountToCollect(event.target.value)} className="ui-input mt-1 w-full" required />
+            </label>
+            <label className="text-sm font-bold">Tài khoản chuyển khoản
+              <select value={transferAccount} onChange={(event) => setTransferAccount(event.target.value as TransferAccount | "")} className="ui-input mt-1 w-full" required>
+                <option value="">Chọn H / A / S / V</option>{(["H", "A", "S", "V"] as const).map((account) => <option key={account} value={account}>{account}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-bold sm:col-span-2">Ghi chú
+              <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="ui-input mt-1 w-full" />
+            </label>
+            <div className="flex justify-end gap-2 sm:col-span-2">
+              <button type="button" className="ui-btn" onClick={() => { setShowForm(false); setTransferAccount(""); }}>Hủy</button>
+              <button type="submit" className="ui-btn ui-btn-primary" disabled={saving || !studentId || !classId || !transferAccount || Number(amountToCollect) <= 0}>{saving ? "Đang ghi nhận…" : "Xác nhận thu học phí"}</button>
+            </div>
+          </form>
+        </section>}
+      </div>
+    );
   }
 
   return (
@@ -1625,13 +1707,10 @@ export default function TuitionPage() {
               <input ref={amountToCollectInputRef} type="number" min="1000" step="1000" value={amountToCollect} onChange={(e) => setAmountToCollect(e.target.value)} className="ui-input" />
             </label>
 
-            <label className="block">
-              <div className="mb-2 text-sm font-bold">Phương thức thanh toán</div>
-              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as "cash" | "transfer")} className="ui-input">
-                <option value="cash">Tiền mặt</option>
-                <option value="transfer">Chuyển khoản</option>
-              </select>
-            </label>
+            <div className="md:col-span-2">
+              <PaymentMethodFields method={paymentMethod} transferAccount={transferAccount}
+                onMethodChange={setPaymentMethod} onTransferAccountChange={setTransferAccount} />
+            </div>
 
             <label className="block md:col-span-2">
               <div className="mb-2 text-sm font-bold">Ghi chú</div>
@@ -1648,7 +1727,7 @@ export default function TuitionPage() {
               <button
                 className="ui-btn ui-btn-primary"
                 type="submit"
-                disabled={saving || !studentId || !classId || studentClasses.length === 0 || Number(amountToCollect) <= 0}
+                disabled={saving || !studentId || !classId || studentClasses.length === 0 || Number(amountToCollect) <= 0 || (paymentMethod === "transfer" && !transferAccount)}
               >
                 {saving ? "Đang ghi nhận..." : "✅ Xác nhận thu học phí"}
               </button>

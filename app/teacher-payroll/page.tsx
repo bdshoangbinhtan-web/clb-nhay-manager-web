@@ -51,6 +51,8 @@ type Payroll = {
   total_amount: number;
   status: "draft" | "locked" | "paid";
   note: string | null;
+  payment_method?: "cash" | "transfer" | string | null;
+  transfer_account?: "H" | "A" | "S" | "V" | null;
 };
 
 type PayrollDetail = {
@@ -218,6 +220,7 @@ export default function TeacherPayrollPage() {
   const [details, setDetails] = useState<PayrollDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
+  const [showTransferAccountFor, setShowTransferAccountFor] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   // Tiền Admin chỉnh riêng từng buổi.
@@ -322,7 +325,7 @@ export default function TeacherPayrollPage() {
         supabase
           .from("teacher_payrolls")
           .select(
-            "id,teacher_id,payroll_month,total_sessions,salary_rate,total_amount,status,note"
+            "id,teacher_id,payroll_month,total_sessions,salary_rate,total_amount,status,note,payment_method,transfer_account"
           )
           .eq("payroll_month", start),
       ]);
@@ -887,8 +890,18 @@ export default function TeacherPayrollPage() {
           ? "transfer"
           : null;
 
+    const transferAccountInput = paymentMethod === "transfer"
+      ? window.prompt("Tài khoản chuyển khoản (H, A, S hoặc V):", "")
+      : null;
+    if (paymentMethod === "transfer" && transferAccountInput === null) return;
+    const transferAccount = transferAccountInput?.trim().toUpperCase() ?? null;
+
     if (!paymentMethod) {
       alert("❌ Vui lòng chọn 1 hoặc 2.");
+      return;
+    }
+    if (paymentMethod === "transfer" && !["H", "A", "S", "V"].includes(transferAccount ?? "")) {
+      alert("Vui lòng chọn H, A, S hoặc V.");
       return;
     }
 
@@ -898,7 +911,7 @@ export default function TeacherPayrollPage() {
         `Số buổi: ${item.totalSessions}\n` +
         `Số tiền: ${money(item.totalAmount)}\n` +
         `Phương thức: ${
-          paymentMethod === "cash" ? "Tiền mặt" : "Chuyển khoản"
+          paymentMethod === "cash" ? "Tiền mặt" : `Chuyển khoản · ${transferAccount}`
         }\n\n` +
         `Sau khi xác nhận, hệ thống sẽ ghi nhận khoản chi.`
     );
@@ -910,6 +923,7 @@ export default function TeacherPayrollPage() {
     const { data, error } = await supabase.rpc("pay_teacher_payroll_with_allowance", {
       p_payroll_id: payroll.id,
       p_payment_method: paymentMethod,
+      p_transfer_account: transferAccount,
     });
 
     setWorking(false);
@@ -1148,6 +1162,12 @@ export default function TeacherPayrollPage() {
                           </span>
                         )}
                       </div>
+
+                      {payroll?.status === "paid" && payroll.payment_method === "transfer" && <div className="mt-2">
+                        <button type="button" className="text-xs font-bold text-blue-700 underline" aria-expanded={showTransferAccountFor === payroll.id}
+                          onClick={() => setShowTransferAccountFor((current) => current === payroll.id ? null : payroll.id)}>Chuyển khoản</button>
+                        {showTransferAccountFor === payroll.id && <span className="ml-2 text-xs font-bold text-slate-600">{payroll.transfer_account ?? "H"}</span>}
+                      </div>}
 
                       <div className="mt-1 text-sm text-slate-400">
                         {rateSummary}

@@ -2,6 +2,7 @@ export type PrivacyTransaction = {
   id: string;
   sourceType: "tuition_payment" | "tuition_refund" | "expense" | "other_revenue";
   paymentMethod: string | null;
+  transferAccount?: string | null;
   date: string;
   amount: number;
   direction: "in" | "out";
@@ -96,6 +97,7 @@ export function resolveTransferLedgerRows(
       id: row.id,
       sourceType: source.sourceType,
       paymentMethod: "transfer",
+      transferAccount: source.transferAccount,
       date: row.business_date,
       amount: Number(row.amount),
       direction: row.direction,
@@ -122,4 +124,19 @@ export function summarizePrivacyTransactions(transactions: PrivacyTransaction[])
   }
 
   return { income, expense, net: income - expense, studentCount: studentIds.size, studentIds };
+}
+
+export function summarizeTransferAccounts(transactions: PrivacyTransaction[]) {
+  const totals: Record<"H" | "A" | "S" | "V", { income: number; expense: number }> = {
+    H: { income: 0, expense: 0 }, A: { income: 0, expense: 0 },
+    S: { income: 0, expense: 0 }, V: { income: 0, expense: 0 },
+  };
+  for (const transaction of transactions) {
+    if (transaction.paymentMethod !== "transfer") continue;
+    const account = transaction.transferAccount;
+    const key = account === "A" || account === "S" || account === "V" ? account : "H";
+    if (transaction.direction === "in") totals[key].income += transaction.amount;
+    else totals[key].expense += transaction.amount;
+  }
+  return totals;
 }

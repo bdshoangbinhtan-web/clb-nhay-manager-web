@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTransferLedgerSourceBatches, excludeReversedPrivacySources, filterPrivacyTransactions, matchedTransferRefundBatchIds, resolveTransferLedgerRows, summarizePrivacyTransactions, type PrivacyLedgerRow, type PrivacyTransaction } from "../lib/privacy-view.ts";
+import { buildTransferLedgerSourceBatches, excludeReversedPrivacySources, filterPrivacyTransactions, matchedTransferRefundBatchIds, resolveTransferLedgerRows, summarizePrivacyTransactions, summarizeTransferAccounts, type PrivacyLedgerRow, type PrivacyTransaction } from "../lib/privacy-view.ts";
 
 const transaction = (
   id: string,
@@ -54,6 +54,21 @@ test("student count uses distinct transfer tuition payments only", () => {
   assert.deepEqual(summary.studentIds, new Set(["student-1", "student-2"]));
   assert.equal(summary.income, 1100000);
   assert.equal(summary.expense, 60000);
+});
+
+test("transfer breakdown assigns legacy transfer rows without an account to H", () => {
+  const totals = summarizeTransferAccounts([
+    transaction("legacy", { amount: 100, transferAccount: null }),
+    transaction("account-a", { amount: 40, transferAccount: "A" }),
+    transaction("cash", { paymentMethod: "cash", amount: 999 }),
+    transaction("expense-v", { sourceType: "expense", direction: "out", amount: 20, transferAccount: "V" }),
+  ]);
+  assert.deepEqual(totals, {
+    H: { income: 100, expense: 0 },
+    A: { income: 40, expense: 0 },
+    S: { income: 0, expense: 0 },
+    V: { income: 0, expense: 20 },
+  });
 });
 
 test("ledger rows resolve through transfer sources, never the bank account", () => {

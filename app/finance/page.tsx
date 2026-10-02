@@ -37,6 +37,7 @@ export default function FinancePage() {
   const [openingAccount, setOpeningAccount] = useState("");
   const [openingBalance, setOpeningBalance] = useState("");
   const [openingNote, setOpeningNote] = useState("");
+  const [showTransferBreakdown, setShowTransferBreakdown] = useState(false);
 
   const activeBranchId = role === "manager" ? myBranchId : branchFilter || null;
 
@@ -91,6 +92,20 @@ export default function FinancePage() {
   const summary = summarizeLedger(entries);
   const dayBalances = accountBalances(entries);
   const latestClosingByAccount = new Map(closings.map((closing) => [closing.account_id, closing]));
+  const transferBreakdown = (["H", "A", "S", "V"] as const).map((account) => {
+    const rows = entries.filter((entry) => {
+      const method = entry.metadata?.payment_method ?? entry.metadata?.refund_payment_method;
+      if (method !== "transfer") return false;
+      const value = entry.metadata?.transfer_account;
+      const legacyAccount = value === "A" || value === "S" || value === "V" ? value : "H";
+      return legacyAccount === account;
+    });
+    return {
+      account,
+      income: rows.filter((entry) => entry.direction === "in").reduce((sum, entry) => sum + Number(entry.amount), 0),
+      expense: rows.filter((entry) => entry.direction === "out").reduce((sum, entry) => sum + Number(entry.amount), 0),
+    };
+  });
 
   async function closeDay(event: React.FormEvent) {
     event.preventDefault();
@@ -171,8 +186,11 @@ export default function FinancePage() {
       </section>
 
       <section className="grid gap-3 sm:grid-cols-2">
-        {accounts.map((account) => <div key={account.id} className="ui-card flex items-center justify-between gap-3 p-4"><div><div className="text-sm font-bold text-slate-500">{account.account_type === "cash" ? "💵 Tiền mặt" : "🏦 Ngân hàng"}</div><div className="font-black">{account.name}</div><div className="mt-1 text-xs text-slate-400">Biến động ngày: {money(dayBalances.get(account.id) ?? 0)}</div></div><strong className="text-right text-xl">{money(account.balance ?? 0)}</strong></div>)}
+        {accounts.map((account) => <div key={account.id} className="ui-card flex items-center justify-between gap-3 p-4"><div><div className="text-sm font-bold text-slate-500">{account.account_type === "cash" ? "💵 Tiền mặt" : "🏦 Chuyển khoản"}</div><div className="font-black">{account.name}</div><div className="mt-1 text-xs text-slate-400">Biến động ngày: {money(dayBalances.get(account.id) ?? 0)}</div>{account.account_type === "bank" && <button type="button" className="mt-2 text-xs font-bold text-blue-700 underline" aria-expanded={showTransferBreakdown} onClick={() => setShowTransferBreakdown((value) => !value)}>Chi tiết H / A / S / V</button>}</div><strong className="text-right text-xl">{money(account.balance ?? 0)}</strong></div>)}
       </section>
+      {showTransferBreakdown && <section className="ui-card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Chi tiết chuyển khoản trong ngày">
+        {transferBreakdown.map((item) => <div key={item.account} className="rounded-xl bg-slate-50 p-3 text-sm"><strong>{item.account}</strong><div className="mt-1 text-slate-500">Thu {money(item.income)}</div><div className="text-slate-500">Chi {money(item.expense)}</div></div>)}
+      </section>}
 
       <section className="ui-card overflow-hidden">
         <div className="flex flex-col gap-2 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-black">Giao dịch ngày {date}</h2><p className="text-sm text-slate-500">Sắp xếp giao dịch mới nhất trước.</p></div><span className="text-sm font-bold text-slate-500">{entries.length} dòng</span></div>
