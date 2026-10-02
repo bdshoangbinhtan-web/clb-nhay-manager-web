@@ -4,11 +4,11 @@ import test from "node:test";
 import { normalizeTransferAccount } from "../lib/payment-method.ts";
 
 const migration = readFileSync(
-  new URL("../supabase/migrations/20261002174328_add_transfer_account_classification.sql", import.meta.url),
+  new URL("../supabase/migrations/20261002191833_add_transfer_account_classification.sql", import.meta.url),
   "utf8",
 );
 const enforcementMigration = readFileSync(
-  new URL("../supabase/migrations/20261003090000_enforce_transfer_account_selection.sql", import.meta.url),
+  new URL("../supabase/migrations/20261002193914_enforce_transfer_account_selection.sql", import.meta.url),
   "utf8",
 );
 const tuitionPage = readFileSync(new URL("../app/tuition/page.tsx", import.meta.url), "utf8");
@@ -77,6 +77,17 @@ test("legacy transfers without an account are read as H in reports, finance, pay
   assert.match(expensesPage, /item\.transfer_account \?\? "H"/);
   assert.match(revenuesPage, /r\.transfer_account\?\?'H'/);
   assert.match(privacyPage, /summarizeTransferAccounts\(visibleFinanceTransactions\)/);
+});
+
+test("tuition collection requires an explicit final confirmation before writing", () => {
+  const paymentFields = readFileSync(new URL("../components/payment-method-fields.tsx", import.meta.url), "utf8");
+  assert.match(tuitionPage, /useState<PaymentMethod \| "">\(""/);
+  assert.match(paymentFields, /<option value="" disabled>Chọn phương thức<\/option>/);
+  assert.match(tuitionPage, /if \(!paymentMethod\)/);
+  assert.match(tuitionPage, /Chỉ bấm OK khi đã nhận tiền thực tế/);
+  assert.match(tuitionPage, /method \?\? ""/);
+  assert.match(tuitionPage, /setPaymentMethod\(privacyView \? "transfer" : ""\)/);
+  assert.doesNotMatch(tuitionPage, /amountToCollectInputRef\.current\?\.focus/);
 });
 
 test("Privacy View opens the shared tuition page and fixes collection to transfer", () => {
