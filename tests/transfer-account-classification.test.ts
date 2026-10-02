@@ -7,8 +7,16 @@ const migration = readFileSync(
   new URL("../supabase/migrations/20261002174328_add_transfer_account_classification.sql", import.meta.url),
   "utf8",
 );
+const enforcementMigration = readFileSync(
+  new URL("../supabase/migrations/20261003090000_enforce_transfer_account_selection.sql", import.meta.url),
+  "utf8",
+);
 const tuitionPage = readFileSync(new URL("../app/tuition/page.tsx", import.meta.url), "utf8");
 const payrollPage = readFileSync(new URL("../app/teacher-payroll/page.tsx", import.meta.url), "utf8");
+const financePage = readFileSync(new URL("../app/finance/page.tsx", import.meta.url), "utf8");
+const reportsPage = readFileSync(new URL("../app/reports/page.tsx", import.meta.url), "utf8");
+const expensesPage = readFileSync(new URL("../app/expenses/page.tsx", import.meta.url), "utf8");
+const revenuesPage = readFileSync(new URL("../app/other-revenue/page.tsx", import.meta.url), "utf8");
 const privacyPage = readFileSync(new URL("../components/layout/privacy-workspace.tsx", import.meta.url), "utf8");
 const appShell = readFileSync(new URL("../components/layout/app-shell.tsx", import.meta.url), "utf8");
 const payrollMigration = readFileSync(new URL("../supabase/migrations/20261001135049_fix_teacher_payroll_payment_and_expense_period.sql", import.meta.url), "utf8");
@@ -22,14 +30,20 @@ test("cash has no transfer account and transfer accepts only H/A/S/V", () => {
   assert.throws(() => normalizeTransferAccount("transfer", "X"));
 });
 
-test("migration backfills only identified transfer source rows and never mutates the append-only ledger", () => {
-  for (const table of ["tuition_payments", "expenses", "other_revenues", "teacher_payrolls"]) {
-    assert.match(migration, new RegExp(`update public\\.${table} set transfer_account = 'H'[\\s\\S]*?where payment_method = 'transfer' and transfer_account is null`, "i"));
-  }
+test("phase one never updates historical sources or the append-only ledger", () => {
+  assert.doesNotMatch(migration, /update\s+public\.(tuition_payments|expenses|other_revenues|teacher_payrolls)\b/i);
   assert.doesNotMatch(migration, /update\s+public\.cash_ledger/i);
   assert.doesNotMatch(migration, /insert\s+into\s+public\.cash_ledger/i);
   assert.match(migration, /v_transfer_account not in \('H','A','S','V'\)/);
   assert.match(migration, /if v_method = 'cash' then\s+new\.transfer_account := null/);
+  for (const table of ["tuition_payments", "expenses", "other_revenues", "teacher_payrolls"]) {
+    assert.match(migration, new RegExp(`check \\(transfer_account is null or \\(payment_method = 'transfer' and transfer_account in \\('H','A','S','V'\\)\\) is true\\) not valid`, "i"));
+    assert.match(migration, new RegExp(`validate constraint ${table}_transfer_account_check`, "i"));
+  }
+  assert.match(migration, /coalesce\(v_transfer_account, v_requested_account, 'H'\)/);
+  assert.match(enforcementMigration, /coalesce\(v_transfer_account, v_requested_account\)/);
+  assert.match(enforcementMigration, /if v_transfer_account is null or v_transfer_account not in \('H','A','S','V'\) then/);
+  assert.doesNotMatch(enforcementMigration, /coalesce\(v_transfer_account, v_requested_account, 'H'\)/);
 });
 
 test("new source triggers preserve one ledger row and add classification only to transfer metadata", () => {
@@ -54,6 +68,15 @@ test("payroll carries the selected account to both payroll and generated expense
   assert.match(migration, /finance_set_transfer_account before insert or update of payment_method, transfer_account on public\.expenses/);
   assert.match(payrollMigration, /already_paid/);
   assert.match(payrollMigration, /allowance/);
+});
+
+test("legacy transfers without an account are read as H in reports, finance, payroll and edit forms", () => {
+  assert.match(financePage, /value === "A" \|\| value === "S" \|\| value === "V" \? value : "H"/);
+  assert.match(reportsPage, /item\.transfer_account \?\? "H"/);
+  assert.match(payrollPage, /payroll\.transfer_account \?\? "H"/);
+  assert.match(expensesPage, /item\.transfer_account \?\? "H"/);
+  assert.match(revenuesPage, /r\.transfer_account\?\?'H'/);
+  assert.match(privacyPage, /summarizeTransferAccounts\(visibleFinanceTransactions\)/);
 });
 
 test("Privacy View opens the shared tuition page and fixes collection to transfer", () => {

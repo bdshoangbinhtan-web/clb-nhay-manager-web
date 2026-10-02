@@ -7,40 +7,23 @@ alter table public.expenses add column if not exists transfer_account text;
 alter table public.other_revenues add column if not exists transfer_account text;
 alter table public.teacher_payrolls add column if not exists transfer_account text;
 
-update public.tuition_payments set transfer_account = 'H'
-where payment_method = 'transfer' and transfer_account is null;
-update public.expenses set transfer_account = 'H'
-where payment_method = 'transfer' and transfer_account is null;
-update public.other_revenues set transfer_account = 'H'
-where payment_method = 'transfer' and transfer_account is null;
-update public.teacher_payrolls set transfer_account = 'H'
-where payment_method = 'transfer' and transfer_account is null;
-
 do $constraints$
 begin
   if not exists (select 1 from pg_constraint where conname = 'tuition_payments_transfer_account_check' and conrelid = 'public.tuition_payments'::regclass) then
     alter table public.tuition_payments add constraint tuition_payments_transfer_account_check
-      check ((payment_method is distinct from 'cash' or transfer_account is null)
-        and (payment_method is distinct from 'transfer' or transfer_account in ('H','A','S','V'))
-        and (transfer_account is null or (payment_method = 'transfer' and transfer_account in ('H','A','S','V')) is true)) not valid;
+      check (transfer_account is null or (payment_method = 'transfer' and transfer_account in ('H','A','S','V')) is true) not valid;
   end if;
   if not exists (select 1 from pg_constraint where conname = 'expenses_transfer_account_check' and conrelid = 'public.expenses'::regclass) then
     alter table public.expenses add constraint expenses_transfer_account_check
-      check ((payment_method is distinct from 'cash' or transfer_account is null)
-        and (payment_method is distinct from 'transfer' or transfer_account in ('H','A','S','V'))
-        and (transfer_account is null or (payment_method = 'transfer' and transfer_account in ('H','A','S','V')) is true)) not valid;
+      check (transfer_account is null or (payment_method = 'transfer' and transfer_account in ('H','A','S','V')) is true) not valid;
   end if;
   if not exists (select 1 from pg_constraint where conname = 'other_revenues_transfer_account_check' and conrelid = 'public.other_revenues'::regclass) then
     alter table public.other_revenues add constraint other_revenues_transfer_account_check
-      check ((payment_method is distinct from 'cash' or transfer_account is null)
-        and (payment_method is distinct from 'transfer' or transfer_account in ('H','A','S','V'))
-        and (transfer_account is null or (payment_method = 'transfer' and transfer_account in ('H','A','S','V')) is true)) not valid;
+      check (transfer_account is null or (payment_method = 'transfer' and transfer_account in ('H','A','S','V')) is true) not valid;
   end if;
   if not exists (select 1 from pg_constraint where conname = 'teacher_payrolls_transfer_account_check' and conrelid = 'public.teacher_payrolls'::regclass) then
     alter table public.teacher_payrolls add constraint teacher_payrolls_transfer_account_check
-      check ((payment_method is distinct from 'cash' or transfer_account is null)
-        and (payment_method is distinct from 'transfer' or transfer_account in ('H','A','S','V'))
-        and (transfer_account is null or (payment_method = 'transfer' and transfer_account in ('H','A','S','V')) is true)) not valid;
+      check (transfer_account is null or (payment_method = 'transfer' and transfer_account in ('H','A','S','V')) is true) not valid;
   end if;
 end;
 $constraints$;
