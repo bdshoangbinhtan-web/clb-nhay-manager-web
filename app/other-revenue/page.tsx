@@ -6,6 +6,7 @@ import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import { PaymentMethodFields } from "@/components/payment-method-fields";
 import { normalizeTransferAccount } from "@/lib/payment-method";
+// Keep payment-method updates functional so cash selection is not overwritten by stale form state.
 type Branch={id:string;name:string};
 type Revenue={id:string;revenue_date:string;category:string;description:string;payer_name:string|null;amount:number;payment_method:string|null;transfer_account:"H"|"A"|"S"|"V"|null;branch_id:string|null;note:string|null;created_at:string;branch?:{id:string;name:string}|null};
 const CATEGORIES=[['room_rental','🏠 Cho thuê phòng'],['workshop','🎤 Workshop / Khóa ngắn hạn'],['event','🎪 Sự kiện / Biểu diễn'],['equipment','🎛️ Cho thuê thiết bị'],['materials','📦 Giáo trình / Tài liệu'],['partnership','🤝 Hợp tác / Đối tác'],['other','💵 Khoản thu khác']] as const;
