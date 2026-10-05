@@ -1779,47 +1779,7 @@ export default function TuitionPage() {
         </div>
       )}
 
-      <section className="ui-card overflow-hidden">
-        <div className="border-b border-slate-100 p-5 sm:p-6">
-          <h2 className="text-2xl font-black">Danh sách cần xử lý</h2>
-          <p className="mt-1 text-sm text-slate-500">Danh sách được tính từ lớp đang học và lịch sử học phí; chưa thu thì chưa tạo phiếu.</p>
-        </div>
-        {loading ? (
-          <div className="p-8 text-center text-slate-400">Đang tính kỳ cần thu…</div>
-        ) : actionableDueRows.length === 0 ? (
-          <div className="p-8 text-center text-slate-500">Hiện không có học viên đến hạn.</div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {actionableDueRows.map((row) => {
-              const period = row.due.firstUnpaidMonth ?? currentMonth;
-              const overdue = period < currentMonth;
-              const branch = branchById.get(row.classItem.branch_id)?.name ?? "Chưa gán cơ sở";
-              return (
-                <div key={`${row.student.id}-${row.classItem.id}`} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                  <div className="min-w-0">
-                    <div className="font-black text-slate-900">{row.student.full_name} <span className="text-xs font-bold text-blue-600">{row.student.student_code}</span></div>
-                    <div className="mt-1 text-sm text-slate-500">{row.classItem.name} · {branch} · Kỳ {monthLabel(period)}</div>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
-                      <span className={`rounded-full px-3 py-1 ${row.due.status === "PARTIAL" ? "bg-amber-100 text-amber-800" : overdue ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"}`}>
-                        {row.due.status === "PARTIAL" ? "Đóng một phần" : overdue ? "Quá hạn" : "Chưa đóng kỳ hiện tại"}
-                      </span>
-                      {row.due.paidThroughMonth && <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Đã đóng đến {monthLabel(row.due.paidThroughMonth)}</span>}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs sm:min-w-[330px]">
-                    <div><div className="text-slate-400">Phải thu</div><strong className="mt-1 block text-sm">{money(row.suggestedAmount)}</strong></div>
-                    <div><div className="text-slate-400">Đã thu</div><strong className="mt-1 block text-sm text-emerald-700">{money(row.due.amountPaid)}</strong></div>
-                    <div><div className="text-slate-400">Còn lại</div><strong className="mt-1 block text-sm text-rose-700">{money(row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount)}</strong></div>
-                  </div>
-                  <div className="flex shrink-0 justify-end">
-                    <button type="button" className="ui-btn ui-btn-primary min-h-11" onClick={() => openCollectionForDueRow(row)}>Thu tiền</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
+      
 
       <section className="ui-card p-6 sm:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -2209,6 +2169,48 @@ export default function TuitionPage() {
           )}
         </section>
       )}
+
+      <section className="ui-card overflow-hidden">
+        <div className="border-b border-slate-100 p-5 sm:p-6">
+          <h2 className="text-2xl font-black">Danh sách cần xử lý</h2>
+          <p className="mt-1 text-sm text-slate-500">Danh sách được tính từ lớp đang học và lịch sử học phí; chưa thu thì chưa tạo phiếu.</p>
+        </div>
+        {loading ? (
+          <div className="p-8 text-center text-slate-400">Đang tính kỳ cần thu…</div>
+        ) : actionableDueRows.length === 0 ? (
+          <div className="p-8 text-center text-slate-500">Hiện không có học viên đến hạn.</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {actionableDueRows.map((row) => {
+              const period = row.due.firstUnpaidMonth ?? currentMonth;
+              const overdue = period < currentMonth;
+              const branch = branchById.get(row.classItem.branch_id)?.name ?? "Chưa gán cơ sở";
+              return (
+                <div key={`${row.student.id}-${row.classItem.id}`} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                  <div className="min-w-0">
+                    <div className="font-black text-slate-900">{row.student.full_name} <span className="text-xs font-bold text-blue-600">{row.student.student_code}</span></div>
+                    <div className="mt-1 text-sm text-slate-500">{row.classItem.name} · {branch} · Kỳ {monthLabel(period)}</div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
+                      <span className={`rounded-full px-3 py-1 ${row.due.status === "PARTIAL" ? "bg-amber-100 text-amber-800" : overdue ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"}`}>
+                        {row.due.status === "PARTIAL" ? "Đóng một phần" : overdue ? "Quá hạn" : "Chưa đóng kỳ hiện tại"}
+                      </span>
+                      {row.due.paidThroughMonth && <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Đã đóng đến {monthLabel(row.due.paidThroughMonth)}</span>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs sm:min-w-[330px]">
+                    <div><div className="text-slate-400">Phải thu</div><strong className="mt-1 block text-sm">{money(row.suggestedAmount)}</strong></div>
+                    <div><div className="text-slate-400">Đã thu</div><strong className="mt-1 block text-sm text-emerald-700">{money(row.due.amountPaid)}</strong></div>
+                    <div><div className="text-slate-400">Còn lại</div><strong className="mt-1 block text-sm text-rose-700">{money(row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount)}</strong></div>
+                  </div>
+                  <div className="flex shrink-0 justify-end">
+                    <button type="button" className="ui-btn ui-btn-primary min-h-11" onClick={() => openCollectionForDueRow(row)}>Thu tiền</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <section id="tuition-list" className="ui-card scroll-mt-6 overflow-hidden">
         <div className="border-b border-slate-100 p-6">
