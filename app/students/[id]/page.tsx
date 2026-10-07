@@ -8,7 +8,7 @@ import { vietnamCurrentMonth, vietnamToday } from "@/lib/vietnam-date";
 import { StudentAvatar } from "@/components/students/student-avatar";
 import { StudentAvatarEditor } from "@/components/students/student-avatar-editor";
 import { getStudentAvatarUrl, uploadStudentAvatar } from "@/lib/student-avatar-storage";
-import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
+import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";\nimport { ParentAppAccessCard } from "@/components/students/parent-app-access-card";
 
 type Student = {
   id: string;
@@ -714,7 +714,13 @@ function StudentDetailContent() {
       );
     } catch (error) {
       alert(
-        `❌ CHUYỂN LỚP THẤT BẠI:\n\n` +
+        `❌ CHUYỂN LỚP THẤT BẠI:\n\      <ParentAppAccessCard
+        studentId={student.id}
+        studentName={student.full_name}
+        parentPhone={student.parent_phone}
+      />
+
+n` +
         (error instanceof Error
           ? error.message
           : String(error))
