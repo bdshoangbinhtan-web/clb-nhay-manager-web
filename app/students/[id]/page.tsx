@@ -715,13 +715,7 @@ function StudentDetailContent() {
       );
     } catch (error) {
       alert(
-        `❌ CHUYỂN LỚP THẤT BẠI:\n\      <ParentAppAccessCard
-        studentId={student.id}
-        studentName={student.full_name}
-        parentPhone={student.parent_phone}
-      />
-
-n` +
+        `❌ CHUYỂN LỚP THẤT BẠI:\n\n` +
         (error instanceof Error
           ? error.message
           : String(error))
@@ -961,6 +955,12 @@ n` +
             </dl>
           </section>
       )}
+
+      <ParentAppAccessCard
+        studentId={student.id}
+        studentName={student.full_name}
+        parentPhone={student.parent_phone}
+      />
 
       <section className="ui-card min-w-0 p-4 sm:p-6">
             <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
