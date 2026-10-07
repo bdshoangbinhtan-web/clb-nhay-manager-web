@@ -15,6 +15,7 @@ const adminManagerMenus = [
 
   ["🏢", "Cơ sở & Lớp", "/branches"],
   ["🏆", "Học viên", "/students"],
+  ["🎵", "Học cùng ABK", "/family-learning"],
   ["✨", "Đăng ký từ WEB", "/dashboard/trial-leads"],
   ["👨‍🏫", "Giáo viên", "/teachers"],
   ["🎟️", "Quản lý học thử", "/trial-students"],
@@ -28,6 +29,7 @@ const adminManagerMenus = [
 ] as const;
 
 const teacherMenus = [
+  ["🎵", "Học cùng ABK", "/family-learning"],
   ["📚", "Lớp của tôi", "/teacher-classes"],
   ["📝", "Điểm danh học viên", "/teacher-student-attendance"],
   ["🎟️", "Học thử", "/teacher-trial-students"],
