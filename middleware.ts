@@ -70,7 +70,7 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // Các trang công khai cho mọi người, kể cả khi đã đăng nhập.
-  if (pathname === "/" || pathname === "/privacy") return response;
+  if (pathname === "/" || pathname === "/privacy" || pathname === "/delete-account") return response;
 
   // Chưa đăng nhập
   if (!user) {
