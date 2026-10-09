@@ -69,8 +69,8 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Trang chủ công khai cho mọi người, kể cả khi đã đăng nhập.
-  if (pathname === "/") return response;
+  // Các trang công khai cho mọi người, kể cả khi đã đăng nhập.
+  if (pathname === "/" || pathname === "/privacy") return response;
 
   // Chưa đăng nhập
   if (!user) {
