@@ -47,7 +47,7 @@ export default function AppShell({
 }) {
   const pathname = usePathname();
 
-  if (pathname === "/login" || pathname === "/") {
+  if (pathname === "/login" || pathname === "/" || pathname === "/privacy") {
     return children;
   }
 
