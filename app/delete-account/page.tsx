@@ -48,6 +48,16 @@ export default function DeleteAccountPage() {
             </ol>
           </section>
 
+          <section className="mt-8 rounded-2xl border border-slate-200 p-5">
+            <h2 className="text-xl font-black text-slate-950">Muốn xóa dữ liệu nhưng vẫn giữ tài khoản?</h2>
+            <p className="mt-3 leading-7 text-slate-700">
+              Phụ huynh có thể yêu cầu xóa một phần hoặc toàn bộ dữ liệu cá nhân mà không cần xóa tài khoản.
+              Hãy gửi email đến <a className="font-bold text-rose-700 underline" href="mailto:bdshoangbinhtan@gmail.com">bdshoangbinhtan@gmail.com</a>,
+              tiêu đề <strong>Yêu cầu xóa dữ liệu – ABK Family Control</strong>, nêu số điện thoại đăng nhập và
+              loại dữ liệu muốn xóa. ANGEL BK có thể yêu cầu xác minh quyền sở hữu tài khoản trước khi xử lý.
+            </p>
+          </section>
+
           <section className="mt-8">
             <h2 className="text-xl font-black text-slate-950">Dữ liệu sẽ được xóa</h2>
             <ul className="mt-3 list-disc space-y-2 pl-6 leading-7">
