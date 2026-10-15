@@ -32,7 +32,6 @@ type Student = {
 type Teacher = {
   id: string;
   full_name: string;
-  salary_rate?: number | null;
 };
 
 const DAY_LABELS: Record<string, string> = {
@@ -136,12 +135,8 @@ export default function ClassDetailPage() {
       return;
     }
 
-    const classTeacherSelection = currentRole === "admin"
-      ? "teacher_id, teachers(id,full_name,salary_rate)"
-      : "teacher_id, teachers(id,full_name)";
-    const teacherSelection = currentRole === "admin"
-      ? "id,full_name,salary_rate"
-      : "id,full_name";
+    const classTeacherSelection = "teacher_id, teachers(id,full_name)";
+    const teacherSelection = "id,full_name";
 
     const [{ data: branchData }, { data: classStudents }, { data: classTeachers }, { data: allTeachers }] =
       await Promise.all([
@@ -448,12 +443,7 @@ export default function ClassDetailPage() {
                       {teacher.full_name}
                     </div>
 
-                    {role === "admin" && <div className="mt-1 text-xs font-semibold text-slate-400">
-                      {Number(
-                        teacher.salary_rate || 0
-                      ).toLocaleString("vi-VN")}{" "}
-                      đ/buổi
-                    </div>}
+
                   </div>
 
                   <button

@@ -18,9 +18,6 @@ type Teacher = {
   birth_date: string | null;
   address: string | null;
   start_date: string | null;
-  salary_type?: string;
-  salary_rate?: number;
-  allowance?: number;
   avatar_url: string | null;
   notes: string | null;
   status: string;
@@ -28,21 +25,9 @@ type Teacher = {
   account_active?: boolean;
 };
 
-const SALARY_TYPES = [
-  ["per_session", "🕐 Theo buổi"],
-];
-
-function money(value: number) {
-  return new Intl.NumberFormat("vi-VN").format(value || 0) + " đ";
-}
-
 function date(value: string | null) {
   if (!value) return "—";
   return new Date(value + "T00:00:00").toLocaleDateString("vi-VN");
-}
-
-function salaryLabel(value: string) {
-  return SALARY_TYPES.find(([id]) => id === value)?.[1] ?? value;
 }
 
 export default function TeachersPage() {
@@ -63,7 +48,6 @@ export default function TeachersPage() {
   const [birthDate, setBirthDate] = useState("");
   const [address, setAddress] = useState("");
   const [startDate, setStartDate] = useState("");
-  const [salaryRate, setSalaryRate] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -153,7 +137,6 @@ export default function TeachersPage() {
     setBirthDate("");
     setAddress("");
     setStartDate("");
-    setSalaryRate("");
     setAvatarUrl("");
     setNotes("");
   }
@@ -178,7 +161,6 @@ export default function TeachersPage() {
     setBirthDate(t.birth_date || "");
     setAddress(t.address || "");
     setStartDate(t.start_date || "");
-    if (role === "admin") setSalaryRate(String(t.salary_rate ?? ""));
     setAvatarUrl(t.avatar_url || "");
     setNotes(t.notes || "");
     setShowForm(true);
@@ -199,13 +181,6 @@ export default function TeachersPage() {
       return;
     }
 
-    const rate = Number(salaryRate);
-
-    if (role === "admin" && (!salaryRate.trim() || !Number.isFinite(rate) || rate < 0)) {
-      alert("Hãy nhập mức lương / thù lao theo buổi hợp lệ.");
-      return;
-    }
-
     setSaving(true);
 
     const commonPayload = {
@@ -217,9 +192,8 @@ export default function TeachersPage() {
       avatar_url: avatarUrl.trim() || null,
       notes: notes.trim() || null,
     };
-    const payload = role === "admin"
-      ? { ...commonPayload, salary_type: "per_session", salary_rate: rate, allowance: 0 }
-      : commonPayload;
+    // Lương chỉ cấu hình theo lớp. Không sửa cột lương giáo viên lịch sử.
+    const payload = commonPayload;
 
     let result: { data: Teacher | null; error: { message: string; code?: string } | null };
 
@@ -246,7 +220,7 @@ export default function TeachersPage() {
           result = await supabase.from("teachers").insert({
             ...commonPayload,
             status: "active",
-            salary_type: "per_session",
+            salary_type: "per_class",
             salary_rate: 0,
             allowance: 0,
           }).select(managerFields).single();
@@ -278,12 +252,7 @@ export default function TeachersPage() {
       return [savedTeacher, ...current];
     });
 
-    alert(
-      (editingId
-        ? "✅ Đã cập nhật giáo viên."
-        : "✅ Đã thêm giáo viên.") +
-        (role === "admin" ? "\n\nMức lương: " + Number(savedTeacher.salary_rate ?? 0).toLocaleString("vi-VN") + " đ/buổi" : "")
-    );
+    alert(editingId ? "✅ Đã cập nhật giáo viên." : "✅ Đã thêm giáo viên.");
 
     resetForm();
     setShowForm(false);
@@ -625,37 +594,11 @@ export default function TeachersPage() {
               />
             </label>
 
-            {role === "admin" && <label>
-              <div className="mb-2 text-sm font-bold">
-                Kiểu tính lương
+            {role === "admin" && (
+              <div className="md:col-span-2 rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+                Mức lương được quản lý tại Lương giáo viên → Lương theo lớp.
               </div>
-              <select
-                className="ui-input"
-                value="per_session"
-                disabled
-              >
-                <option value="per_session">🕐 Theo buổi</option>
-              </select>
-            </label>}
-
-            {role === "admin" && <label>
-              <div className="mb-2 text-sm font-bold">
-                Mức lương / thù lao *
-              </div>
-              <input
-                type="number"
-                min="0"
-                step="1000"
-                className="ui-input"
-                value={salaryRate}
-                onChange={(e) => setSalaryRate(e.target.value)}
-                placeholder="Ví dụ: 250000"
-                required
-              />
-              <div className="mt-1 text-xs font-semibold text-slate-400">
-                Tính theo mỗi buổi giáo viên đã dạy
-              </div>
-            </label>}
+            )}
 
             <label className="md:col-span-2">
               <div className="mb-2 text-sm font-bold">
@@ -845,17 +788,6 @@ export default function TeachersPage() {
                   <span className="text-slate-400">Ngày bắt đầu</span>
                   <b>{date(teacher.start_date)}</b>
                 </div>
-
-                {role === "admin" && <div className="flex justify-between">
-                  <span className="text-slate-400">Kiểu lương</span>
-                  <b>{salaryLabel(teacher.salary_type ?? "")}</b>
-                </div>}
-
-                {role === "admin" && <div className="flex justify-between">
-                  <span className="text-slate-400">Mức lương</span>
-                  <b>{money(Number(teacher.salary_rate))}</b>
-                </div>}
-
 
               </div>
 

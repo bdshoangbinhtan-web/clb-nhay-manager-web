@@ -11,7 +11,6 @@ type PayrollTab = "payroll" | "class-salaries";
 type Teacher = {
   id: string;
   full_name: string;
-  salary_rate: number | null;
   status: string;
 };
 
@@ -284,7 +283,7 @@ export default function TeacherPayrollPage() {
       await Promise.all([
         supabase
           .from("teachers")
-          .select("id,full_name,salary_rate,status")
+          .select("id,full_name,status")
           .eq("status", "active")
           .order("full_name"),
 
@@ -518,9 +517,9 @@ export default function TeacherPayrollPage() {
 
       const multiplier = Number(session.duration_multiplier ?? 1);
 
-      const legacyHourlyRate =
-        Number(session.standing_hourly_rate ?? 0) ||
-        Number(teacher.salary_rate ?? 0);
+      // Chỉ dùng mức đã lưu tại thời điểm dạy để bảo toàn lịch sử;
+      // không suy ra lương từ hồ sơ giáo viên nữa.
+      const legacyHourlyRate = Number(session.standing_hourly_rate ?? 0);
 
       const snapshotValue = Number(
         session.class_salary_per_session_snapshot ?? 0
