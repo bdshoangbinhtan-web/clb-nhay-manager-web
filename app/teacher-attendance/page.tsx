@@ -29,7 +29,6 @@ type ClassItem = {
 type Teacher = {
   id: string;
   full_name: string;
-  salary_rate?: number | null;
   status: string;
 };
 
@@ -136,9 +135,7 @@ export default function TeacherAttendancePage() {
 
     setLoadingTeachers(true);
 
-    const teacherFields = role === "admin"
-      ? "id,full_name,salary_rate,status"
-      : "id,full_name,status";
+    const teacherFields = "id,full_name,status";
     const { data: teacherLinks, error: teacherError } = await supabase
       .from("class_teachers")
       .select(`
@@ -449,7 +446,7 @@ export default function TeacherAttendancePage() {
           📋 Điểm danh giáo viên
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          {role === "admin" ? "Mỗi buổi dạy được tính vào lương theo mức lương/buổi." : "Ghi nhận trạng thái dạy của giáo viên theo từng buổi."}
+          Ghi nhận buổi dạy của giáo viên. Thù lao được thiết lập theo từng lớp.
         </p>
       </div>
 
@@ -595,12 +592,7 @@ export default function TeacherAttendancePage() {
                   >
                     <div>
                       <div className="font-black">{row.teacher.full_name}</div>
-                      {role === "admin" && <div className="mt-1 text-sm text-slate-400">
-                        {Number(row.teacher.salary_rate || 0).toLocaleString(
-                          "vi-VN"
-                        )}{" "}
-                        đ / buổi
-                      </div>}
+
                     </div>
 
                     <div className="flex gap-2">
