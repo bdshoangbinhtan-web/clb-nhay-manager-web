@@ -206,6 +206,9 @@ export default function TuitionPage() {
   const urlContextAppliedRef = useRef(false);
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminUnpaid, setShowAdminUnpaid] = useState(false);
+  const [adminUnpaidSearch, setAdminUnpaidSearch] = useState("");
+  const [deletingTuitionId, setDeletingTuitionId] = useState<string | null>(null);
 
   const [tuition, setTuition] = useState<Tuition[]>([]);
   const [payments, setPayments] = useState<TuitionPayment[]>([]);
@@ -255,13 +258,13 @@ export default function TuitionPage() {
     if (authData.user) {
       const { data: profileData } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role,is_active")
         .eq("id", authData.user.id)
         .maybeSingle();
 
       if (requestId !== loadRequestRef.current) return;
 
-      setIsAdmin(profileData?.role === "admin");
+      setIsAdmin(profileData?.role === "admin" && profileData?.is_active === true);
     }
 
     const [
@@ -1171,42 +1174,44 @@ export default function TuitionPage() {
 
   async function deleteTuition(item: Tuition) {
     if (!isAdmin) {
-      alert("Chỉ ADMIN mới được xóa học phí.");
+      alert("Chỉ ADMIN đang hoạt động mới được xóa học phí.");
       return;
     }
+    if (deletingTuitionId) return;
 
-    if (Number(item.amount_paid || 0) > 0) {
-      alert("Không thể xóa học phí đã thu tiền.");
+    if (
+      Number(item.amount_paid || 0) !== 0 ||
+      paymentsByTuition.has(item.id) ||
+      tuitionAdjustments.some(
+        (adjustment) => adjustment.tuition_id === item.id || adjustment.target_tuition_id === item.id
+      )
+    ) {
+      alert("Khoản này có tiền đã thu hoặc lịch sử điều chỉnh, không được xóa.");
       return;
     }
 
     const ok = window.confirm(
-      `Xóa học phí ${money(Number(item.amount_due || 0))} của ${studentName(item.student_id)}?\n\n` +
-        "Chỉ xóa khoản học phí này, không xóa học viên, lớp hay dữ liệu khác."
+      `Xóa học phí ${money(Number(item.amount_due || 0))} của ${studentName(item.student_id)} — kỳ ${monthLabel(item.billing_month.slice(0, 7))}?\n\n` +
+        "Chỉ xóa khoản chưa thu đã lưu. Nếu học viên vẫn nằm trong lớp đang học, công nợ dự kiến có thể tiếp tục được tính."
     );
-
     if (!ok) return;
 
-    const { error } = await supabase.rpc("admin_delete_unpaid_tuition", {
-      p_tuition_id: item.id,
-    });
-
-    if (error) {
-      alert("Không thể xóa học phí: " + error.message);
-      return;
+    setDeletingTuitionId(item.id);
+    try {
+      // The database verifies the active Admin role again; managers cannot call this RPC.
+      const { error } = await supabase.rpc("admin_delete_unpaid_tuition", {
+        p_tuition_id: item.id,
+      });
+      if (error) {
+        alert("Không thể xóa học phí: " + error.message);
+        return;
+      }
+      setTuition((current) => current.filter((row) => row.id !== item.id));
+      await loadData();
+      alert("Đã xóa học phí chưa thu. Nếu vẫn có công nợ dự kiến, hãy cập nhật trạng thái nghỉ học/rời lớp của học viên.");
+    } finally {
+      setDeletingTuitionId(null);
     }
-
-    // Cập nhật UI ngay sau khi DB xóa thành công.
-    // Các ô Tổng phải thu / Đã thu / Còn nợ được tính từ state tuition,
-    // nên loại dòng vừa xóa khỏi state sẽ đồng bộ số liệu ngay lập tức.
-    setTuition((current) =>
-      current.filter((tuitionItem) => tuitionItem.id !== item.id)
-    );
-
-    alert("Đã xóa khoản học phí chưa thu.");
-
-    // Đồng bộ lại lần nữa từ DB để đảm bảo state khớp production.
-    await loadData();
   }
 
   function openCollectionForTuition(
@@ -1335,6 +1340,25 @@ export default function TuitionPage() {
     () => filteredTuition.slice(0, visibleTuitionCount),
     [filteredTuition, visibleTuitionCount]
   );
+
+  // Not limited to current billing month or active class membership.
+  const adminUnpaidTuition = useMemo(() => {
+    const q = adminUnpaidSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+    return tuition
+      .filter((item) => {
+        if (Number(item.amount_paid || 0) !== 0) return false;
+        if (!q) return true;
+        const student = studentById.get(item.student_id);
+        const searchText = `${student?.full_name ?? ""} ${student?.student_code ?? ""} ${classById.get(item.class_id ?? "")?.name ?? ""}`
+          .toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+        return searchText.includes(q);
+      })
+      .sort((a, b) => {
+        const aActive = studentById.get(a.student_id)?.status === "active" ? 1 : 0;
+        const bActive = studentById.get(b.student_id)?.status === "active" ? 1 : 0;
+        return aActive - bActive || b.billing_month.localeCompare(a.billing_month);
+      });
+  }, [adminUnpaidSearch, tuition, studentById, classById]);
 
   const filteredStudents = useMemo(() => {
     const q = studentSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
@@ -1904,6 +1928,71 @@ export default function TuitionPage() {
       </section>
 
 
+      {isAdmin && (
+        <section className="ui-card p-5 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black">🗑️ Xóa học phí chưa thu · Admin</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Xem khoản học phí đã lưu của mọi kỳ, kể cả học viên nghỉ lớp. Không xóa tiền đã thu hay lịch sử điều chỉnh.
+              </p>
+            </div>
+            <button type="button" className="ui-btn ui-btn-primary" onClick={() => setShowAdminUnpaid((value) => !value)}>
+              {showAdminUnpaid ? "Đóng danh sách" : `Xem khoản chưa thu (${adminUnpaidTuition.length})`}
+            </button>
+          </div>
+          {showAdminUnpaid && (
+            <div className="mt-4 space-y-3">
+              <input
+                className="ui-input w-full sm:max-w-sm"
+                value={adminUnpaidSearch}
+                onChange={(event) => setAdminUnpaidSearch(event.target.value)}
+                placeholder="🔎 Tìm tên, mã học viên hoặc lớp..."
+              />
+              {adminUnpaidTuition.length === 0 ? (
+                <p className="text-sm text-slate-500">Không có khoản học phí chưa thu nào đã lưu phù hợp.</p>
+              ) : (
+                <div className="divide-y divide-slate-100 rounded-xl border border-slate-100">
+                  {adminUnpaidTuition.slice(0, 100).map((item) => {
+                    const hasHistory = paymentsForTuition(item.id).length > 0 ||
+                      tuitionAdjustments.some((row) => row.tuition_id === item.id || row.target_tuition_id === item.id);
+                    const inactive = studentById.get(item.student_id)?.status !== "active";
+                    return (
+                      <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4">
+                        <div>
+                          <div className="font-bold text-slate-800">
+                            {studentName(item.student_id)}
+                            {inactive && <span className="ml-2 text-xs font-bold text-amber-700">Đã nghỉ / không hoạt động</span>}
+                          </div>
+                          <div className="text-sm text-slate-500">
+                            {className(item.class_id)} · {monthLabel(item.billing_month.slice(0, 7))} · Chưa thu {money(Number(item.amount_due))}
+                          </div>
+                          {hasHistory && <div className="text-xs text-amber-700">Có lịch sử giao dịch/điều chỉnh — không thể xóa</div>}
+                        </div>
+                        <button
+                          type="button"
+                          className="ui-btn min-h-11 whitespace-nowrap"
+                          disabled={hasHistory || deletingTuitionId !== null}
+                          onClick={() => deleteTuition(item)}
+                        >
+                          {deletingTuitionId === item.id ? "Đang xóa..." : "🗑️ Xóa học phí"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {adminUnpaidTuition.length > 100 && (
+                    <div className="p-3 text-sm text-slate-500">Đang hiển thị 100 khoản đầu tiên. Hãy tìm theo tên để thu hẹp danh sách.</div>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                Công nợ dự kiến chưa có bản ghi để xóa. Học viên đã nghỉ cần cập nhật trạng thái nghỉ học hoặc rời lớp để ngừng tính nợ.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
       {voicePayment && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4">
           <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
@@ -2138,6 +2227,7 @@ export default function TuitionPage() {
                         <button
                           type="button"
                           className="ui-btn whitespace-nowrap"
+                          disabled={deletingTuitionId !== null}
                           onClick={() => deleteTuition(item)}
                         >
                           🗑️ Xóa
@@ -2185,6 +2275,14 @@ export default function TuitionPage() {
               const period = row.due.firstUnpaidMonth ?? currentMonth;
               const overdue = period < currentMonth;
               const branch = branchById.get(row.classItem.branch_id)?.name ?? "Chưa gán cơ sở";
+              const existingTuition = tuition.find(
+                (item) => item.student_id === row.student.id &&
+                  item.class_id === row.classItem.id &&
+                  monthKey(item.billing_month) === period
+              );
+              const canDeleteExisting = existingTuition && Number(existingTuition.amount_paid || 0) === 0 &&
+                paymentsForTuition(existingTuition.id).length === 0 &&
+                !tuitionAdjustments.some((a) => a.tuition_id === existingTuition.id || a.target_tuition_id === existingTuition.id);
               return (
                 <div key={`${row.student.id}-${row.classItem.id}`} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                   <div className="min-w-0">
@@ -2202,8 +2300,23 @@ export default function TuitionPage() {
                     <div><div className="text-slate-400">Đã thu</div><strong className="mt-1 block text-sm text-emerald-700">{money(row.due.amountPaid)}</strong></div>
                     <div><div className="text-slate-400">Còn lại</div><strong className="mt-1 block text-sm text-rose-700">{money(row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount)}</strong></div>
                   </div>
-                  <div className="flex shrink-0 justify-end">
+                  <div className="flex flex-wrap shrink-0 justify-end gap-2">
                     <button type="button" className="ui-btn ui-btn-primary min-h-11" onClick={() => openCollectionForDueRow(row)}>Thu tiền</button>
+                    {isAdmin && canDeleteExisting && (
+                      <button
+                        type="button"
+                        disabled={deletingTuitionId !== null}
+                        className="ui-btn min-h-11"
+                        onClick={() => deleteTuition(existingTuition)}
+                      >
+                        {deletingTuitionId === existingTuition.id ? "Đang xóa..." : "🗑️ Xóa"}
+                      </button>
+                    )}
+                    {isAdmin && !existingTuition && (
+                      <a className="ui-btn min-h-11" href={`/students/${row.student.id}?edit=1`} title="Khoản dự tính không thể xóa vì chưa có bản ghi. Nếu đã nghỉ, cập nhật trạng thái học viên hoặc lớp.">
+                        Cập nhật nghỉ học
+                      </a>
+                    )}
                   </div>
                 </div>
               );
@@ -2332,7 +2445,8 @@ export default function TuitionPage() {
                             <button
                               type="button"
                               className="ui-btn whitespace-nowrap"
-                              onClick={() => deleteTuition(item)}
+                              disabled={deletingTuitionId !== null}
+                          onClick={() => deleteTuition(item)}
                             >
                               🗑️ Xóa
                             </button>
