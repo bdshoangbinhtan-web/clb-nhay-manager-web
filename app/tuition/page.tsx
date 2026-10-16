@@ -1191,7 +1191,7 @@ export default function TuitionPage() {
     }
 
     const ok = window.confirm(
-      `Xóa học phí ${money(Number(item.amount_due || 0))} của ${studentName(item.student_id)} — kỳ ${monthLabel(monthKey(item.billing_month))}?\n\n` +
+      `Xóa học phí ${money(Number(item.amount_due || 0))} của ${studentName(item.student_id)} — kỳ ${monthLabel(item.billing_month.slice(0, 7))}?\n\n` +
         "Chỉ xóa khoản chưa thu đã lưu. Nếu học viên vẫn nằm trong lớp đang học, công nợ dự kiến có thể tiếp tục được tính."
     );
     if (!ok) return;
@@ -1965,7 +1965,7 @@ export default function TuitionPage() {
                             {inactive && <span className="ml-2 text-xs font-bold text-amber-700">Đã nghỉ / không hoạt động</span>}
                           </div>
                           <div className="text-sm text-slate-500">
-                            {className(item.class_id)} · {monthLabel(monthKey(item.billing_month))} · Chưa thu {money(Number(item.amount_due))}
+                            {className(item.class_id)} · {monthLabel(item.billing_month.slice(0, 7))} · Chưa thu {money(Number(item.amount_due))}
                           </div>
                           {hasHistory && <div className="text-xs text-amber-700">Có lịch sử giao dịch/điều chỉnh — không thể xóa</div>}
                         </div>
