@@ -1973,7 +1973,6 @@ export default function TuitionPage() {
                           type="button"
                           className="ui-btn min-h-11 whitespace-nowrap"
                           disabled={hasHistory || deletingTuitionId !== null}
-                          disabled={deletingTuitionId !== null}
                           onClick={() => deleteTuition(item)}
                         >
                           {deletingTuitionId === item.id ? "Đang xóa..." : "🗑️ Xóa học phí"}
