@@ -1403,24 +1403,61 @@ export default function TuitionPage() {
     [filteredTuition, visibleTuitionCount]
   );
 
-  // Not limited to current billing month or active class membership.
+  // The Admin panel includes stored unpaid records across every branch/month,
+  // plus virtual debt when no tuition row was ever inserted.
   const adminUnpaidTuition = useMemo(() => {
+    const candidates = new Map<string, Tuition>();
+    const keyFor = (id: string, classId: string | null, period: string) =>
+      [id, classId ?? "no-class", period].join("__");
+    for (const item of tuition) {
+      if (Number(item.amount_due || 0) <= 0 || Number(item.amount_paid || 0) !== 0) continue;
+      const period = monthKey(item.billing_month);
+      if (!period || (item.class_id && waivedTuitionKeys.has(keyFor(item.student_id, item.class_id, period)))) continue;
+      candidates.set(keyFor(item.student_id, item.class_id, period), item);
+    }
+    for (const row of membershipTuitionRows) {
+      const period = row.due.firstUnpaidMonth;
+      if (!period || period > currentMonth || !["DUE", "OVERDUE"].includes(row.due.status)) continue;
+      const key = keyFor(row.student.id, row.classItem.id, period);
+      if (waivedTuitionKeys.has(key) || candidates.has(key)) continue;
+      if (tuition.some((item) => item.student_id === row.student.id &&
+        item.class_id === row.classItem.id && monthKey(item.billing_month) === period)) continue;
+      const estimated = Number(row.suggestedAmount || 0);
+      if (estimated <= 0) continue;
+      candidates.set(key, {
+        id: "projected:" + key,
+        student_id: row.student.id,
+        class_id: row.classItem.id,
+        branch_id: row.classItem.branch_id,
+        billing_month: periodDate(period),
+        description: "Công nợ tự tính, chưa có phiếu",
+        amount_due: estimated,
+        amount_paid: 0,
+        payment_date: null,
+        note: null,
+        status: "unpaid",
+      });
+    }
     const q = adminUnpaidSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-    return tuition
+    return [...candidates.values()]
       .filter((item) => {
-        if (Number(item.amount_paid || 0) !== 0) return false;
         if (!q) return true;
         const student = studentById.get(item.student_id);
-        const searchText = `${student?.full_name ?? ""} ${student?.student_code ?? ""} ${classById.get(item.class_id ?? "")?.name ?? ""}`
-          .toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-        return searchText.includes(q);
+        const branch = branchById.get(item.branch_id ?? student?.branch_id ?? "")?.name ?? "";
+        const haystack = [
+          student?.full_name ?? "", student?.student_code ?? "",
+          classById.get(item.class_id ?? "")?.name ?? "",
+          branch, monthKey(item.billing_month) ?? ""
+        ].join(" ").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+        return haystack.includes(q);
       })
       .sort((a, b) => {
         const aActive = studentById.get(a.student_id)?.status === "active" ? 1 : 0;
         const bActive = studentById.get(b.student_id)?.status === "active" ? 1 : 0;
         return aActive - bActive || b.billing_month.localeCompare(a.billing_month);
       });
-  }, [adminUnpaidSearch, tuition, studentById, classById]);
+  }, [adminUnpaidSearch, tuition, waivedTuitionKeys, membershipTuitionRows, currentMonth,
+    studentById, classById, branchById]);
 
   const filteredStudents = useMemo(() => {
     const q = studentSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
