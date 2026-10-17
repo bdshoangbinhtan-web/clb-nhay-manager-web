@@ -319,7 +319,11 @@ export default function DashboardPage() {
     setPayrollAlerts((payrollAlertsRes.data ?? []) as PayrollForAlert[]);
     
     // Void receipts remain in the immutable audit log but must never count as income.
-    setPayments((paymentsRes.data ?? []).filter((p) => !p.tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]")));
+    setPayments((paymentsRes.data ?? []).filter((payment) => {
+      const relation = payment.tuition as unknown as { note?: string | null } | { note?: string | null }[] | null;
+      const tuition = Array.isArray(relation) ? relation[0] : relation;
+      return !tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]");
+    }));
     setExpenses(filterEffectiveSources("expense", expensesRes.data ?? [], sourceReversalsRes.data ?? []));
     setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenuesRes.data ?? []) as OtherRevenue[], sourceReversalsRes.data ?? []));
     setAdjustments((adjustmentsRes.data ?? []) as TuitionAdjustment[]);
