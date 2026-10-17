@@ -10,6 +10,7 @@ import { PaymentMethodFields, type PaymentMethod, type TransferAccount } from "@
 import { normalizeTransferAccount } from "@/lib/payment-method";
 import {
   applyTuitionAdjustments,
+  applyTuitionWaivers,
   applyTransferredTuitionCoverage,
   type TuitionTransferOut,
   determineActiveClasses,
@@ -65,6 +66,7 @@ type Tuition = {
   effective_amount_due?: number;
   effective_amount_paid?: number;
   covered_by_transfer?: boolean;
+  waived?: boolean;
   payment_date: string | null;
   note: string | null;
   status: string;
@@ -79,6 +81,16 @@ type TuitionPayment = {
   payment_method: "cash" | "transfer" | string | null;
   payment_date: string | null;
   receipt_no: string | null;
+};
+
+type TuitionWaiver = {
+  id: string;
+  student_id: string;
+  class_id: string;
+  billing_month: string;
+  reason: string;
+  waived_at: string;
+  revoked_at: string | null;
 };
 
 type TuitionAdjustment = {
@@ -212,6 +224,8 @@ export default function TuitionPage() {
   const [showAdminUnpaid, setShowAdminUnpaid] = useState(false);
   const [adminUnpaidSearch, setAdminUnpaidSearch] = useState("");
   const [deletingTuitionId, setDeletingTuitionId] = useState<string | null>(null);
+  const [restoringWaiverId, setRestoringWaiverId] = useState<string | null>(null);
+  const [tuitionWaivers, setTuitionWaivers] = useState<TuitionWaiver[]>([]);
 
   const [tuition, setTuition] = useState<Tuition[]>([]);
   const [payments, setPayments] = useState<TuitionPayment[]>([]);
@@ -278,6 +292,7 @@ export default function TuitionPage() {
       membershipResult,
       adjustmentResult,
       transferHistoryResult,
+      waiverResult,
     ] = await Promise.all([
       supabase
         .from("students")
@@ -296,6 +311,7 @@ export default function TuitionPage() {
         .from("tuition_adjustments")
         .select("id,tuition_id,target_tuition_id,action,amount"),
       supabase.rpc("get_tuition_transfer_out_history"),
+      supabase.from("tuition_waivers").select("id,student_id,class_id,billing_month,reason,waived_at,revoked_at"),
     ]);
 
     if (requestId !== loadRequestRef.current) return;
@@ -328,6 +344,7 @@ export default function TuitionPage() {
       { data: membershipData, error: membershipError },
       { data: adjustmentData, error: adjustmentError },
       { data: transferHistoryData, error: transferHistoryError },
+      { data: waiverData, error: waiverError },
     ] = [
       studentResult,
       branchResult,
@@ -335,6 +352,7 @@ export default function TuitionPage() {
       membershipResult,
       adjustmentResult,
       transferHistoryResult,
+      waiverResult,
     ];
 
     if (requestId !== loadRequestRef.current) return;
@@ -377,6 +395,12 @@ export default function TuitionPage() {
 
     if (transferHistoryError) {
       alert("Không thể kiểm tra học phí đã đóng khi chuyển lớp: " + transferHistoryError.message);
+      setLoading(false);
+      return;
+    }
+
+    if (waiverError) {
+      alert("Không thể kiểm tra các tháng đã miễn thu: " + waiverError.message);
       setLoading(false);
       return;
     }
@@ -424,6 +448,7 @@ export default function TuitionPage() {
     setPayments(paymentData ?? []);
     setTuitionAdjustments((adjustmentData ?? []) as TuitionAdjustment[]);
     setTransferHistory((transferHistoryData ?? []) as TuitionTransferOut[]);
+    setTuitionWaivers((waiverData ?? []) as TuitionWaiver[]);
     setStudents(studentData ?? []);
     setBranches(branchData ?? []);
     setClasses(classData ?? []);
@@ -505,10 +530,21 @@ export default function TuitionPage() {
   const currentMonth = vietnamCurrentMonth();
   const viewingPreLaunchMonth = billingMonth < TUITION_TRACKING_START_MONTH;
 
+  const activeTuitionWaivers = useMemo(
+    () => tuitionWaivers.filter((item) => !item.revoked_at),
+    [tuitionWaivers]
+  );
+  const waivedTuitionKeys = useMemo(
+    () => new Set(activeTuitionWaivers.map((item) =>
+      [item.student_id, item.class_id, monthKey(item.billing_month)].join("__")
+    )),
+    [activeTuitionWaivers]
+  );
   const tuitionForDueStatus = useMemo(() => {
     const effective = applyTuitionAdjustments(tuition, payments, tuitionAdjustments);
-    return applyTransferredTuitionCoverage(effective, activeMemberships, transferHistory);
-  }, [activeMemberships, payments, transferHistory, tuition, tuitionAdjustments]);
+    const covered = applyTransferredTuitionCoverage(effective, activeMemberships, transferHistory);
+    return applyTuitionWaivers(covered, activeTuitionWaivers);
+  }, [activeMemberships, activeTuitionWaivers, payments, transferHistory, tuition, tuitionAdjustments]);
 
   const membershipTuitionRows = useMemo(() => {
     const rows: Array<{
@@ -1064,6 +1100,11 @@ export default function TuitionPage() {
       return;
     }
 
+    if (waivedTuitionKeys.has([studentId,classId,collectionMonth].join("__"))) {
+      alert("Kỳ này đã được Admin miễn thu. Không thể ghi phiếu thu.");
+      return;
+    }
+
     const dueAmount = Number(amountDue);
     const amount = Number(amountToCollect);
 
@@ -1199,44 +1240,75 @@ export default function TuitionPage() {
   }
 
   async function deleteTuition(item: Tuition) {
-    if (!isAdmin) {
-      alert("Chỉ ADMIN đang hoạt động mới được xóa học phí.");
-      return;
-    }
-    if (deletingTuitionId) return;
-
-    if (
-      Number(item.amount_paid || 0) !== 0 ||
-      paymentsByTuition.has(item.id) ||
-      tuitionAdjustments.some(
-        (adjustment) => adjustment.tuition_id === item.id || adjustment.target_tuition_id === item.id
-      )
-    ) {
+    if (!isAdmin || deletingTuitionId) return;
+    if (Number(item.amount_paid || 0) !== 0 ||
+      (!item.id.startsWith("projected:") && (paymentsByTuition.has(item.id) ||
+        tuitionAdjustments.some((adjustment) =>
+          adjustment.tuition_id === item.id || adjustment.target_tuition_id === item.id)))) {
       alert("Khoản này có tiền đã thu hoặc lịch sử điều chỉnh, không được xóa.");
       return;
     }
-
-    const ok = window.confirm(
-      `Xóa học phí ${money(Number(item.amount_due || 0))} của ${studentName(item.student_id)} — kỳ ${monthLabel(item.billing_month.slice(0, 7))}?\n\n` +
-        "Chỉ xóa khoản chưa thu đã lưu. Nếu học viên vẫn nằm trong lớp đang học, công nợ dự kiến có thể tiếp tục được tính."
+    const student = studentById.get(item.student_id);
+    const classLabel = className(item.class_id);
+    const reason = window.prompt(
+      "MIỄN THU HỌC PHÍ · CHỈ ADMIN\n\n" +
+      "Học viên: " + (student?.full_name ?? "") + " (" + (student?.student_code ?? "") + ")\n" +
+      "Lớp: " + classLabel + "\nKỳ: " + monthLabel(item.billing_month.slice(0, 7)) + "\n" +
+      "Số chưa đóng: " + money(Number(item.amount_due)) + "\n\n" +
+      "Nhập lý do miễn thu. Tiền đã đóng các tháng khác vẫn giữ nguyên:",
+      "Nghỉ học không báo – Không thu tháng này"
     );
-    if (!ok) return;
+    if (reason === null) return;
+    if (reason.trim().length < 5 || reason.trim().length > 300) {
+      alert("Lý do phải từ 5 đến 300 ký tự."); return;
+    }
+    if (!window.confirm(
+      "XÁC NHẬN KHÔNG THU " + monthLabel(item.billing_month.slice(0, 7)) + "?\n\n" +
+      (student?.full_name ?? "") + " · " + classLabel + "\n" +
+      "Số tiền miễn thu: " + money(Number(item.amount_due)) + "\n\n" +
+      "Tháng này sẽ không tự phát sinh nợ lại kể cả khi bé học lại. " +
+      "Nếu bé đã nghỉ, hãy chuyển trạng thái sang TẠM NGƯNG để dừng tính những tháng kế tiếp."
+    )) return;
 
     setDeletingTuitionId(item.id);
     try {
-      // The database verifies the active Admin role again; managers cannot call this RPC.
-      const { error } = await supabase.rpc("admin_delete_unpaid_tuition", {
-        p_tuition_id: item.id,
-      });
-      if (error) {
-        alert("Không thể xóa học phí: " + error.message);
-        return;
-      }
-      setTuition((current) => current.filter((row) => row.id !== item.id));
+      const period = monthKey(item.billing_month);
+      const useDurableWaiver = !!item.class_id && !!period &&
+        period >= TUITION_TRACKING_START_MONTH && period <= currentMonth;
+      const { error } = useDurableWaiver
+        ? await supabase.rpc("admin_waive_unpaid_tuition", {
+            p_student_id: item.student_id,
+            p_class_id: item.class_id,
+            p_billing_month: periodDate(item.billing_month),
+            p_reason: reason.trim(),
+          })
+        : item.id.startsWith("projected:")
+          ? { error: { message: "Công nợ dự kiến phải có lớp học để miễn thu." } }
+          : await supabase.rpc("admin_delete_unpaid_tuition", { p_tuition_id: item.id });
+      if (error) { alert("Không thể miễn thu: " + error.message); return; }
       await loadData();
-      alert("Đã xóa học phí chưa thu. Nếu vẫn có công nợ dự kiến, hãy cập nhật trạng thái nghỉ học/rời lớp của học viên.");
+      alert(useDurableWaiver
+        ? "✅ Đã ghi nhận không thu học phí tháng này. Công nợ sẽ không tự tạo lại."
+        : "✅ Đã xóa phiếu học phí chưa thu. Chức năng miễn thu cố định áp dụng từ tháng 10/2026 đến hiện tại.");
     } finally {
       setDeletingTuitionId(null);
+    }
+  }
+
+  async function restoreTuitionWaiver(waiver: TuitionWaiver) {
+    if (!isAdmin || restoringWaiverId) return;
+    if (!window.confirm(
+      "Bỏ miễn thu " + monthLabel(waiver.billing_month.slice(0, 7)) +
+      " của " + studentName(waiver.student_id) + "?\n\n" +
+      "Hệ thống có thể tính lại công nợ tháng này."
+    )) return;
+    setRestoringWaiverId(waiver.id);
+    try {
+      const { error } = await supabase.rpc("admin_restore_tuition_waiver", { p_waiver_id: waiver.id });
+      if (error) { alert(error.message); return; }
+      await loadData();
+    } finally {
+      setRestoringWaiverId(null);
     }
   }
 
@@ -1367,24 +1439,61 @@ export default function TuitionPage() {
     [filteredTuition, visibleTuitionCount]
   );
 
-  // Not limited to current billing month or active class membership.
+  // The Admin panel includes stored unpaid records across every branch/month,
+  // plus virtual debt when no tuition row was ever inserted.
   const adminUnpaidTuition = useMemo(() => {
+    const candidates = new Map<string, Tuition>();
+    const keyFor = (id: string, classId: string | null, period: string) =>
+      [id, classId ?? "no-class", period].join("__");
+    for (const item of tuition) {
+      if (Number(item.amount_due || 0) <= 0 || Number(item.amount_paid || 0) !== 0) continue;
+      const period = monthKey(item.billing_month);
+      if (!period || (item.class_id && waivedTuitionKeys.has(keyFor(item.student_id, item.class_id, period)))) continue;
+      candidates.set(keyFor(item.student_id, item.class_id, period), item);
+    }
+    for (const row of membershipTuitionRows) {
+      const period = row.due.firstUnpaidMonth;
+      if (!period || period > currentMonth || !["DUE", "OVERDUE"].includes(row.due.status)) continue;
+      const key = keyFor(row.student.id, row.classItem.id, period);
+      if (waivedTuitionKeys.has(key) || candidates.has(key)) continue;
+      if (tuition.some((item) => item.student_id === row.student.id &&
+        item.class_id === row.classItem.id && monthKey(item.billing_month) === period)) continue;
+      const estimated = Number(row.suggestedAmount || 0);
+      if (estimated <= 0) continue;
+      candidates.set(key, {
+        id: "projected:" + key,
+        student_id: row.student.id,
+        class_id: row.classItem.id,
+        branch_id: row.classItem.branch_id,
+        billing_month: periodDate(period),
+        description: "Công nợ tự tính, chưa có phiếu",
+        amount_due: estimated,
+        amount_paid: 0,
+        payment_date: null,
+        note: null,
+        status: "unpaid",
+      });
+    }
     const q = adminUnpaidSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-    return tuition
+    return [...candidates.values()]
       .filter((item) => {
-        if (Number(item.amount_paid || 0) !== 0) return false;
         if (!q) return true;
         const student = studentById.get(item.student_id);
-        const searchText = `${student?.full_name ?? ""} ${student?.student_code ?? ""} ${classById.get(item.class_id ?? "")?.name ?? ""}`
-          .toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-        return searchText.includes(q);
+        const branch = branchById.get(item.branch_id ?? student?.branch_id ?? "")?.name ?? "";
+        const haystack = [
+          student?.full_name ?? "", student?.student_code ?? "",
+          classById.get(item.class_id ?? "")?.name ?? "",
+          branch, monthKey(item.billing_month) ?? ""
+        ].join(" ").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+        return haystack.includes(q);
       })
       .sort((a, b) => {
         const aActive = studentById.get(a.student_id)?.status === "active" ? 1 : 0;
         const bActive = studentById.get(b.student_id)?.status === "active" ? 1 : 0;
         return aActive - bActive || b.billing_month.localeCompare(a.billing_month);
       });
-  }, [adminUnpaidSearch, tuition, studentById, classById]);
+  }, [adminUnpaidSearch, tuition, waivedTuitionKeys, membershipTuitionRows, currentMonth,
+    studentById, classById, branchById]);
 
   const filteredStudents = useMemo(() => {
     const q = studentSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
@@ -1448,6 +1557,10 @@ export default function TuitionPage() {
     period: string,
     amountOverride?: number
   ) {
+    if (waivedTuitionKeys.has([student.id,classItem.id,period].join("__"))) {
+      alert("Kỳ này Admin đã ghi nhận không thu học phí. Muốn thu lại phải bỏ miễn thu trước.");
+      return;
+    }
     const membership = activeMemberships.find((item) =>
       item.student_id === student.id && item.class_id === classItem.id
     );
@@ -1507,9 +1620,9 @@ export default function TuitionPage() {
     <section id="admin-delete-tuition" className="ui-card scroll-mt-24 border border-rose-200 p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-black">🗑️ Xóa học phí chưa thu · Admin</h2>
+              <h2 className="text-xl font-black">🗑️ Xóa / miễn thu học phí toàn hệ thống · Admin</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Xem khoản học phí đã lưu của mọi kỳ, kể cả học viên nghỉ lớp. Không xóa tiền đã thu hay lịch sử điều chỉnh.
+                Tìm học viên ở mọi cơ sở: phiếu chưa thu và công nợ tự tính chưa có phiếu. Chỉ Admin được miễn thu từng tháng. Giữ nguyên mọi khoản đã đóng.
               </p>
             </div>
             <button type="button" className="ui-btn ui-btn-primary" onClick={() => setShowAdminUnpaid((value) => !value)}>
@@ -1522,7 +1635,7 @@ export default function TuitionPage() {
                 className="ui-input w-full sm:max-w-sm"
                 value={adminUnpaidSearch}
                 onChange={(event) => setAdminUnpaidSearch(event.target.value)}
-                placeholder="🔎 Tìm tên, mã học viên hoặc lớp..."
+                placeholder="🔎 Tìm tên, mã học viên, lớp hoặc cơ sở..."
               />
               {adminUnpaidTuition.length === 0 ? (
                 <p className="text-sm text-slate-500">Không có khoản học phí chưa thu nào đã lưu phù hợp.</p>
@@ -1537,10 +1650,11 @@ export default function TuitionPage() {
                         <div>
                           <div className="font-bold text-slate-800">
                             {studentName(item.student_id)}
-                            {inactive && <span className="ml-2 text-xs font-bold text-amber-700">Đã nghỉ / không hoạt động</span>}
+                            {inactive && <span className="ml-2 text-xs font-bold text-amber-700">Tạm ngưng</span>}
+                            {item.id.startsWith("projected:") && <span className="ml-2 text-xs font-bold text-blue-700">Nợ tự tính · chưa có phiếu</span>}
                           </div>
                           <div className="text-sm text-slate-500">
-                            {className(item.class_id)} · {monthLabel(item.billing_month.slice(0, 7))} · Chưa thu {money(Number(item.amount_due))}
+                            {className(item.class_id)} · {branchById.get(item.branch_id ?? "")?.name ?? ""} · {monthLabel(item.billing_month.slice(0, 7))} · Chưa thu {money(Number(item.amount_due))}
                           </div>
                           {hasHistory && <div className="text-xs text-amber-700">Có lịch sử giao dịch/điều chỉnh — không thể xóa</div>}
                         </div>
@@ -1561,8 +1675,37 @@ export default function TuitionPage() {
                 </div>
               )}
               <p className="text-xs text-slate-500">
-                Công nợ dự kiến chưa có bản ghi để xóa. Học viên đã nghỉ cần cập nhật trạng thái nghỉ học hoặc rời lớp để ngừng tính nợ.
+                Miễn thu chỉ áp dụng cho tháng đã chọn; nếu bé đã nghỉ, đổi Tạm ngưng để ngừng tính những tháng tiếp theo.
               </p>
+              {activeTuitionWaivers.length > 0 && (
+                <div className="mt-6 rounded-xl border border-slate-200 p-3">
+                  <div className="mb-3 text-sm font-black">✅ Tháng đã miễn thu ({activeTuitionWaivers.length}) · Có thể hoàn tác</div>
+                  <div className="max-h-64 divide-y divide-slate-100 overflow-y-auto">
+                    {activeTuitionWaivers
+                      .filter((waiver) => {
+                        const q = adminUnpaidSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+                        if (!q) return true;
+                        const student = studentById.get(waiver.student_id);
+                        const haystack = [student?.full_name,student?.student_code,classById.get(waiver.class_id)?.name,monthKey(waiver.billing_month)]
+                          .join(" ").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+                        return haystack.includes(q);
+                      })
+                      .slice(0, 40).map((waiver) => (
+                      <div key={waiver.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
+                        <div className="text-sm">
+                          <div className="font-bold">{studentName(waiver.student_id)} · {monthLabel(waiver.billing_month.slice(0, 7))}</div>
+                          <div className="text-slate-500">{className(waiver.class_id)} · {waiver.reason}</div>
+                        </div>
+                        <button type="button" className="ui-btn whitespace-nowrap"
+                          disabled={restoringWaiverId !== null || deletingTuitionId !== null}
+                          onClick={() => restoreTuitionWaiver(waiver)}>
+                          {restoringWaiverId === waiver.id ? "Đang hoàn tác..." : "↩ Bỏ miễn thu"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -2182,7 +2325,8 @@ export default function TuitionPage() {
                 const canCollectPeriod = billingMonth >= TUITION_TRACKING_START_MONTH &&
                   !!membership && student.status === "active" &&
                   (monthKey(membership.end_date) ?? "9999-12") >= billingMonth;
-                const fullyPaid = !!item && remain <= 0 && due > 0;
+                const isWaived = !!item?.waived;
+                const fullyPaid = !!item && !isWaived && remain <= 0 && due > 0;
 
                 return (
                   <div
@@ -2197,7 +2341,9 @@ export default function TuitionPage() {
                         </span>
                       </div>
                       <div className="mt-1 text-xs text-slate-400">
-                        {item?.covered_by_transfer
+                        {isWaived
+                          ? `Kỳ ${monthLabel(billingMonth)} · Admin đã ghi nhận không thu`
+                          : item?.covered_by_transfer
                           ? `Kỳ ${monthLabel(billingMonth)} · đã đóng từ lớp trước khi chuyển`
                           : item
                           ? `Kỳ ${monthLabel(billingMonth)}`
@@ -2231,7 +2377,11 @@ export default function TuitionPage() {
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
-                      {fullyPaid ? (
+                      {isWaived ? (
+                        <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-black text-slate-700">
+                          ⚪ Không thu · Admin
+                        </span>
+                      ) : fullyPaid ? (
                         <span className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-black text-emerald-700">
                           🟢 {item?.covered_by_transfer ? "Đã đóng · chuyển lớp" : billingMonth > currentMonth ? "Đã đóng trước" : "Đã đóng đủ"}
                         </span>
@@ -2257,7 +2407,7 @@ export default function TuitionPage() {
                         </span>
                       )}
 
-                      {item && isAdmin && Number(item.amount_paid || 0) === 0 && (
+                      {item && !isWaived && isAdmin && Number(item.amount_paid || 0) === 0 && (
                         <button
                           type="button"
                           className="ui-btn whitespace-nowrap"
@@ -2346,10 +2496,22 @@ export default function TuitionPage() {
                         {deletingTuitionId === existingTuition.id ? "Đang xóa..." : "🗑️ Xóa"}
                       </button>
                     )}
-                    {isAdmin && !existingTuition && (
-                      <a className="ui-btn min-h-11" href={`/students/${row.student.id}?edit=1`} title="Khoản dự tính không thể xóa vì chưa có bản ghi. Nếu đã nghỉ, cập nhật trạng thái học viên hoặc lớp.">
-                        Cập nhật nghỉ học
-                      </a>
+                    {isAdmin && !existingTuition && row.due.status !== "PARTIAL" && (
+                      <button type="button" className="ui-btn min-h-11"
+                        disabled={deletingTuitionId !== null}
+                        onClick={() => deleteTuition({
+                          id: "projected:" + [row.student.id,row.classItem.id,period].join("__"),
+                          student_id: row.student.id,
+                          class_id: row.classItem.id,
+                          branch_id: row.classItem.branch_id,
+                          billing_month: periodDate(period),
+                          description: "Công nợ tự tính",
+                          amount_due: Number(row.suggestedAmount),
+                          amount_paid: 0,
+                          status: "unpaid", payment_date: null, note: null,
+                        })}>
+                        🗑️ Không thu tháng này
+                      </button>
                     )}
                   </div>
                 </div>
