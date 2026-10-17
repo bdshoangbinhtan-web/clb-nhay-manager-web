@@ -10,6 +10,7 @@ import { PaymentMethodFields, type PaymentMethod, type TransferAccount } from "@
 import { normalizeTransferAccount } from "@/lib/payment-method";
 import {
   applyTuitionAdjustments,
+  applyTuitionWaivers,
   applyTransferredTuitionCoverage,
   type TuitionTransferOut,
   determineActiveClasses,
@@ -65,6 +66,7 @@ type Tuition = {
   effective_amount_due?: number;
   effective_amount_paid?: number;
   covered_by_transfer?: boolean;
+  waived?: boolean;
   payment_date: string | null;
   note: string | null;
   status: string;
@@ -79,6 +81,16 @@ type TuitionPayment = {
   payment_method: "cash" | "transfer" | string | null;
   payment_date: string | null;
   receipt_no: string | null;
+};
+
+type TuitionWaiver = {
+  id: string;
+  student_id: string;
+  class_id: string;
+  billing_month: string;
+  reason: string;
+  waived_at: string;
+  revoked_at: string | null;
 };
 
 type TuitionAdjustment = {
@@ -212,6 +224,8 @@ export default function TuitionPage() {
   const [showAdminUnpaid, setShowAdminUnpaid] = useState(false);
   const [adminUnpaidSearch, setAdminUnpaidSearch] = useState("");
   const [deletingTuitionId, setDeletingTuitionId] = useState<string | null>(null);
+  const [restoringWaiverId, setRestoringWaiverId] = useState<string | null>(null);
+  const [tuitionWaivers, setTuitionWaivers] = useState<TuitionWaiver[]>([]);
 
   const [tuition, setTuition] = useState<Tuition[]>([]);
   const [payments, setPayments] = useState<TuitionPayment[]>([]);
@@ -278,6 +292,7 @@ export default function TuitionPage() {
       membershipResult,
       adjustmentResult,
       transferHistoryResult,
+      waiverResult,
     ] = await Promise.all([
       supabase
         .from("students")
@@ -296,6 +311,7 @@ export default function TuitionPage() {
         .from("tuition_adjustments")
         .select("id,tuition_id,target_tuition_id,action,amount"),
       supabase.rpc("get_tuition_transfer_out_history"),
+      supabase.from("tuition_waivers").select("id,student_id,class_id,billing_month,reason,waived_at,revoked_at"),
     ]);
 
     if (requestId !== loadRequestRef.current) return;
@@ -328,6 +344,7 @@ export default function TuitionPage() {
       { data: membershipData, error: membershipError },
       { data: adjustmentData, error: adjustmentError },
       { data: transferHistoryData, error: transferHistoryError },
+      { data: waiverData, error: waiverError },
     ] = [
       studentResult,
       branchResult,
@@ -335,6 +352,7 @@ export default function TuitionPage() {
       membershipResult,
       adjustmentResult,
       transferHistoryResult,
+      waiverResult,
     ];
 
     if (requestId !== loadRequestRef.current) return;
@@ -377,6 +395,12 @@ export default function TuitionPage() {
 
     if (transferHistoryError) {
       alert("Không thể kiểm tra học phí đã đóng khi chuyển lớp: " + transferHistoryError.message);
+      setLoading(false);
+      return;
+    }
+
+    if (waiverError) {
+      alert("Không thể kiểm tra các tháng đã miễn thu: " + waiverError.message);
       setLoading(false);
       return;
     }
@@ -424,6 +448,7 @@ export default function TuitionPage() {
     setPayments(paymentData ?? []);
     setTuitionAdjustments((adjustmentData ?? []) as TuitionAdjustment[]);
     setTransferHistory((transferHistoryData ?? []) as TuitionTransferOut[]);
+    setTuitionWaivers((waiverData ?? []) as TuitionWaiver[]);
     setStudents(studentData ?? []);
     setBranches(branchData ?? []);
     setClasses(classData ?? []);
@@ -505,10 +530,21 @@ export default function TuitionPage() {
   const currentMonth = vietnamCurrentMonth();
   const viewingPreLaunchMonth = billingMonth < TUITION_TRACKING_START_MONTH;
 
+  const activeTuitionWaivers = useMemo(
+    () => tuitionWaivers.filter((item) => !item.revoked_at),
+    [tuitionWaivers]
+  );
+  const waivedTuitionKeys = useMemo(
+    () => new Set(activeTuitionWaivers.map((item) =>
+      [item.student_id, item.class_id, monthKey(item.billing_month)].join("__")
+    )),
+    [activeTuitionWaivers]
+  );
   const tuitionForDueStatus = useMemo(() => {
     const effective = applyTuitionAdjustments(tuition, payments, tuitionAdjustments);
-    return applyTransferredTuitionCoverage(effective, activeMemberships, transferHistory);
-  }, [activeMemberships, payments, transferHistory, tuition, tuitionAdjustments]);
+    const covered = applyTransferredTuitionCoverage(effective, activeMemberships, transferHistory);
+    return applyTuitionWaivers(covered, activeTuitionWaivers);
+  }, [activeMemberships, activeTuitionWaivers, payments, transferHistory, tuition, tuitionAdjustments]);
 
   const membershipTuitionRows = useMemo(() => {
     const rows: Array<{
