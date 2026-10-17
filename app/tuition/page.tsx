@@ -315,7 +315,8 @@ export default function TuitionPage() {
         break;
       }
       const batch = (result.data ?? []) as Tuition[];
-      tuitionRows.push(...batch);
+      // Voided duplicate receipts are audit-only, never shown as tuition or revenue.
+      tuitionRows.push(...batch.filter((row) => !row.note?.includes("[VOID_DUPLICATE_TRANSFER]")));
       if (batch.length < 500) break;
       tuitionOffset += 500;
     }
@@ -1500,6 +1501,73 @@ export default function TuitionPage() {
     openCollectionForPeriod(row.student, row.classItem, period, remaining);
   }
 
+  // Display the Admin delete action at the top in BOTH normal and privacy views.
+  // The server RPC still enforces active Admin permission on every deletion.
+  const adminDeletePanel = isAdmin ? (
+    <section id="admin-delete-tuition" className="ui-card scroll-mt-24 border border-rose-200 p-5 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black">🗑️ Xóa học phí chưa thu · Admin</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Xem khoản học phí đã lưu của mọi kỳ, kể cả học viên nghỉ lớp. Không xóa tiền đã thu hay lịch sử điều chỉnh.
+              </p>
+            </div>
+            <button type="button" className="ui-btn ui-btn-primary" onClick={() => setShowAdminUnpaid((value) => !value)}>
+              {showAdminUnpaid ? "Đóng danh sách" : `🗑️ Xóa học phí · Admin (${adminUnpaidTuition.length})`}
+            </button>
+          </div>
+          {showAdminUnpaid && (
+            <div className="mt-4 space-y-3">
+              <input
+                className="ui-input w-full sm:max-w-sm"
+                value={adminUnpaidSearch}
+                onChange={(event) => setAdminUnpaidSearch(event.target.value)}
+                placeholder="🔎 Tìm tên, mã học viên hoặc lớp..."
+              />
+              {adminUnpaidTuition.length === 0 ? (
+                <p className="text-sm text-slate-500">Không có khoản học phí chưa thu nào đã lưu phù hợp.</p>
+              ) : (
+                <div className="divide-y divide-slate-100 rounded-xl border border-slate-100">
+                  {adminUnpaidTuition.slice(0, 100).map((item) => {
+                    const hasHistory = paymentsForTuition(item.id).length > 0 ||
+                      tuitionAdjustments.some((row) => row.tuition_id === item.id || row.target_tuition_id === item.id);
+                    const inactive = studentById.get(item.student_id)?.status !== "active";
+                    return (
+                      <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4">
+                        <div>
+                          <div className="font-bold text-slate-800">
+                            {studentName(item.student_id)}
+                            {inactive && <span className="ml-2 text-xs font-bold text-amber-700">Đã nghỉ / không hoạt động</span>}
+                          </div>
+                          <div className="text-sm text-slate-500">
+                            {className(item.class_id)} · {monthLabel(item.billing_month.slice(0, 7))} · Chưa thu {money(Number(item.amount_due))}
+                          </div>
+                          {hasHistory && <div className="text-xs text-amber-700">Có lịch sử giao dịch/điều chỉnh — không thể xóa</div>}
+                        </div>
+                        <button
+                          type="button"
+                          className="ui-btn min-h-11 whitespace-nowrap"
+                          disabled={hasHistory || deletingTuitionId !== null}
+                          onClick={() => deleteTuition(item)}
+                        >
+                          {deletingTuitionId === item.id ? "Đang xóa..." : "🗑️ Xóa học phí"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {adminUnpaidTuition.length > 100 && (
+                    <div className="p-3 text-sm text-slate-500">Đang hiển thị 100 khoản đầu tiên. Hãy tìm theo tên để thu hẹp danh sách.</div>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                Công nợ dự kiến chưa có bản ghi để xóa. Học viên đã nghỉ cần cập nhật trạng thái nghỉ học hoặc rời lớp để ngừng tính nợ.
+              </p>
+            </div>
+          )}
+        </section>
+  ) : null;
+
   if (privacyView) {
     return (
       <div className="space-y-5">
@@ -1510,6 +1578,7 @@ export default function TuitionPage() {
           </div>
           <div className="rounded-xl bg-blue-50 px-3 py-2 text-sm font-bold text-blue-800">Chuyển khoản</div>
         </header>
+        {adminDeletePanel}
         <section className="ui-card space-y-4 p-5">
           <input autoComplete="off" className="ui-input min-h-12 w-full" placeholder="Tìm tên hoặc mã học viên..."
             value={studentSearch} onChange={(event) => { setStudentSearch(event.target.value); setShowStudentSearch(true); }} />
@@ -1581,6 +1650,8 @@ export default function TuitionPage() {
           <p className="mt-2 text-slate-400">Trung tâm quản lý học phí toàn câu lạc bộ</p>
         </div>
       </section>
+
+      {adminDeletePanel}
 
       <section className="rounded-3xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-sm sm:p-7">
         <label className="block">
@@ -1953,70 +2024,6 @@ export default function TuitionPage() {
       </section>
 
 
-      {isAdmin && (
-        <section className="ui-card p-5 sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-black">🗑️ Xóa học phí chưa thu · Admin</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Xem khoản học phí đã lưu của mọi kỳ, kể cả học viên nghỉ lớp. Không xóa tiền đã thu hay lịch sử điều chỉnh.
-              </p>
-            </div>
-            <button type="button" className="ui-btn ui-btn-primary" onClick={() => setShowAdminUnpaid((value) => !value)}>
-              {showAdminUnpaid ? "Đóng danh sách" : `Xem khoản chưa thu (${adminUnpaidTuition.length})`}
-            </button>
-          </div>
-          {showAdminUnpaid && (
-            <div className="mt-4 space-y-3">
-              <input
-                className="ui-input w-full sm:max-w-sm"
-                value={adminUnpaidSearch}
-                onChange={(event) => setAdminUnpaidSearch(event.target.value)}
-                placeholder="🔎 Tìm tên, mã học viên hoặc lớp..."
-              />
-              {adminUnpaidTuition.length === 0 ? (
-                <p className="text-sm text-slate-500">Không có khoản học phí chưa thu nào đã lưu phù hợp.</p>
-              ) : (
-                <div className="divide-y divide-slate-100 rounded-xl border border-slate-100">
-                  {adminUnpaidTuition.slice(0, 100).map((item) => {
-                    const hasHistory = paymentsForTuition(item.id).length > 0 ||
-                      tuitionAdjustments.some((row) => row.tuition_id === item.id || row.target_tuition_id === item.id);
-                    const inactive = studentById.get(item.student_id)?.status !== "active";
-                    return (
-                      <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4">
-                        <div>
-                          <div className="font-bold text-slate-800">
-                            {studentName(item.student_id)}
-                            {inactive && <span className="ml-2 text-xs font-bold text-amber-700">Đã nghỉ / không hoạt động</span>}
-                          </div>
-                          <div className="text-sm text-slate-500">
-                            {className(item.class_id)} · {monthLabel(item.billing_month.slice(0, 7))} · Chưa thu {money(Number(item.amount_due))}
-                          </div>
-                          {hasHistory && <div className="text-xs text-amber-700">Có lịch sử giao dịch/điều chỉnh — không thể xóa</div>}
-                        </div>
-                        <button
-                          type="button"
-                          className="ui-btn min-h-11 whitespace-nowrap"
-                          disabled={hasHistory || deletingTuitionId !== null}
-                          onClick={() => deleteTuition(item)}
-                        >
-                          {deletingTuitionId === item.id ? "Đang xóa..." : "🗑️ Xóa học phí"}
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {adminUnpaidTuition.length > 100 && (
-                    <div className="p-3 text-sm text-slate-500">Đang hiển thị 100 khoản đầu tiên. Hãy tìm theo tên để thu hẹp danh sách.</div>
-                  )}
-                </div>
-              )}
-              <p className="text-xs text-slate-500">
-                Công nợ dự kiến chưa có bản ghi để xóa. Học viên đã nghỉ cần cập nhật trạng thái nghỉ học hoặc rời lớp để ngừng tính nợ.
-              </p>
-            </div>
-          )}
-        </section>
-      )}
 
       {voicePayment && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4">

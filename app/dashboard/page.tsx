@@ -234,7 +234,7 @@ export default function DashboardPage() {
           .order("name"),
         supabase
           .from("tuition_payments")
-          .select("id,amount,payment_date,payment_method")
+          .select("id,amount,payment_date,payment_method,tuition:tuition_id(note)")
           .gte("payment_date", previousMonthStart)
           .lt("payment_date", nextMonthStart)
           .order("payment_date", { ascending: false }),
@@ -318,7 +318,12 @@ export default function DashboardPage() {
     setTeachersAlerts((teachersAlertsRes.data ?? []) as TeacherForAlert[]);
     setPayrollAlerts((payrollAlertsRes.data ?? []) as PayrollForAlert[]);
     
-    setPayments(paymentsRes.data ?? []);
+    // Void receipts remain in the immutable audit log but must never count as income.
+    setPayments((paymentsRes.data ?? []).filter((payment) => {
+      const relation = payment.tuition as unknown as { note?: string | null } | { note?: string | null }[] | null;
+      const tuition = Array.isArray(relation) ? relation[0] : relation;
+      return !tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]");
+    }));
     setExpenses(filterEffectiveSources("expense", expensesRes.data ?? [], sourceReversalsRes.data ?? []));
     setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenuesRes.data ?? []) as OtherRevenue[], sourceReversalsRes.data ?? []));
     setAdjustments((adjustmentsRes.data ?? []) as TuitionAdjustment[]);

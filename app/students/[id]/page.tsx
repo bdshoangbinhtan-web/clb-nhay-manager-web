@@ -43,6 +43,7 @@ type Tuition = {
   amount_due: number;
   amount_paid: number;
   status: string;
+  note?: string | null;
 };
 
 type TuitionAdjustment = {
@@ -162,7 +163,7 @@ function StudentDetailContent() {
 
         supabase
           .from("tuition")
-          .select("id,billing_month,amount_due,amount_paid,status")
+          .select("id,billing_month,amount_due,amount_paid,status,note")
           .eq("student_id", id)
           .eq("billing_month", `${currentMonth}-01`),
       ]);
@@ -197,7 +198,7 @@ function StudentDetailContent() {
       console.error(currentTuitionRes.error);
       setCurrentTuition([]);
     } else {
-      setCurrentTuition(currentTuitionRes.data ?? []);
+      setCurrentTuition((currentTuitionRes.data ?? []).filter((t) => !t.note?.includes("[VOID_DUPLICATE_TRANSFER]")));
     }
 
     setCurrentTuitionLoading(false);
@@ -311,7 +312,7 @@ function StudentDetailContent() {
     const [tuitionRes, adjustmentRes] = await Promise.all([
       supabase
         .from("tuition")
-        .select("id,billing_month,amount_due,amount_paid,status")
+        .select("id,billing_month,amount_due,amount_paid,status,note")
         .eq("student_id", id)
         .order("billing_month", { ascending: true }),
       supabase
@@ -337,7 +338,7 @@ function StudentDetailContent() {
       return;
     }
 
-    setTuitionList(tuitionRes.data ?? []);
+    setTuitionList((tuitionRes.data ?? []).filter((t) => !t.note?.includes("[VOID_DUPLICATE_TRANSFER]")));
     setAdjustments(adjustmentRes.data ?? []);
     setAdjustmentAction("none");
     setAdjustmentAmount("");
