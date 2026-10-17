@@ -1615,9 +1615,9 @@ export default function TuitionPage() {
     <section id="admin-delete-tuition" className="ui-card scroll-mt-24 border border-rose-200 p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-black">🗑️ Xóa học phí chưa thu · Admin</h2>
+              <h2 className="text-xl font-black">🗑️ Xóa / miễn thu học phí toàn hệ thống · Admin</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Xem khoản học phí đã lưu của mọi kỳ, kể cả học viên nghỉ lớp. Không xóa tiền đã thu hay lịch sử điều chỉnh.
+                Tìm học viên ở mọi cơ sở: phiếu chưa thu và công nợ tự tính chưa có phiếu. Chỉ Admin được miễn thu từng tháng. Giữ nguyên mọi khoản đã đóng.
               </p>
             </div>
             <button type="button" className="ui-btn ui-btn-primary" onClick={() => setShowAdminUnpaid((value) => !value)}>
@@ -1630,7 +1630,7 @@ export default function TuitionPage() {
                 className="ui-input w-full sm:max-w-sm"
                 value={adminUnpaidSearch}
                 onChange={(event) => setAdminUnpaidSearch(event.target.value)}
-                placeholder="🔎 Tìm tên, mã học viên hoặc lớp..."
+                placeholder="🔎 Tìm tên, mã học viên, lớp hoặc cơ sở..."
               />
               {adminUnpaidTuition.length === 0 ? (
                 <p className="text-sm text-slate-500">Không có khoản học phí chưa thu nào đã lưu phù hợp.</p>
@@ -1645,10 +1645,11 @@ export default function TuitionPage() {
                         <div>
                           <div className="font-bold text-slate-800">
                             {studentName(item.student_id)}
-                            {inactive && <span className="ml-2 text-xs font-bold text-amber-700">Đã nghỉ / không hoạt động</span>}
+                            {inactive && <span className="ml-2 text-xs font-bold text-amber-700">Tạm ngưng</span>}
+                            {item.id.startsWith("projected:") && <span className="ml-2 text-xs font-bold text-blue-700">Nợ tự tính · chưa có phiếu</span>}
                           </div>
                           <div className="text-sm text-slate-500">
-                            {className(item.class_id)} · {monthLabel(item.billing_month.slice(0, 7))} · Chưa thu {money(Number(item.amount_due))}
+                            {className(item.class_id)} · {branchById.get(item.branch_id ?? "")?.name ?? ""} · {monthLabel(item.billing_month.slice(0, 7))} · Chưa thu {money(Number(item.amount_due))}
                           </div>
                           {hasHistory && <div className="text-xs text-amber-700">Có lịch sử giao dịch/điều chỉnh — không thể xóa</div>}
                         </div>
@@ -1669,8 +1670,37 @@ export default function TuitionPage() {
                 </div>
               )}
               <p className="text-xs text-slate-500">
-                Công nợ dự kiến chưa có bản ghi để xóa. Học viên đã nghỉ cần cập nhật trạng thái nghỉ học hoặc rời lớp để ngừng tính nợ.
+                Miễn thu chỉ áp dụng cho tháng đã chọn; nếu bé đã nghỉ, đổi Tạm ngưng để ngừng tính những tháng tiếp theo.
               </p>
+              {activeTuitionWaivers.length > 0 && (
+                <div className="mt-6 rounded-xl border border-slate-200 p-3">
+                  <div className="mb-3 text-sm font-black">✅ Tháng đã miễn thu ({activeTuitionWaivers.length}) · Có thể hoàn tác</div>
+                  <div className="max-h-64 divide-y divide-slate-100 overflow-y-auto">
+                    {activeTuitionWaivers
+                      .filter((waiver) => {
+                        const q = adminUnpaidSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+                        if (!q) return true;
+                        const student = studentById.get(waiver.student_id);
+                        const haystack = [student?.full_name,student?.student_code,classById.get(waiver.class_id)?.name,monthKey(waiver.billing_month)]
+                          .join(" ").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+                        return haystack.includes(q);
+                      })
+                      .slice(0, 40).map((waiver) => (
+                      <div key={waiver.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
+                        <div className="text-sm">
+                          <div className="font-bold">{studentName(waiver.student_id)} · {monthLabel(waiver.billing_month.slice(0, 7))}</div>
+                          <div className="text-slate-500">{className(waiver.class_id)} · {waiver.reason}</div>
+                        </div>
+                        <button type="button" className="ui-btn whitespace-nowrap"
+                          disabled={restoringWaiverId !== null || deletingTuitionId !== null}
+                          onClick={() => restoreTuitionWaiver(waiver)}>
+                          {restoringWaiverId === waiver.id ? "Đang hoàn tác..." : "↩ Bỏ miễn thu"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
             </div>
           )}
         </section>
