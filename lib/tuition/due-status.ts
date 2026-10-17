@@ -97,6 +97,48 @@ export function applyTuitionAdjustments<T extends TuitionRecord>(
  * and same-day returns to an earlier class. Independently added classes are not
  * credited merely because the student paid for a different class.
  */
+
+export type TuitionWaiverPeriod = {
+  student_id: string;
+  class_id: string;
+  billing_month: string;
+};
+
+/** A waiver is a non-collectible period even if membership infers a debt. */
+export function applyTuitionWaivers<T extends TuitionRecord>(
+  records: T[],
+  waivers: TuitionWaiverPeriod[]
+): (T & { waived?: boolean })[] {
+  const result: (T & { waived?: boolean })[] = records.map((row) => ({ ...row }));
+  const keyFor = (studentId: string, classId: string, period: string | null) =>
+    [studentId, classId, period ?? ""].join("__");
+  const existing = new Set(
+    records.filter((row) => !!row.class_id).map((row) =>
+      keyFor(row.student_id, row.class_id!, monthKey(row.billing_month))
+    )
+  );
+  for (const waiver of waivers) {
+    const period = monthKey(waiver.billing_month);
+    if (!period) continue;
+    const key = keyFor(waiver.student_id, waiver.class_id, period);
+    // Never mask a real payment if inconsistent legacy data appears.
+    if (existing.has(key)) continue;
+    existing.add(key);
+    result.push({
+      id: "waived:" + key,
+      student_id: waiver.student_id,
+      class_id: waiver.class_id,
+      billing_month: period + "-01",
+      amount_due: 0,
+      amount_paid: 0,
+      effective_amount_due: 0,
+      effective_amount_paid: 0,
+      waived: true,
+    } as T & { waived?: boolean });
+  }
+  return result;
+}
+
 export type TuitionTransferOut = {
   student_id: string;
   class_id: string;
