@@ -727,7 +727,11 @@ function StudentDetailContent() {
   }
 
   async function removeClass(classId: string) {
-    if (!confirm("Xóa học viên khỏi lớp này? Học viên vẫn được giữ lại.")) {
+    if (!confirm(
+      "⚠️ XÓA HỌC VIÊN KHỎI LỚP\n\n" +
+      "Nếu bé đang CHUYỂN LỚP, hãy bấm HỦY và dùng nút 🔄 Chuyển lớp để lưu lịch sử và giữ học phí đã đóng.\n\n" +
+      "Chỉ chọn OK nếu bé thực sự rời lớp này mà không chuyển sang lớp khác."
+    )) {
       return;
     }
 
