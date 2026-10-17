@@ -1100,6 +1100,11 @@ export default function TuitionPage() {
       return;
     }
 
+    if (waivedTuitionKeys.has([studentId,classId,collectionMonth].join("__"))) {
+      alert("Kỳ này đã được Admin miễn thu. Không thể ghi phiếu thu.");
+      return;
+    }
+
     const dueAmount = Number(amountDue);
     const amount = Number(amountToCollect);
 
@@ -1235,44 +1240,70 @@ export default function TuitionPage() {
   }
 
   async function deleteTuition(item: Tuition) {
-    if (!isAdmin) {
-      alert("Chỉ ADMIN đang hoạt động mới được xóa học phí.");
-      return;
-    }
-    if (deletingTuitionId) return;
-
-    if (
-      Number(item.amount_paid || 0) !== 0 ||
-      paymentsByTuition.has(item.id) ||
-      tuitionAdjustments.some(
-        (adjustment) => adjustment.tuition_id === item.id || adjustment.target_tuition_id === item.id
-      )
-    ) {
+    if (!isAdmin || deletingTuitionId) return;
+    if (Number(item.amount_paid || 0) !== 0 ||
+      (!item.id.startsWith("projected:") && (paymentsByTuition.has(item.id) ||
+        tuitionAdjustments.some((adjustment) =>
+          adjustment.tuition_id === item.id || adjustment.target_tuition_id === item.id)))) {
       alert("Khoản này có tiền đã thu hoặc lịch sử điều chỉnh, không được xóa.");
       return;
     }
-
-    const ok = window.confirm(
-      `Xóa học phí ${money(Number(item.amount_due || 0))} của ${studentName(item.student_id)} — kỳ ${monthLabel(item.billing_month.slice(0, 7))}?\n\n` +
-        "Chỉ xóa khoản chưa thu đã lưu. Nếu học viên vẫn nằm trong lớp đang học, công nợ dự kiến có thể tiếp tục được tính."
+    const student = studentById.get(item.student_id);
+    const classLabel = className(item.class_id);
+    const reason = window.prompt(
+      "MIỄN THU HỌC PHÍ · CHỈ ADMIN\n\n" +
+      "Học viên: " + (student?.full_name ?? "") + " (" + (student?.student_code ?? "") + ")\n" +
+      "Lớp: " + classLabel + "\nKỳ: " + monthLabel(item.billing_month.slice(0, 7)) + "\n" +
+      "Số chưa đóng: " + money(Number(item.amount_due)) + "\n\n" +
+      "Nhập lý do miễn thu. Tiền đã đóng các tháng khác vẫn giữ nguyên:",
+      "Nghỉ học không báo – Không thu tháng này"
     );
-    if (!ok) return;
+    if (reason === null) return;
+    if (reason.trim().length < 5 || reason.trim().length > 300) {
+      alert("Lý do phải từ 5 đến 300 ký tự."); return;
+    }
+    if (!window.confirm(
+      "XÁC NHẬN KHÔNG THU " + monthLabel(item.billing_month.slice(0, 7)) + "?\n\n" +
+      (student?.full_name ?? "") + " · " + classLabel + "\n" +
+      "Số tiền miễn thu: " + money(Number(item.amount_due)) + "\n\n" +
+      "Tháng này sẽ không tự phát sinh nợ lại kể cả khi bé học lại. " +
+      "Nếu bé đã nghỉ, hãy chuyển trạng thái sang TẠM NGƯNG để dừng tính những tháng kế tiếp."
+    )) return;
 
     setDeletingTuitionId(item.id);
     try {
-      // The database verifies the active Admin role again; managers cannot call this RPC.
-      const { error } = await supabase.rpc("admin_delete_unpaid_tuition", {
-        p_tuition_id: item.id,
-      });
-      if (error) {
-        alert("Không thể xóa học phí: " + error.message);
-        return;
-      }
-      setTuition((current) => current.filter((row) => row.id !== item.id));
+      const { error } = item.class_id
+        ? await supabase.rpc("admin_waive_unpaid_tuition", {
+            p_student_id: item.student_id,
+            p_class_id: item.class_id,
+            p_billing_month: periodDate(item.billing_month),
+            p_reason: reason.trim(),
+          })
+        : item.id.startsWith("projected:")
+          ? { error: { message: "Công nợ dự kiến phải có lớp học để miễn thu." } }
+          : await supabase.rpc("admin_delete_unpaid_tuition", { p_tuition_id: item.id });
+      if (error) { alert("Không thể miễn thu: " + error.message); return; }
       await loadData();
-      alert("Đã xóa học phí chưa thu. Nếu vẫn có công nợ dự kiến, hãy cập nhật trạng thái nghỉ học/rời lớp của học viên.");
+      alert("✅ Đã ghi nhận không thu học phí tháng này. Công nợ sẽ không tự tạo lại.");
     } finally {
       setDeletingTuitionId(null);
+    }
+  }
+
+  async function restoreTuitionWaiver(waiver: TuitionWaiver) {
+    if (!isAdmin || restoringWaiverId) return;
+    if (!window.confirm(
+      "Bỏ miễn thu " + monthLabel(waiver.billing_month.slice(0, 7)) +
+      " của " + studentName(waiver.student_id) + "?\n\n" +
+      "Hệ thống có thể tính lại công nợ tháng này."
+    )) return;
+    setRestoringWaiverId(waiver.id);
+    try {
+      const { error } = await supabase.rpc("admin_restore_tuition_waiver", { p_waiver_id: waiver.id });
+      if (error) { alert(error.message); return; }
+      await loadData();
+    } finally {
+      setRestoringWaiverId(null);
     }
   }
 
@@ -1521,6 +1552,10 @@ export default function TuitionPage() {
     period: string,
     amountOverride?: number
   ) {
+    if (waivedTuitionKeys.has([student.id,classItem.id,period].join("__"))) {
+      alert("Kỳ này Admin đã ghi nhận không thu học phí. Muốn thu lại phải bỏ miễn thu trước.");
+      return;
+    }
     const membership = activeMemberships.find((item) =>
       item.student_id === student.id && item.class_id === classItem.id
     );
