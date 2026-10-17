@@ -77,7 +77,7 @@ export default function ReceiptPage() {
 
       const { data: tuition, error: tuitionError } = await supabase
         .from("tuition")
-        .select("id,student_id,class_id,branch_id,billing_month,amount_due,amount_paid")
+        .select("id,student_id,class_id,branch_id,billing_month,amount_due,amount_paid,note")
         .eq("id", payment.tuition_id)
         .single();
 
@@ -85,6 +85,14 @@ export default function ReceiptPage() {
 
       if (tuitionError || !tuition) {
         alert(tuitionError?.message || "Không tìm thấy học phí.");
+        setLoading(false);
+        return;
+      }
+
+      // The receipt is retained only as evidence of an erroneous entry.
+      // Never let users reprint it as a valid payment.
+      if (tuition.note?.includes("[VOID_DUPLICATE_TRANSFER]")) {
+        setData({ voided: true, receiptNo: payment.receipt_no || payment.id });
         setLoading(false);
         return;
       }
@@ -153,6 +161,16 @@ export default function ReceiptPage() {
   }
 
   if (!data) return null;
+
+  if (data.voided) {
+    return (
+      <div className="mx-auto mt-10 max-w-lg rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+        <h1 className="text-xl font-black text-rose-800">Phiếu thu đã hủy</h1>
+        <p className="mt-2 text-sm text-rose-700">Mã phiếu {data.receiptNo} bị ghi trùng khi chuyển lớp. Giao dịch đã được đảo sổ quỹ và không còn là khoản thu hợp lệ.</p>
+        <p className="mt-2 text-xs text-slate-500">Chỉ giữ lịch sử kiểm toán, không dùng phiếu này để xác nhận thanh toán.</p>
+      </div>
+    );
+  }
 
   return (
     <>
