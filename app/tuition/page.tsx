@@ -1700,7 +1700,7 @@ export default function TuitionPage() {
                     ))}
                   </div>
                 </div>
-              )
+              )}
             </div>
           )}
         </section>
