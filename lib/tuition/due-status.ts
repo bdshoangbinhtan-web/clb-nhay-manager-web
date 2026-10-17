@@ -45,11 +45,11 @@ export type MembershipTuitionStatus = {
   remaining: number;
 };
 
-export function applyTuitionAdjustments(
-  records: TuitionRecord[],
+export function applyTuitionAdjustments<T extends TuitionRecord>(
+  records: T[],
   payments: TuitionPaymentAmount[],
   adjustments: TuitionAdjustmentAmount[]
-): TuitionRecord[] {
+): T[] {
   const paymentsByTuition = new Map<string, number>();
   const cancelledByTuition = new Map<string, number>();
   const carriedIntoTuition = new Map<string, number>();
@@ -85,6 +85,122 @@ export function applyTuitionAdjustments(
       Math.max(Number(record.amount_paid || 0), paymentsByTuition.get(record.id) ?? 0) +
       (carriedIntoTuition.get(record.id) ?? 0),
   }));
+}
+
+
+/**
+ * Transfer changes class membership, not the student's already-paid billing period.
+ * All rows below are view-only projections; no receipt, tuition or cash ledger is written.
+ *
+ * A previous class counts only if it has a verified transfer_out whose transfer
+ * date matches the next enrollment's start date. The chain also handles A -> B -> C
+ * and same-day returns to an earlier class. Independently added classes are not
+ * credited merely because the student paid for a different class.
+ */
+export type TuitionTransferOut = {
+  student_id: string;
+  class_id: string;
+  start_date: string | null;
+  end_date: string | null;
+  changed_at: string;
+};
+
+export type TransferCovered<T> = T & { covered_by_transfer?: boolean };
+
+export function applyTransferredTuitionCoverage<T extends TuitionRecord>(
+  paidRecords: T[],
+  memberships: TuitionMembership[],
+  transferOut: TuitionTransferOut[]
+): TransferCovered<T>[] {
+  const result: TransferCovered<T>[] = paidRecords.map((item) => ({ ...item }));
+  const transferByStudent = new Map<string, TuitionTransferOut[]>();
+  const recordsByStudent = new Map<string, T[]>();
+  const targetByPeriod = new Map<string, TransferCovered<T>>();
+
+  const key = (studentId: string, classId: string, period: string) =>
+    `${studentId}__${classId}__${period}`;
+
+  for (const row of paidRecords) {
+    const studentRows = recordsByStudent.get(row.student_id) ?? [];
+    studentRows.push(row);
+    recordsByStudent.set(row.student_id, studentRows);
+  }
+  for (const row of result) {
+    const period = monthKey(row.billing_month);
+    if (row.class_id && period) targetByPeriod.set(key(row.student_id, row.class_id, period), row);
+  }
+  for (const event of transferOut) {
+    if (!event.end_date) continue;
+    const studentEvents = transferByStudent.get(event.student_id) ?? [];
+    studentEvents.push(event);
+    transferByStudent.set(event.student_id, studentEvents);
+  }
+  for (const events of transferByStudent.values()) {
+    events.sort((a, b) => b.changed_at.localeCompare(a.changed_at));
+  }
+
+  for (const membership of memberships) {
+    if (membership.status !== "active" || !membership.start_date) continue;
+    const events = transferByStudent.get(membership.student_id) ?? [];
+    const studentRecords = recordsByStudent.get(membership.student_id) ?? [];
+    let classId = membership.class_id;
+    let startDate: string | null = membership.start_date;
+    let before = "9999-12-31T23:59:59Z";
+    const visited = new Set<string>();
+
+    for (let depth = 0; depth < 30 && startDate; depth += 1) {
+      const previous = events.find((event) =>
+        event.end_date === startDate &&
+        event.class_id !== classId &&
+        event.changed_at < before &&
+        !visited.has(`${event.class_id}:${event.changed_at}`)
+      );
+      if (!previous) break;
+      visited.add(`${previous.class_id}:${previous.changed_at}`);
+      const transferMonth = monthKey(previous.end_date);
+
+      for (const source of studentRecords) {
+        const period = monthKey(source.billing_month);
+        if (!period || !transferMonth || period < transferMonth || source.class_id !== previous.class_id) continue;
+
+        const due = Number(source.effective_amount_due ?? source.amount_due);
+        const paid = Number(source.effective_amount_paid ?? source.amount_paid);
+        // Do not waive a genuine balance, or falsely count a partial payment as full.
+        if (!(due > 0 && paid >= due)) continue;
+
+        const targetKey = key(membership.student_id, membership.class_id, period);
+        const current = targetByPeriod.get(targetKey);
+        if (current) {
+          const currentDue = Number(current.effective_amount_due ?? current.amount_due);
+          const currentPaid = Number(current.effective_amount_paid ?? current.amount_paid);
+          // A stored but entirely unpaid duplicate invoice must not revive a paid debt.
+          // Never overwrite a real payment already recorded in the destination class.
+          if (currentDue > 0 && currentPaid === 0 && Number(current.amount_paid) === 0) {
+            current.effective_amount_paid = currentDue;
+            current.covered_by_transfer = true;
+          }
+          continue;
+        }
+
+        const projection: TransferCovered<T> = {
+          ...source,
+          id: `transfer-coverage:${membership.student_id}:${membership.class_id}:${period}`,
+          class_id: membership.class_id,
+          effective_amount_due: due,
+          effective_amount_paid: paid,
+          covered_by_transfer: true,
+        };
+        result.push(projection);
+        targetByPeriod.set(targetKey, projection);
+      }
+
+      classId = previous.class_id;
+      startDate = previous.start_date;
+      before = previous.changed_at;
+    }
+  }
+
+  return result;
 }
 
 export function monthKey(value: string | null | undefined): string | null {
