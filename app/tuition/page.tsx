@@ -64,6 +64,7 @@ type Tuition = {
   amount_paid: number;
   effective_amount_due?: number;
   effective_amount_paid?: number;
+  covered_by_transfer?: boolean;
   payment_date: string | null;
   note: string | null;
   status: string;
