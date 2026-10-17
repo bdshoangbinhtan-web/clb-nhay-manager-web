@@ -221,7 +221,11 @@ export default function ReportsPage() {
 
     setBranches(branchData ?? []);
     // Voided duplicate entries remain in immutable audit history, not revenue.
-    setPayments((paymentData ?? []).filter((p) => !p.tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]")) as unknown as Payment[]);
+    setPayments((paymentData ?? []).filter((payment) => {
+      const relation = payment.tuition as unknown as { note?: string | null } | { note?: string | null }[] | null;
+      const tuition = Array.isArray(relation) ? relation[0] : relation;
+      return !tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]");
+    }) as unknown as Payment[]);
     setExpenses(filterEffectiveSources("expense", expenseData ?? [], sourceReversalData ?? []));
     setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenueData ?? []) as OtherRevenue[], sourceReversalData ?? []));
     setAdjustments((adjustmentData ?? []) as unknown as Adjustment[]);
