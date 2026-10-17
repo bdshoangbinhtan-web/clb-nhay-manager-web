@@ -1272,7 +1272,10 @@ export default function TuitionPage() {
 
     setDeletingTuitionId(item.id);
     try {
-      const { error } = item.class_id
+      const period = monthKey(item.billing_month);
+      const useDurableWaiver = !!item.class_id && !!period &&
+        period >= TUITION_TRACKING_START_MONTH && period <= currentMonth;
+      const { error } = useDurableWaiver
         ? await supabase.rpc("admin_waive_unpaid_tuition", {
             p_student_id: item.student_id,
             p_class_id: item.class_id,
@@ -1284,7 +1287,9 @@ export default function TuitionPage() {
           : await supabase.rpc("admin_delete_unpaid_tuition", { p_tuition_id: item.id });
       if (error) { alert("Không thể miễn thu: " + error.message); return; }
       await loadData();
-      alert("✅ Đã ghi nhận không thu học phí tháng này. Công nợ sẽ không tự tạo lại.");
+      alert(useDurableWaiver
+        ? "✅ Đã ghi nhận không thu học phí tháng này. Công nợ sẽ không tự tạo lại."
+        : "✅ Đã xóa phiếu học phí chưa thu. Chức năng miễn thu cố định áp dụng từ tháng 10/2026 đến hiện tại.");
     } finally {
       setDeletingTuitionId(null);
     }
