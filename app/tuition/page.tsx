@@ -10,6 +10,8 @@ import { PaymentMethodFields, type PaymentMethod, type TransferAccount } from "@
 import { normalizeTransferAccount } from "@/lib/payment-method";
 import {
   applyTuitionAdjustments,
+  applyTransferredTuitionCoverage,
+  type TuitionTransferOut,
   determineActiveClasses,
   getFirstUnpaidMonth,
   getMembershipTuitionStatus,
@@ -213,6 +215,7 @@ export default function TuitionPage() {
   const [tuition, setTuition] = useState<Tuition[]>([]);
   const [payments, setPayments] = useState<TuitionPayment[]>([]);
   const [tuitionAdjustments, setTuitionAdjustments] = useState<TuitionAdjustment[]>([]);
+  const [transferHistory, setTransferHistory] = useState<TuitionTransferOut[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
@@ -273,6 +276,7 @@ export default function TuitionPage() {
       classResult,
       membershipResult,
       adjustmentResult,
+      transferHistoryResult,
     ] = await Promise.all([
       supabase
         .from("students")
@@ -290,6 +294,7 @@ export default function TuitionPage() {
       supabase
         .from("tuition_adjustments")
         .select("id,tuition_id,target_tuition_id,action,amount"),
+      supabase.rpc("get_tuition_transfer_out_history"),
     ]);
 
     if (requestId !== loadRequestRef.current) return;
@@ -320,12 +325,14 @@ export default function TuitionPage() {
       { data: classData, error: classError },
       { data: membershipData, error: membershipError },
       { data: adjustmentData, error: adjustmentError },
+      { data: transferHistoryData, error: transferHistoryError },
     ] = [
       studentResult,
       branchResult,
       classResult,
       membershipResult,
       adjustmentResult,
+      transferHistoryResult,
     ];
 
     if (requestId !== loadRequestRef.current) return;
@@ -362,6 +369,12 @@ export default function TuitionPage() {
 
     if (adjustmentError) {
       alert(adjustmentError.message);
+      setLoading(false);
+      return;
+    }
+
+    if (transferHistoryError) {
+      alert("Không thể kiểm tra học phí đã đóng khi chuyển lớp: " + transferHistoryError.message);
       setLoading(false);
       return;
     }
@@ -408,6 +421,7 @@ export default function TuitionPage() {
     setTuition(tuitionRows);
     setPayments(paymentData ?? []);
     setTuitionAdjustments((adjustmentData ?? []) as TuitionAdjustment[]);
+    setTransferHistory((transferHistoryData ?? []) as TuitionTransferOut[]);
     setStudents(studentData ?? []);
     setBranches(branchData ?? []);
     setClasses(classData ?? []);
@@ -490,8 +504,9 @@ export default function TuitionPage() {
   const viewingPreLaunchMonth = billingMonth < TUITION_TRACKING_START_MONTH;
 
   const tuitionForDueStatus = useMemo(() => {
-    return applyTuitionAdjustments(tuition, payments, tuitionAdjustments);
-  }, [payments, tuition, tuitionAdjustments]);
+    const effective = applyTuitionAdjustments(tuition, payments, tuitionAdjustments);
+    return applyTransferredTuitionCoverage(effective, activeMemberships, transferHistory);
+  }, [activeMemberships, payments, transferHistory, tuition, tuitionAdjustments]);
 
   const membershipTuitionRows = useMemo(() => {
     const rows: Array<{
@@ -645,13 +660,13 @@ export default function TuitionPage() {
 
   const tuitionByStudentClass = useMemo(() => {
     const result = new Map<string, Tuition>();
-    for (const item of tuition) {
+    for (const item of tuitionForDueStatus) {
       if (!item.class_id || monthKey(item.billing_month) !== billingMonth) continue;
       result.set(`${item.student_id}__${item.class_id}`, item);
     }
 
     return result;
-  }, [tuition, billingMonth]);
+  }, [tuitionForDueStatus, billingMonth]);
 
   const paymentsByTuition = useMemo(() => {
     const result = new Map<string, TuitionPayment[]>();
@@ -1071,6 +1086,15 @@ export default function TuitionPage() {
         item.class_id === classId &&
         monthKey(item.billing_month) === collectionMonth
     );
+    const inheritedPayment = tuitionForDueStatus.find(
+      (item) => item.student_id === studentId && item.class_id === classId &&
+        monthKey(item.billing_month) === collectionMonth && item.covered_by_transfer
+    );
+    if (inheritedPayment && Number(inheritedPayment.effective_amount_paid ?? inheritedPayment.amount_paid) >=
+      Number(inheritedPayment.effective_amount_due ?? inheritedPayment.amount_due)) {
+      alert("Tháng này học viên đã đóng ở lớp cũ trước khi chuyển lớp. Không thu trùng học phí.");
+      return;
+    }
     const expectedAmount = existing
       ? Number(existing.amount_due)
       : suggestedTuitionAmount(selectedStudent, classItem, collectionMonth, membership.start_date);
@@ -2165,7 +2189,9 @@ export default function TuitionPage() {
                         </span>
                       </div>
                       <div className="mt-1 text-xs text-slate-400">
-                        {item
+                        {item?.covered_by_transfer
+                          ? `Kỳ ${monthLabel(billingMonth)} · đã đóng từ lớp trước khi chuyển`
+                          : item
                           ? `Kỳ ${monthLabel(billingMonth)}`
                           : viewingPreLaunchMonth
                             ? "Dữ liệu lịch sử · không tự tính công nợ"
@@ -2199,7 +2225,7 @@ export default function TuitionPage() {
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       {fullyPaid ? (
                         <span className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-black text-emerald-700">
-                          🟢 {billingMonth > currentMonth ? "Đã đóng trước" : "Đã đóng đủ"}
+                          🟢 {item?.covered_by_transfer ? "Đã đóng · chuyển lớp" : billingMonth > currentMonth ? "Đã đóng trước" : "Đã đóng đủ"}
                         </span>
                       ) : item && (billingMonth <= currentMonth || canCollectPeriod) ? (
                         <button
