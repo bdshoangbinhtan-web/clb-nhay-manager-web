@@ -143,7 +143,8 @@ export default function ReportsPage() {
           transfer_account,
           payment_date,
           tuition:tuition_id (
-            branch_id
+            branch_id,
+            note
           )
         `)
         .gte("payment_date", range.start)
@@ -219,7 +220,8 @@ export default function ReportsPage() {
     }
 
     setBranches(branchData ?? []);
-    setPayments((paymentData ?? []) as unknown as Payment[]);
+    // Voided duplicate entries remain in immutable audit history, not revenue.
+    setPayments((paymentData ?? []).filter((p) => !p.tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]")) as unknown as Payment[]);
     setExpenses(filterEffectiveSources("expense", expenseData ?? [], sourceReversalData ?? []));
     setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenueData ?? []) as OtherRevenue[], sourceReversalData ?? []));
     setAdjustments((adjustmentData ?? []) as unknown as Adjustment[]);
