@@ -1153,14 +1153,14 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-xl font-black">📊 Phân tích hoạt động</h2>
           <p className="mt-1 text-sm text-slate-400">
-            So sánh nhanh với tháng trước
+            So sánh tiền thực thu và doanh thu được phân bổ theo kỳ học
           </p>
         </div>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <div className="rounded-2xl bg-slate-50 p-5">
             <div className="text-sm font-bold text-slate-500">
-              💰 Thu tháng này / tháng trước
+              💰 Tiền thực thu tháng này / tháng trước
             </div>
             <div className="mt-2 grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-white p-3 shadow-sm">
@@ -1188,6 +1188,11 @@ export default function DashboardPage() {
               {revenueChange === null
                 ? "Chưa đủ dữ liệu để tính % thay đổi"
                 : `${revenueChange >= 0 ? "↑" : "↓"} ${Math.abs(revenueChange).toFixed(1)}% so với tháng trước`}
+            </div>
+            <div className="mt-3 border-t border-slate-200 pt-3 text-sm text-slate-600">
+              <div className="font-bold">Doanh thu theo kỳ (học phí đã thu + thu khác)</div>
+              {periodLoadError ? <div className="text-rose-600">Không tải được số liệu theo kỳ học.</div> :
+                <div className="mt-1 flex flex-wrap justify-between gap-2"><b>{money(periodRevenue)}</b><span>Tháng trước: {money(previousPeriodRevenue)}</span></div>}
             </div>
           </div>
 
@@ -1303,7 +1308,7 @@ export default function DashboardPage() {
         </section>
 
         {/* KPI */}
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {[
           {
             icon: "👥",
@@ -1321,10 +1326,17 @@ export default function DashboardPage() {
           },
           {
             icon: "💰",
-            label: "Thu tháng này",
+            label: "Thu thực tế tháng này",
             value: money(revenue),
             suffix: `${monthPayments.length} giao dịch`,
             href: "/tuition",
+          },
+          {
+            icon: "📆",
+            label: "Doanh thu theo kỳ",
+            value: periodLoadError ? "—" : money(periodRevenue),
+            suffix: "Học phí kỳ đã thu + thu khác",
+            href: "/reports",
           },
           {
             icon: "💸",
@@ -1371,7 +1383,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-black">💵 Tình hình tài chính</h2>
               <p className="mt-1 text-sm text-slate-400">
-                Thu − Chi = Còn lại
+                Tiền thực thu − hoàn tiền − chi = dòng tiền còn lại
               </p>
             </div>
 
@@ -1383,12 +1395,20 @@ export default function DashboardPage() {
             </Link>
           </div>
 
-          <div className="mt-7 grid gap-4 sm:grid-cols-3">
+          <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl bg-gradient-to-br from-emerald-50 to-white p-5 shadow-[inset_0_1px_0_white,0_7px_18px_rgba(35,50,75,.05)]">
-              <div className="text-sm font-semibold text-slate-500">Tổng thu</div>
+              <div className="text-sm font-semibold text-slate-500">Tiền thực thu</div>
               <div className="mt-2 text-xl font-black text-emerald-700">
                 {loading ? "—" : money(revenue)}
               </div>
+            </div>
+
+            <div className="rounded-2xl bg-gradient-to-br from-indigo-50 to-white p-5 shadow-[inset_0_1px_0_white,0_7px_18px_rgba(35,50,75,.05)]">
+              <div className="text-sm font-semibold text-slate-500">Doanh thu theo kỳ học</div>
+              <div className="mt-2 text-xl font-black text-indigo-700">
+                {loading || periodLoadError ? "—" : money(periodRevenue)}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">Học phí đã thu theo kỳ − hoàn theo kỳ + thu khác</div>
             </div>
 
             <div className="rounded-2xl bg-gradient-to-br from-rose-50 to-white p-5 shadow-[inset_0_1px_0_white,0_7px_18px_rgba(35,50,75,.05)]">
@@ -1400,7 +1420,7 @@ export default function DashboardPage() {
 
             <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-white p-5 shadow-[inset_0_1px_0_white,0_7px_18px_rgba(35,50,75,.05)]">
               <div className="text-sm font-semibold text-slate-500">
-                Còn lại
+                Còn lại (dòng tiền)
               </div>
               <div
                 className={`mt-2 text-xl font-black ${
@@ -1411,6 +1431,7 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+          <p className="mt-3 text-sm text-slate-600">⏭ Thu trước các kỳ sau trong tháng: <b>{loading ? "—" : money(advanceCollected)}</b> (đã gồm trong tiền thực thu, không tính vào doanh thu kỳ này).</p>
         </div>
 
         {/* BRANCH */}
