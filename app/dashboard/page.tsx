@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { filterEffectiveSources } from "@/lib/finance/ledger";
+import { isVoidedDuplicateTuition, sumAdvanceTuitionCollected, sumTuitionByBillingPeriod } from "@/lib/finance/tuition-period";
+import type { TuitionRelation } from "@/lib/finance/tuition-period";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import { activeStaffRole } from "@/lib/active-staff-role";
 import {
@@ -53,6 +55,7 @@ type Payment = {
   amount: number;
   payment_date: string;
   payment_method: string | null;
+  tuition: TuitionRelation | TuitionRelation[] | null;
 };
 
 type OtherRevenue = {
@@ -75,6 +78,7 @@ type TuitionAdjustment = {
   action: string;
   amount: number;
   created_at: string;
+  tuition: TuitionRelation | TuitionRelation[] | null;
 };
 
 
@@ -166,6 +170,9 @@ export default function DashboardPage() {
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [periodPayments, setPeriodPayments] = useState<Payment[]>([]);
+  const [periodRefunds, setPeriodRefunds] = useState<TuitionAdjustment[]>([]);
+  const [periodLoadError, setPeriodLoadError] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [otherRevenues, setOtherRevenues] = useState<OtherRevenue[]>([]);
   const [adjustments, setAdjustments] = useState<TuitionAdjustment[]>([]);
@@ -182,6 +189,7 @@ export default function DashboardPage() {
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     setRole("");
+    setPeriodLoadError(false);
 
     const { data: { user } } = await supabase.auth.getUser();
     const { data: profile, error: profileError } = user
@@ -207,8 +215,10 @@ export default function DashboardPage() {
       classesRes,
       branchesRes,
       paymentsRes,
+      periodPaymentsRes,
       expensesRes,
       adjustmentsRes,
+      periodRefundsRes,
       classStudentsRes,
       tuitionAlertsRes,
       teachersAlertsRes,
@@ -223,6 +233,12 @@ export default function DashboardPage() {
           .select("id,student_code,full_name,status,created_at")
           .order("created_at", { ascending: false }),
         supabase
+          .from("tuition_adjustments")
+          .select("id,amount,action,created_at,tuition:tuition_id!inner(billing_month,branch_id,note)")
+          .eq("action", "refund")
+          .gte("tuition.billing_month", previousMonthStart)
+          .lt("tuition.billing_month", nextMonthStart),
+        supabase
           .from("classes")
           .select(
             "id,name,branch_id,status,monthly_fee,schedule_days,schedule_start,schedule_end"
@@ -234,10 +250,15 @@ export default function DashboardPage() {
           .order("name"),
         supabase
           .from("tuition_payments")
-          .select("id,amount,payment_date,payment_method,tuition:tuition_id(note)")
+          .select("id,amount,payment_date,payment_method,tuition:tuition_id(billing_month,branch_id,note)")
           .gte("payment_date", previousMonthStart)
           .lt("payment_date", nextMonthStart)
           .order("payment_date", { ascending: false }),
+        supabase
+          .from("tuition_payments")
+          .select("id,amount,payment_date,tuition:tuition_id!inner(billing_month,branch_id,note)")
+          .gte("tuition.billing_month", previousMonthStart)
+          .lt("tuition.billing_month", nextMonthStart),
         supabase
           .from("expenses")
           .select("id,amount,expense_date,category,description")
@@ -294,6 +315,9 @@ export default function DashboardPage() {
     if (classesRes.error) console.error(classesRes.error);
     if (branchesRes.error) console.error(branchesRes.error);
     if (paymentsRes.error) console.error(paymentsRes.error);
+    if (periodPaymentsRes.error) console.error(periodPaymentsRes.error);
+    if (periodRefundsRes.error) console.error(periodRefundsRes.error);
+    setPeriodLoadError(Boolean(periodPaymentsRes.error || periodRefundsRes.error));
     if (expensesRes.error) console.error(expensesRes.error);
     if (adjustmentsRes.error) console.error(adjustmentsRes.error);
     if (classStudentsRes.error) console.error(classStudentsRes.error);
@@ -318,12 +342,10 @@ export default function DashboardPage() {
     setTeachersAlerts((teachersAlertsRes.data ?? []) as TeacherForAlert[]);
     setPayrollAlerts((payrollAlertsRes.data ?? []) as PayrollForAlert[]);
     
-    // Void receipts remain in the immutable audit log but must never count as income.
-    setPayments((paymentsRes.data ?? []).filter((payment) => {
-      const relation = payment.tuition as unknown as { note?: string | null } | { note?: string | null }[] | null;
-      const tuition = Array.isArray(relation) ? relation[0] : relation;
-      return !tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]");
-    }));
+    // Do not count voided duplicate transfer receipts in either view.
+    setPayments(((paymentsRes.data ?? []) as unknown as Payment[]).filter((item) => !isVoidedDuplicateTuition(item)));
+    setPeriodPayments(((periodPaymentsRes.data ?? []) as unknown as Payment[]).filter((item) => !isVoidedDuplicateTuition(item)));
+    setPeriodRefunds(((periodRefundsRes.data ?? []) as unknown as TuitionAdjustment[]).filter((item) => !isVoidedDuplicateTuition(item)));
     setExpenses(filterEffectiveSources("expense", expensesRes.data ?? [], sourceReversalsRes.data ?? []));
     setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenuesRes.data ?? []) as OtherRevenue[], sourceReversalsRes.data ?? []));
     setAdjustments((adjustmentsRes.data ?? []) as TuitionAdjustment[]);
@@ -508,7 +530,11 @@ export default function DashboardPage() {
     (sum, item) => sum + Number(item.amount || 0),
     0
   );
-  const revenue = tuitionRevenue + otherRevenue;
+  const revenue = tuitionRevenue + otherRevenue; // Cash received by payment date.
+  const billedPeriodTuition = sumTuitionByBillingPeriod(periodPayments, financeMonthKey)
+    - sumTuitionByBillingPeriod(periodRefunds, financeMonthKey);
+  const periodRevenue = billedPeriodTuition + otherRevenue; // Allocated receipts, not unpaid invoice accrual.
+  const advanceCollected = sumAdvanceTuitionCollected(monthPayments, financeMonthKey);
   const refundTotal = adjustments.reduce((sum, item) => {
     const refundDate = toVietnamDateKey(item.created_at);
 
@@ -728,6 +754,9 @@ export default function DashboardPage() {
 
   const previousMonthRevenue =
     previousMonthTuitionRevenue + previousMonthOtherRevenue;
+  const previousPeriodRevenue = sumTuitionByBillingPeriod(periodPayments, previousMonthKey)
+    - sumTuitionByBillingPeriod(periodRefunds, previousMonthKey)
+    + previousMonthOtherRevenue;
 
   const revenueChange =
     previousMonthRevenue > 0
