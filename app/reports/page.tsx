@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { filterEffectiveSources } from "@/lib/finance/ledger";
+import { isVoidedDuplicateTuition, linkedTuition, sumAdvanceTuitionCollected, sumTuitionByBillingPeriod } from "@/lib/finance/tuition-period";
+import type { TuitionRelation } from "@/lib/finance/tuition-period";
 import { vietnamCurrentMonth, toVietnamDateKey } from "@/lib/vietnam-date";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
@@ -14,9 +16,7 @@ type Payment = {
   payment_method: string | null;
   transfer_account: "H" | "A" | "S" | "V" | null;
   payment_date: string | null;
-  tuition: {
-    branch_id: string | null;
-  } | null;
+  tuition: TuitionRelation | TuitionRelation[] | null;
 };
 
 type Expense = {
@@ -40,9 +40,7 @@ type Adjustment = {
   amount: number;
   action: "reserve" | "refund" | "carry_forward" | "cancel" | "none";
   created_at: string;
-  tuition: {
-    branch_id: string | null;
-  } | null;
+  tuition: TuitionRelation | TuitionRelation[] | null;
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -107,6 +105,8 @@ export default function ReportsPage() {
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [periodPayments, setPeriodPayments] = useState<Payment[]>([]);
+  const [periodRefunds, setPeriodRefunds] = useState<Adjustment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [otherRevenues, setOtherRevenues] = useState<OtherRevenue[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
@@ -127,6 +127,8 @@ export default function ReportsPage() {
     const [
       { data: branchData, error: branchError },
       { data: paymentData, error: paymentError },
+      { data: periodPaymentData, error: periodPaymentError },
+      { data: periodRefundData, error: periodRefundError },
       { data: expenseData, error: expenseError },
       { data: adjustmentData, error: adjustmentError },
       { data: otherRevenueData, error: otherRevenueError },
@@ -144,11 +146,27 @@ export default function ReportsPage() {
           payment_date,
           tuition:tuition_id (
             branch_id,
+            billing_month,
             note
           )
         `)
         .gte("payment_date", range.start)
         .lt("payment_date", range.end),
+
+      // Tuition assigned to the selected lesson period, independently of payment date.
+      supabase
+        .from("tuition_payments")
+        .select("id,amount,payment_date,tuition:tuition_id!inner(branch_id,billing_month,note)")
+        .gte("tuition.billing_month", range.start)
+        .lt("tuition.billing_month", range.end),
+
+      // Period refunds reverse the original lesson period, not the refund date.
+      supabase
+        .from("tuition_adjustments")
+        .select("id,amount,action,created_at,tuition:tuition_id!inner(branch_id,billing_month,note)")
+        .eq("action", "refund")
+        .gte("tuition.billing_month", range.start)
+        .lt("tuition.billing_month", range.end),
 
       supabase
         .from("expenses")
@@ -164,7 +182,9 @@ export default function ReportsPage() {
           action,
           created_at,
           tuition:tuition_id (
-            branch_id
+            branch_id,
+            billing_month,
+            note
           )
         `)
         .eq("action", "refund")
@@ -195,6 +215,12 @@ export default function ReportsPage() {
       return;
     }
 
+    if (periodPaymentError || periodRefundError) {
+      alert((periodPaymentError || periodRefundError)?.message ?? "Không thể tải doanh thu theo kỳ học.");
+      setLoading(false);
+      return;
+    }
+
     if (expenseError) {
       alert(expenseError.message);
       setLoading(false);
@@ -220,12 +246,10 @@ export default function ReportsPage() {
     }
 
     setBranches(branchData ?? []);
-    // Voided duplicate entries remain in immutable audit history, not revenue.
-    setPayments((paymentData ?? []).filter((payment) => {
-      const relation = payment.tuition as unknown as { note?: string | null } | { note?: string | null }[] | null;
-      const tuition = Array.isArray(relation) ? relation[0] : relation;
-      return !tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]");
-    }) as unknown as Payment[]);
+    // Void duplicate payments remain in the audit log but never inflate totals.
+    setPayments(((paymentData ?? []) as unknown as Payment[]).filter((item) => !isVoidedDuplicateTuition(item)));
+    setPeriodPayments(((periodPaymentData ?? []) as unknown as Payment[]).filter((item) => !isVoidedDuplicateTuition(item)));
+    setPeriodRefunds(((periodRefundData ?? []) as unknown as Adjustment[]).filter((item) => !isVoidedDuplicateTuition(item)));
     setExpenses(filterEffectiveSources("expense", expenseData ?? [], sourceReversalData ?? []));
     setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenueData ?? []) as OtherRevenue[], sourceReversalData ?? []));
     setAdjustments((adjustmentData ?? []) as unknown as Adjustment[]);
@@ -275,7 +299,7 @@ export default function ReportsPage() {
 
       if (
         branchFilter &&
-        item.tuition?.branch_id !== branchFilter
+        linkedTuition(item)?.branch_id !== branchFilter
       ) {
         return false;
       }
@@ -300,7 +324,7 @@ export default function ReportsPage() {
     return adjustments.filter((item) => {
       if (!adjustmentInPeriod(item)) return false;
 
-      if (branchFilter && item.tuition?.branch_id !== branchFilter) {
+      if (branchFilter && linkedTuition(item)?.branch_id !== branchFilter) {
         return false;
       }
 
@@ -339,8 +363,13 @@ export default function ReportsPage() {
     0
   );
 
-  const netRevenue = totalThu - totalRefund;
-  const remaining = netRevenue - totalChi;
+  const netCashIn = totalThu - totalRefund;
+  const remaining = netCashIn - totalChi;
+  // Collected tuition assigned by billing_month; unpaid tuition remains a separate receivable.
+  const periodTuitionThu = sumTuitionByBillingPeriod(periodPayments, period, branchFilter);
+  const periodTuitionRefund = sumTuitionByBillingPeriod(periodRefunds, period, branchFilter);
+  const periodRevenue = periodTuitionThu - periodTuitionRefund + otherThu;
+  const advanceCollected = sumAdvanceTuitionCollected(filteredPayments, period);
 
   const cash = filteredPayments
     .filter((item) => item.payment_method === "cash")
@@ -382,7 +411,7 @@ export default function ReportsPage() {
           .filter(
             (item) =>
               paymentInPeriod(item) &&
-              item.tuition?.branch_id === branch.id
+              linkedTuition(item)?.branch_id === branch.id
           )
           .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -398,12 +427,15 @@ export default function ReportsPage() {
           .reduce((sum, item) => sum + Number(item.amount), 0);
 
         const thu = tuitionThu + otherThu;
+        const earned = sumTuitionByBillingPeriod(periodPayments, period, branch.id)
+          - sumTuitionByBillingPeriod(periodRefunds, period, branch.id) + otherThu;
+        const advance = sumAdvanceTuitionCollected(payments, period, branch.id);
 
         const refund = adjustments
           .filter(
             (item) =>
               adjustmentInPeriod(item) &&
-              item.tuition?.branch_id === branch.id
+              linkedTuition(item)?.branch_id === branch.id
           )
           .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -418,6 +450,8 @@ export default function ReportsPage() {
         return {
           ...branch,
           thu,
+          earned,
+          advance,
           otherThu,
           refund,
           chi,
@@ -425,11 +459,13 @@ export default function ReportsPage() {
         };
       })
       .filter(
-        (item) => item.thu !== 0 || item.refund !== 0 || item.chi !== 0
+        (item) => item.thu !== 0 || item.earned !== 0 || item.refund !== 0 || item.chi !== 0
       );
   }, [
     branches,
     payments,
+    periodPayments,
+    periodRefunds,
     otherRevenues,
     adjustments,
     expenses,
@@ -443,7 +479,7 @@ export default function ReportsPage() {
   const unassignedTuitionThu = payments
     .filter(
       (item) =>
-        paymentInPeriod(item) && !item.tuition?.branch_id
+        paymentInPeriod(item) && !linkedTuition(item)?.branch_id
     )
     .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -460,6 +496,9 @@ export default function ReportsPage() {
 
   const unassignedThu =
     unassignedTuitionThu + unassignedOtherThu;
+  const unassignedEarned = sumTuitionByBillingPeriod(periodPayments.filter((item) => !linkedTuition(item)?.branch_id), period)
+    - sumTuitionByBillingPeriod(periodRefunds.filter((item) => !linkedTuition(item)?.branch_id), period) + unassignedOtherThu;
+  const unassignedAdvance = sumAdvanceTuitionCollected(payments.filter((item) => !linkedTuition(item)?.branch_id), period);
 
   const unassignedChi = expenses
     .filter(
@@ -469,7 +508,7 @@ export default function ReportsPage() {
 
   const unassignedRefund = adjustments
     .filter(
-      (item) => adjustmentInPeriod(item) && !item.tuition?.branch_id
+      (item) => adjustmentInPeriod(item) && !linkedTuition(item)?.branch_id
     )
     .reduce((sum, item) => sum + Number(item.amount), 0);
 
