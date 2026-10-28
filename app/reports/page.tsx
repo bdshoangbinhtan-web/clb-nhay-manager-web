@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { filterEffectiveSources } from "@/lib/finance/ledger";
+import { loadAllPages } from "@/lib/finance/report-pagination";
 import { isVoidedDuplicateTuition, linkedTuition, sumAdvanceTuitionCollected, sumTuitionByBillingPeriod } from "@/lib/finance/tuition-period";
 import type { TuitionRelation } from "@/lib/finance/tuition-period";
 import { vietnamCurrentMonth, toVietnamDateKey } from "@/lib/vietnam-date";
@@ -136,7 +137,7 @@ export default function ReportsPage() {
     ] = await Promise.all([
       supabase.from("branches").select("id,name").order("name"),
 
-      supabase
+      loadAllPages(async (from, to) => await supabase
         .from("tuition_payments")
         .select(`
           id,
@@ -151,14 +152,18 @@ export default function ReportsPage() {
           )
         `)
         .gte("payment_date", range.start)
-        .lt("payment_date", range.end),
+        .lt("payment_date", range.end)
+        .order("id")
+        .range(from, to)),
 
       // Tuition assigned to the selected lesson period, independently of payment date.
-      supabase
+      loadAllPages(async (from, to) => await supabase
         .from("tuition_payments")
         .select("id,amount,payment_date,tuition:tuition_id!inner(branch_id,billing_month,note)")
         .gte("tuition.billing_month", range.start)
-        .lt("tuition.billing_month", range.end),
+        .lt("tuition.billing_month", range.end)
+        .order("id")
+        .range(from, to)),
 
       // Period refunds reverse the original lesson period, not the refund date.
       supabase
