@@ -545,7 +545,7 @@ export default function ReportsPage() {
           </h1>
 
           <p className="mt-2 text-slate-400">
-            Tổng hợp thu, chi và kết quả kinh doanh của CLB
+            Tách tiền thực thu theo ngày với doanh thu học phí theo kỳ học (số đã thu); công nợ theo dõi riêng
           </p>
         </div>
 
@@ -637,10 +637,10 @@ export default function ReportsPage() {
         </div>
       ) : (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             <div className="ui-card p-6">
               <div className="text-sm font-bold text-slate-400">
-                💰 TỔNG THU
+                💰 TIỀN THỰC THU
               </div>
               <div className="mt-2 text-3xl font-black text-emerald-600">
                 {money(totalThu)}
@@ -652,7 +652,7 @@ export default function ReportsPage() {
 
             <div className="ui-card p-6">
               <div className="text-sm font-bold text-slate-400">
-                💸 HOÀN TIỀN
+                💸 HOÀN TIỀN THỰC TẾ
               </div>
               <div className="mt-2 text-3xl font-black text-amber-600">
                 {money(totalRefund)}
@@ -664,14 +664,26 @@ export default function ReportsPage() {
 
             <div className="ui-card p-6">
               <div className="text-sm font-bold text-slate-400">
-                💼 DOANH THU RÒNG
+                💼 THU RÒNG (DÒNG TIỀN)
               </div>
               <div className="mt-2 text-3xl font-black text-blue-600">
-                {money(netRevenue)}
+                {money(netCashIn)}
               </div>
               <div className="mt-2 text-sm text-slate-400">
-                Tổng thu − Hoàn tiền
+                Thực thu − Hoàn tiền thực tế
               </div>
+            </div>
+
+            <div className="ui-card p-6">
+              <div className="text-sm font-bold text-slate-400">📆 DOANH THU THEO KỲ HỌC</div>
+              <div className="mt-2 text-3xl font-black text-indigo-700">{money(periodRevenue)}</div>
+              <div className="mt-2 text-sm text-slate-400">Học phí đã thu theo tháng học − hoàn theo kỳ + thu khác</div>
+            </div>
+
+            <div className="ui-card p-6">
+              <div className="text-sm font-bold text-slate-400">⏭ THU TRƯỚC KỲ SAU</div>
+              <div className="mt-2 text-3xl font-black text-cyan-700">{money(advanceCollected)}</div>
+              <div className="mt-2 text-sm text-slate-400">Đã nằm trong thực thu, chưa tính vào doanh thu kỳ đang xem</div>
             </div>
 
             <div className="ui-card p-6">
@@ -688,7 +700,7 @@ export default function ReportsPage() {
 
             <div className="ui-card p-6">
               <div className="text-sm font-bold text-slate-400">
-                📈 CÒN LẠI
+                📈 CÒN LẠI (DÒNG TIỀN)
               </div>
               <div
                 className={`mt-2 text-3xl font-black ${
@@ -700,7 +712,7 @@ export default function ReportsPage() {
                 {money(remaining)}
               </div>
               <div className="mt-2 text-sm text-slate-400">
-                Doanh thu ròng − Chi
+                Thu ròng − Chi
               </div>
             </div>
           </section>
@@ -765,12 +777,13 @@ export default function ReportsPage() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-400">
-                Tổng thu (gồm học phí + thu khác) − Hoàn − Chi = Còn lại
+                Thực thu − hoàn tiền − chi = dòng tiền còn lại; doanh thu theo kỳ được tính riêng
               </p>
             </div>
 
             {branchSummary.length === 0 &&
             unassignedThu === 0 &&
+            unassignedEarned === 0 &&
             unassignedChi === 0 ? (
               <div className="p-10 text-center text-slate-400">
                 Chưa có dữ liệu trong kỳ này.
@@ -781,7 +794,9 @@ export default function ReportsPage() {
                   <thead>
                     <tr className="border-b border-slate-100 text-left text-sm text-slate-400">
                       <th className="p-4">Cơ sở</th>
-                      <th className="p-4 text-right">Tổng thu</th>
+                      <th className="p-4 text-right">Thực thu</th>
+                      <th className="p-4 text-right">Theo kỳ học</th>
+                      <th className="p-4 text-right">Thu trước</th>
                       <th className="p-4 text-right">Thu khác</th>
                       <th className="p-4 text-right">Hoàn</th>
                       <th className="p-4 text-right">Chi</th>
@@ -804,6 +819,8 @@ export default function ReportsPage() {
                         <td className="p-4 text-right font-bold text-emerald-600">
                           {money(branch.thu)}
                         </td>
+                        <td className="p-4 text-right font-bold text-indigo-700">{money(branch.earned)}</td>
+                        <td className="p-4 text-right font-bold text-cyan-700">{money(branch.advance)}</td>
 
                         <td className="p-4 text-right font-bold text-cyan-600">
                           {money(branch.otherThu)}
@@ -829,7 +846,8 @@ export default function ReportsPage() {
                       </tr>
                     ))}
 
-                    {(unassignedThu > 0 ||
+                    {(unassignedThu !== 0 ||
+                      unassignedEarned !== 0 ||
                       unassignedRefund > 0 ||
                       unassignedChi > 0) && (
                       <tr className="border-b border-slate-50 bg-slate-50">
@@ -840,6 +858,8 @@ export default function ReportsPage() {
                         <td className="p-4 text-right font-bold text-emerald-600">
                           {money(unassignedThu)}
                         </td>
+                        <td className="p-4 text-right font-bold text-indigo-700">{money(unassignedEarned)}</td>
+                        <td className="p-4 text-right font-bold text-cyan-700">{money(unassignedAdvance)}</td>
 
                         <td className="p-4 text-right font-bold text-cyan-600">
                           {money(unassignedOtherThu)}
@@ -869,6 +889,8 @@ export default function ReportsPage() {
                       <td className="p-4 text-right font-black text-emerald-600">
                         {money(totalThu)}
                       </td>
+                      <td className="p-4 text-right font-black text-indigo-700">{money(periodRevenue)}</td>
+                      <td className="p-4 text-right font-black text-cyan-700">{money(advanceCollected)}</td>
 
                       <td className="p-4 text-right font-black text-cyan-600">
                         {money(otherThu)}
