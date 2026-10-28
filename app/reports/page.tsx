@@ -112,6 +112,7 @@ export default function ReportsPage() {
   const [otherRevenues, setOtherRevenues] = useState<OtherRevenue[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [showTransferBreakdown, setShowTransferBreakdown] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -119,11 +120,13 @@ export default function ReportsPage() {
     const range = reportPeriodRange(mode, period);
 
     if (!range) {
+      setLoadError("Kỳ báo cáo không hợp lệ.");
       setLoading(false);
       return;
     }
 
     setLoading(true);
+    setLoadError("");
 
     const [
       { data: branchData, error: branchError },
@@ -209,42 +212,50 @@ export default function ReportsPage() {
     if (requestId !== loadRequestRef.current) return;
 
     if (branchError) {
+      setLoadError(branchError.message);
       alert(branchError.message);
       setLoading(false);
       return;
     }
 
     if (paymentError) {
+      setLoadError(paymentError.message);
       alert(paymentError.message);
       setLoading(false);
       return;
     }
 
     if (periodPaymentError || periodRefundError) {
-      alert((periodPaymentError || periodRefundError)?.message ?? "Không thể tải doanh thu theo kỳ học.");
+      const message = (periodPaymentError || periodRefundError)?.message ?? "Không thể tải doanh thu theo kỳ học.";
+      setLoadError(message);
+      alert(message);
       setLoading(false);
       return;
     }
 
     if (expenseError) {
+      setLoadError(expenseError.message);
       alert(expenseError.message);
       setLoading(false);
       return;
     }
 
     if (adjustmentError) {
+      setLoadError(adjustmentError.message);
       alert(adjustmentError.message);
       setLoading(false);
       return;
     }
 
     if (otherRevenueError) {
+      setLoadError(otherRevenueError.message);
       alert(otherRevenueError.message);
       setLoading(false);
       return;
     }
 
     if (sourceReversalError) {
+      setLoadError(sourceReversalError.message);
       alert(sourceReversalError.message);
       setLoading(false);
       return;
@@ -642,6 +653,8 @@ export default function ReportsPage() {
         <div className="ui-card p-12 text-center text-slate-400">
           Đang tải báo cáo...
         </div>
+      ) : loadError ? (
+        <div className="ui-card p-6 text-rose-700">Không tải được báo cáo: {loadError} <button className="ml-3 font-bold underline" onClick={() => void loadData()}>Thử lại</button></div>
       ) : (
         <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
