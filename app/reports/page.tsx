@@ -411,6 +411,7 @@ export default function ReportsPage() {
 
   const branchSummary = useMemo(() => {
     return branches
+      .filter((branch) => !branchFilter || branch.id === branchFilter)
       .map((branch) => {
         const tuitionThu = payments
           .filter(
@@ -468,6 +469,7 @@ export default function ReportsPage() {
       );
   }, [
     branches,
+    branchFilter,
     payments,
     periodPayments,
     periodRefunds,
@@ -787,9 +789,7 @@ export default function ReportsPage() {
             </div>
 
             {branchSummary.length === 0 &&
-            unassignedThu === 0 &&
-            unassignedEarned === 0 &&
-            unassignedChi === 0 ? (
+            (branchFilter || (unassignedThu === 0 && unassignedEarned === 0 && unassignedChi === 0)) ? (
               <div className="p-10 text-center text-slate-400">
                 Chưa có dữ liệu trong kỳ này.
               </div>
@@ -851,7 +851,7 @@ export default function ReportsPage() {
                       </tr>
                     ))}
 
-                    {(unassignedThu !== 0 ||
+                    {!branchFilter && (unassignedThu !== 0 ||
                       unassignedEarned !== 0 ||
                       unassignedRefund > 0 ||
                       unassignedChi > 0) && (
