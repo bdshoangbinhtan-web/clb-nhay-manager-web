@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { filterEffectiveSources } from "@/lib/finance/ledger";
+import { loadAllPages } from "@/lib/finance/report-pagination";
 import { isVoidedDuplicateTuition, sumAdvanceTuitionCollected, sumTuitionByBillingPeriod } from "@/lib/finance/tuition-period";
 import type { TuitionRelation } from "@/lib/finance/tuition-period";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
@@ -242,17 +243,20 @@ export default function DashboardPage() {
           .from("branches")
           .select("id,name")
           .order("name"),
-        supabase
+        loadAllPages(async (from, to) => await supabase
           .from("tuition_payments")
           .select("id,amount,payment_date,payment_method,tuition:tuition_id(billing_month,branch_id,note)")
           .gte("payment_date", previousMonthStart)
           .lt("payment_date", nextMonthStart)
-          .order("payment_date", { ascending: false }),
-        supabase
+          .order("id")
+          .range(from, to)),
+        loadAllPages(async (from, to) => await supabase
           .from("tuition_payments")
           .select("id,amount,payment_date,tuition:tuition_id!inner(billing_month,branch_id,note)")
           .gte("tuition.billing_month", previousMonthStart)
-          .lt("tuition.billing_month", nextMonthStart),
+          .lt("tuition.billing_month", nextMonthStart)
+          .order("id")
+          .range(from, to)),
         supabase
           .from("expenses")
           .select("id,amount,expense_date,category,description")
