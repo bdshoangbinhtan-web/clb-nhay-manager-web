@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { filterEffectiveSources } from "@/lib/finance/ledger";
+import { loadAllPages } from "@/lib/finance/report-pagination";
+import { isVoidedDuplicateTuition, sumAdvanceTuitionCollected, sumTuitionByBillingPeriod } from "@/lib/finance/tuition-period";
+import type { TuitionRelation } from "@/lib/finance/tuition-period";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import { activeStaffRole } from "@/lib/active-staff-role";
 import {
@@ -53,6 +56,7 @@ type Payment = {
   amount: number;
   payment_date: string;
   payment_method: string | null;
+  tuition: TuitionRelation | TuitionRelation[] | null;
 };
 
 type OtherRevenue = {
@@ -75,6 +79,7 @@ type TuitionAdjustment = {
   action: string;
   amount: number;
   created_at: string;
+  tuition: TuitionRelation | TuitionRelation[] | null;
 };
 
 
@@ -166,6 +171,9 @@ export default function DashboardPage() {
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [periodPayments, setPeriodPayments] = useState<Payment[]>([]);
+  const [periodRefunds, setPeriodRefunds] = useState<TuitionAdjustment[]>([]);
+  const [periodLoadError, setPeriodLoadError] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [otherRevenues, setOtherRevenues] = useState<OtherRevenue[]>([]);
   const [adjustments, setAdjustments] = useState<TuitionAdjustment[]>([]);
@@ -182,6 +190,7 @@ export default function DashboardPage() {
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     setRole("");
+    setPeriodLoadError(false);
 
     const { data: { user } } = await supabase.auth.getUser();
     const { data: profile, error: profileError } = user
@@ -207,8 +216,10 @@ export default function DashboardPage() {
       classesRes,
       branchesRes,
       paymentsRes,
+      periodPaymentsRes,
       expensesRes,
       adjustmentsRes,
+      periodRefundsRes,
       classStudentsRes,
       tuitionAlertsRes,
       teachersAlertsRes,
@@ -232,12 +243,21 @@ export default function DashboardPage() {
           .from("branches")
           .select("id,name")
           .order("name"),
-        supabase
+        loadAllPages(async (from, to) => await supabase
           .from("tuition_payments")
-          .select("id,amount,payment_date,payment_method,tuition:tuition_id(note)")
+          .select("id,amount,payment_date,payment_method,tuition:tuition_id(billing_month,branch_id,note)")
           .gte("payment_date", previousMonthStart)
           .lt("payment_date", nextMonthStart)
-          .order("payment_date", { ascending: false }),
+          .order("payment_date", { ascending: false })
+          .order("id")
+          .range(from, to)),
+        loadAllPages(async (from, to) => await supabase
+          .from("tuition_payments")
+          .select("id,amount,payment_date,tuition:tuition_id!inner(billing_month,branch_id,note)")
+          .gte("tuition.billing_month", previousMonthStart)
+          .lt("tuition.billing_month", nextMonthStart)
+          .order("id")
+          .range(from, to)),
         supabase
           .from("expenses")
           .select("id,amount,expense_date,category,description")
@@ -251,6 +271,12 @@ export default function DashboardPage() {
           .gte("created_at", `${currentMonthStart}T00:00:00+07:00`)
           .lt("created_at", `${nextMonthStart}T00:00:00+07:00`)
           .order("created_at", { ascending: false }),
+        supabase
+          .from("tuition_adjustments")
+          .select("id,amount,action,created_at,tuition:tuition_id!inner(billing_month,branch_id,note)")
+          .eq("action", "refund")
+          .gte("tuition.billing_month", previousMonthStart)
+          .lt("tuition.billing_month", nextMonthStart),
 
         supabase
           .from("class_students")
@@ -294,6 +320,9 @@ export default function DashboardPage() {
     if (classesRes.error) console.error(classesRes.error);
     if (branchesRes.error) console.error(branchesRes.error);
     if (paymentsRes.error) console.error(paymentsRes.error);
+    if (periodPaymentsRes.error) console.error(periodPaymentsRes.error);
+    if (periodRefundsRes.error) console.error(periodRefundsRes.error);
+    setPeriodLoadError(Boolean(periodPaymentsRes.error || periodRefundsRes.error));
     if (expensesRes.error) console.error(expensesRes.error);
     if (adjustmentsRes.error) console.error(adjustmentsRes.error);
     if (classStudentsRes.error) console.error(classStudentsRes.error);
@@ -318,12 +347,10 @@ export default function DashboardPage() {
     setTeachersAlerts((teachersAlertsRes.data ?? []) as TeacherForAlert[]);
     setPayrollAlerts((payrollAlertsRes.data ?? []) as PayrollForAlert[]);
     
-    // Void receipts remain in the immutable audit log but must never count as income.
-    setPayments((paymentsRes.data ?? []).filter((payment) => {
-      const relation = payment.tuition as unknown as { note?: string | null } | { note?: string | null }[] | null;
-      const tuition = Array.isArray(relation) ? relation[0] : relation;
-      return !tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]");
-    }));
+    // Do not count voided duplicate transfer receipts in either view.
+    setPayments(((paymentsRes.data ?? []) as unknown as Payment[]).filter((item) => !isVoidedDuplicateTuition(item)));
+    setPeriodPayments(((periodPaymentsRes.data ?? []) as unknown as Payment[]).filter((item) => !isVoidedDuplicateTuition(item)));
+    setPeriodRefunds(((periodRefundsRes.data ?? []) as unknown as TuitionAdjustment[]).filter((item) => !isVoidedDuplicateTuition(item)));
     setExpenses(filterEffectiveSources("expense", expensesRes.data ?? [], sourceReversalsRes.data ?? []));
     setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenuesRes.data ?? []) as OtherRevenue[], sourceReversalsRes.data ?? []));
     setAdjustments((adjustmentsRes.data ?? []) as TuitionAdjustment[]);
@@ -508,7 +535,11 @@ export default function DashboardPage() {
     (sum, item) => sum + Number(item.amount || 0),
     0
   );
-  const revenue = tuitionRevenue + otherRevenue;
+  const revenue = tuitionRevenue + otherRevenue; // Cash received by payment date.
+  const billedPeriodTuition = sumTuitionByBillingPeriod(periodPayments, financeMonthKey)
+    - sumTuitionByBillingPeriod(periodRefunds, financeMonthKey);
+  const periodRevenue = billedPeriodTuition + otherRevenue; // Allocated receipts, not unpaid invoice accrual.
+  const advanceCollected = sumAdvanceTuitionCollected(monthPayments, financeMonthKey);
   const refundTotal = adjustments.reduce((sum, item) => {
     const refundDate = toVietnamDateKey(item.created_at);
 
@@ -728,6 +759,9 @@ export default function DashboardPage() {
 
   const previousMonthRevenue =
     previousMonthTuitionRevenue + previousMonthOtherRevenue;
+  const previousPeriodRevenue = sumTuitionByBillingPeriod(periodPayments, previousMonthKey)
+    - sumTuitionByBillingPeriod(periodRefunds, previousMonthKey)
+    + previousMonthOtherRevenue;
 
   const revenueChange =
     previousMonthRevenue > 0
@@ -1124,14 +1158,14 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-xl font-black">📊 Phân tích hoạt động</h2>
           <p className="mt-1 text-sm text-slate-400">
-            So sánh nhanh với tháng trước
+            So sánh tiền thực thu và doanh thu được phân bổ theo kỳ học
           </p>
         </div>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <div className="rounded-2xl bg-slate-50 p-5">
             <div className="text-sm font-bold text-slate-500">
-              💰 Thu tháng này / tháng trước
+              💰 Tiền thực thu tháng này / tháng trước
             </div>
             <div className="mt-2 grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-white p-3 shadow-sm">
@@ -1159,6 +1193,11 @@ export default function DashboardPage() {
               {revenueChange === null
                 ? "Chưa đủ dữ liệu để tính % thay đổi"
                 : `${revenueChange >= 0 ? "↑" : "↓"} ${Math.abs(revenueChange).toFixed(1)}% so với tháng trước`}
+            </div>
+            <div className="mt-3 border-t border-slate-200 pt-3 text-sm text-slate-600">
+              <div className="font-bold">Doanh thu theo kỳ (học phí đã thu + thu khác)</div>
+              {periodLoadError ? <div className="text-rose-600">Không tải được số liệu theo kỳ học.</div> :
+                <div className="mt-1 flex flex-wrap justify-between gap-2"><b>{money(periodRevenue)}</b><span>Tháng trước: {money(previousPeriodRevenue)}</span></div>}
             </div>
           </div>
 
@@ -1274,7 +1313,7 @@ export default function DashboardPage() {
         </section>
 
         {/* KPI */}
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {[
           {
             icon: "👥",
@@ -1292,10 +1331,17 @@ export default function DashboardPage() {
           },
           {
             icon: "💰",
-            label: "Thu tháng này",
+            label: "Thu thực tế tháng này",
             value: money(revenue),
             suffix: `${monthPayments.length} giao dịch`,
             href: "/tuition",
+          },
+          {
+            icon: "📆",
+            label: "Doanh thu theo kỳ",
+            value: periodLoadError ? "—" : money(periodRevenue),
+            suffix: "Học phí kỳ đã thu + thu khác",
+            href: "/reports",
           },
           {
             icon: "💸",
@@ -1342,7 +1388,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-black">💵 Tình hình tài chính</h2>
               <p className="mt-1 text-sm text-slate-400">
-                Thu − Chi = Còn lại
+                Tiền thực thu − hoàn tiền − chi = dòng tiền còn lại
               </p>
             </div>
 
@@ -1354,12 +1400,20 @@ export default function DashboardPage() {
             </Link>
           </div>
 
-          <div className="mt-7 grid gap-4 sm:grid-cols-3">
+          <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl bg-gradient-to-br from-emerald-50 to-white p-5 shadow-[inset_0_1px_0_white,0_7px_18px_rgba(35,50,75,.05)]">
-              <div className="text-sm font-semibold text-slate-500">Tổng thu</div>
+              <div className="text-sm font-semibold text-slate-500">Tiền thực thu</div>
               <div className="mt-2 text-xl font-black text-emerald-700">
                 {loading ? "—" : money(revenue)}
               </div>
+            </div>
+
+            <div className="rounded-2xl bg-gradient-to-br from-indigo-50 to-white p-5 shadow-[inset_0_1px_0_white,0_7px_18px_rgba(35,50,75,.05)]">
+              <div className="text-sm font-semibold text-slate-500">Doanh thu theo kỳ học</div>
+              <div className="mt-2 text-xl font-black text-indigo-700">
+                {loading || periodLoadError ? "—" : money(periodRevenue)}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">Học phí đã thu theo kỳ − hoàn theo kỳ + thu khác</div>
             </div>
 
             <div className="rounded-2xl bg-gradient-to-br from-rose-50 to-white p-5 shadow-[inset_0_1px_0_white,0_7px_18px_rgba(35,50,75,.05)]">
@@ -1371,7 +1425,7 @@ export default function DashboardPage() {
 
             <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-white p-5 shadow-[inset_0_1px_0_white,0_7px_18px_rgba(35,50,75,.05)]">
               <div className="text-sm font-semibold text-slate-500">
-                Còn lại
+                Còn lại (dòng tiền)
               </div>
               <div
                 className={`mt-2 text-xl font-black ${
@@ -1382,6 +1436,7 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+          <p className="mt-3 text-sm text-slate-600">⏭ Thu trước các kỳ sau trong tháng: <b>{loading ? "—" : money(advanceCollected)}</b> (đã gồm trong tiền thực thu, không tính vào doanh thu kỳ này).</p>
         </div>
 
         {/* BRANCH */}

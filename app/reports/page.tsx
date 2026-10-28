@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { filterEffectiveSources } from "@/lib/finance/ledger";
+import { loadAllPages } from "@/lib/finance/report-pagination";
+import { isVoidedDuplicateTuition, linkedTuition, sumAdvanceTuitionCollected, sumTuitionByBillingPeriod } from "@/lib/finance/tuition-period";
+import type { TuitionRelation } from "@/lib/finance/tuition-period";
 import { vietnamCurrentMonth, toVietnamDateKey } from "@/lib/vietnam-date";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
@@ -14,9 +17,7 @@ type Payment = {
   payment_method: string | null;
   transfer_account: "H" | "A" | "S" | "V" | null;
   payment_date: string | null;
-  tuition: {
-    branch_id: string | null;
-  } | null;
+  tuition: TuitionRelation | TuitionRelation[] | null;
 };
 
 type Expense = {
@@ -40,9 +41,7 @@ type Adjustment = {
   amount: number;
   action: "reserve" | "refund" | "carry_forward" | "cancel" | "none";
   created_at: string;
-  tuition: {
-    branch_id: string | null;
-  } | null;
+  tuition: TuitionRelation | TuitionRelation[] | null;
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -107,10 +106,13 @@ export default function ReportsPage() {
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [periodPayments, setPeriodPayments] = useState<Payment[]>([]);
+  const [periodRefunds, setPeriodRefunds] = useState<Adjustment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [otherRevenues, setOtherRevenues] = useState<OtherRevenue[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [showTransferBreakdown, setShowTransferBreakdown] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -118,15 +120,19 @@ export default function ReportsPage() {
     const range = reportPeriodRange(mode, period);
 
     if (!range) {
+      setLoadError("Kỳ báo cáo không hợp lệ.");
       setLoading(false);
       return;
     }
 
     setLoading(true);
+    setLoadError("");
 
     const [
       { data: branchData, error: branchError },
       { data: paymentData, error: paymentError },
+      { data: periodPaymentData, error: periodPaymentError },
+      { data: periodRefundData, error: periodRefundError },
       { data: expenseData, error: expenseError },
       { data: adjustmentData, error: adjustmentError },
       { data: otherRevenueData, error: otherRevenueError },
@@ -134,7 +140,7 @@ export default function ReportsPage() {
     ] = await Promise.all([
       supabase.from("branches").select("id,name").order("name"),
 
-      supabase
+      loadAllPages(async (from, to) => await supabase
         .from("tuition_payments")
         .select(`
           id,
@@ -144,11 +150,31 @@ export default function ReportsPage() {
           payment_date,
           tuition:tuition_id (
             branch_id,
+            billing_month,
             note
           )
         `)
         .gte("payment_date", range.start)
-        .lt("payment_date", range.end),
+        .lt("payment_date", range.end)
+        .order("id")
+        .range(from, to)),
+
+      // Tuition assigned to the selected lesson period, independently of payment date.
+      loadAllPages(async (from, to) => await supabase
+        .from("tuition_payments")
+        .select("id,amount,payment_date,tuition:tuition_id!inner(branch_id,billing_month,note)")
+        .gte("tuition.billing_month", range.start)
+        .lt("tuition.billing_month", range.end)
+        .order("id")
+        .range(from, to)),
+
+      // Period refunds reverse the original lesson period, not the refund date.
+      supabase
+        .from("tuition_adjustments")
+        .select("id,amount,action,created_at,tuition:tuition_id!inner(branch_id,billing_month,note)")
+        .eq("action", "refund")
+        .gte("tuition.billing_month", range.start)
+        .lt("tuition.billing_month", range.end),
 
       supabase
         .from("expenses")
@@ -164,7 +190,9 @@ export default function ReportsPage() {
           action,
           created_at,
           tuition:tuition_id (
-            branch_id
+            branch_id,
+            billing_month,
+            note
           )
         `)
         .eq("action", "refund")
@@ -184,48 +212,60 @@ export default function ReportsPage() {
     if (requestId !== loadRequestRef.current) return;
 
     if (branchError) {
+      setLoadError(branchError.message);
       alert(branchError.message);
       setLoading(false);
       return;
     }
 
     if (paymentError) {
+      setLoadError(paymentError.message);
       alert(paymentError.message);
       setLoading(false);
       return;
     }
 
+    if (periodPaymentError || periodRefundError) {
+      const message = (periodPaymentError || periodRefundError)?.message ?? "Không thể tải doanh thu theo kỳ học.";
+      setLoadError(message);
+      alert(message);
+      setLoading(false);
+      return;
+    }
+
     if (expenseError) {
+      setLoadError(expenseError.message);
       alert(expenseError.message);
       setLoading(false);
       return;
     }
 
     if (adjustmentError) {
+      setLoadError(adjustmentError.message);
       alert(adjustmentError.message);
       setLoading(false);
       return;
     }
 
     if (otherRevenueError) {
+      setLoadError(otherRevenueError.message);
       alert(otherRevenueError.message);
       setLoading(false);
       return;
     }
 
     if (sourceReversalError) {
+      setLoadError(sourceReversalError.message);
       alert(sourceReversalError.message);
       setLoading(false);
       return;
     }
 
     setBranches(branchData ?? []);
-    // Voided duplicate entries remain in immutable audit history, not revenue.
-    setPayments((paymentData ?? []).filter((payment) => {
-      const relation = payment.tuition as unknown as { note?: string | null } | { note?: string | null }[] | null;
-      const tuition = Array.isArray(relation) ? relation[0] : relation;
-      return !tuition?.note?.includes("[VOID_DUPLICATE_TRANSFER]");
-    }) as unknown as Payment[]);
+    // Void duplicate payments remain in the audit log but never inflate totals.
+    setPayments(((paymentData ?? []) as unknown as Payment[]).filter((item) => !isVoidedDuplicateTuition(item)));
+    setPeriodPayments(((periodPaymentData ?? []) as unknown as Payment[]).filter((item) => !isVoidedDuplicateTuition(item)));
+    setPeriodRefunds(((periodRefundData ?? []) as unknown as Adjustment[]).filter((item) => !isVoidedDuplicateTuition(item)));
     setExpenses(filterEffectiveSources("expense", expenseData ?? [], sourceReversalData ?? []));
     setOtherRevenues(filterEffectiveSources("other_revenue", (otherRevenueData ?? []) as OtherRevenue[], sourceReversalData ?? []));
     setAdjustments((adjustmentData ?? []) as unknown as Adjustment[]);
@@ -275,7 +315,7 @@ export default function ReportsPage() {
 
       if (
         branchFilter &&
-        item.tuition?.branch_id !== branchFilter
+        linkedTuition(item)?.branch_id !== branchFilter
       ) {
         return false;
       }
@@ -300,7 +340,7 @@ export default function ReportsPage() {
     return adjustments.filter((item) => {
       if (!adjustmentInPeriod(item)) return false;
 
-      if (branchFilter && item.tuition?.branch_id !== branchFilter) {
+      if (branchFilter && linkedTuition(item)?.branch_id !== branchFilter) {
         return false;
       }
 
@@ -339,8 +379,13 @@ export default function ReportsPage() {
     0
   );
 
-  const netRevenue = totalThu - totalRefund;
-  const remaining = netRevenue - totalChi;
+  const netCashIn = totalThu - totalRefund;
+  const remaining = netCashIn - totalChi;
+  // Collected tuition assigned by billing_month; unpaid tuition remains a separate receivable.
+  const periodTuitionThu = sumTuitionByBillingPeriod(periodPayments, period, branchFilter);
+  const periodTuitionRefund = sumTuitionByBillingPeriod(periodRefunds, period, branchFilter);
+  const periodRevenue = periodTuitionThu - periodTuitionRefund + otherThu;
+  const advanceCollected = sumAdvanceTuitionCollected(filteredPayments, period);
 
   const cash = filteredPayments
     .filter((item) => item.payment_method === "cash")
@@ -377,12 +422,13 @@ export default function ReportsPage() {
 
   const branchSummary = useMemo(() => {
     return branches
+      .filter((branch) => !branchFilter || branch.id === branchFilter)
       .map((branch) => {
         const tuitionThu = payments
           .filter(
             (item) =>
               paymentInPeriod(item) &&
-              item.tuition?.branch_id === branch.id
+              linkedTuition(item)?.branch_id === branch.id
           )
           .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -398,12 +444,15 @@ export default function ReportsPage() {
           .reduce((sum, item) => sum + Number(item.amount), 0);
 
         const thu = tuitionThu + otherThu;
+        const earned = sumTuitionByBillingPeriod(periodPayments, period, branch.id)
+          - sumTuitionByBillingPeriod(periodRefunds, period, branch.id) + otherThu;
+        const advance = sumAdvanceTuitionCollected(payments, period, branch.id);
 
         const refund = adjustments
           .filter(
             (item) =>
               adjustmentInPeriod(item) &&
-              item.tuition?.branch_id === branch.id
+              linkedTuition(item)?.branch_id === branch.id
           )
           .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -418,6 +467,8 @@ export default function ReportsPage() {
         return {
           ...branch,
           thu,
+          earned,
+          advance,
           otherThu,
           refund,
           chi,
@@ -425,11 +476,14 @@ export default function ReportsPage() {
         };
       })
       .filter(
-        (item) => item.thu !== 0 || item.refund !== 0 || item.chi !== 0
+        (item) => item.thu !== 0 || item.earned !== 0 || item.refund !== 0 || item.chi !== 0
       );
   }, [
     branches,
+    branchFilter,
     payments,
+    periodPayments,
+    periodRefunds,
     otherRevenues,
     adjustments,
     expenses,
@@ -443,7 +497,7 @@ export default function ReportsPage() {
   const unassignedTuitionThu = payments
     .filter(
       (item) =>
-        paymentInPeriod(item) && !item.tuition?.branch_id
+        paymentInPeriod(item) && !linkedTuition(item)?.branch_id
     )
     .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -460,6 +514,9 @@ export default function ReportsPage() {
 
   const unassignedThu =
     unassignedTuitionThu + unassignedOtherThu;
+  const unassignedEarned = sumTuitionByBillingPeriod(periodPayments.filter((item) => !linkedTuition(item)?.branch_id), period)
+    - sumTuitionByBillingPeriod(periodRefunds.filter((item) => !linkedTuition(item)?.branch_id), period) + unassignedOtherThu;
+  const unassignedAdvance = sumAdvanceTuitionCollected(payments.filter((item) => !linkedTuition(item)?.branch_id), period);
 
   const unassignedChi = expenses
     .filter(
@@ -469,7 +526,7 @@ export default function ReportsPage() {
 
   const unassignedRefund = adjustments
     .filter(
-      (item) => adjustmentInPeriod(item) && !item.tuition?.branch_id
+      (item) => adjustmentInPeriod(item) && !linkedTuition(item)?.branch_id
     )
     .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -506,7 +563,7 @@ export default function ReportsPage() {
           </h1>
 
           <p className="mt-2 text-slate-400">
-            Tổng hợp thu, chi và kết quả kinh doanh của CLB
+            Tách tiền thực thu theo ngày với doanh thu học phí theo kỳ học (số đã thu); công nợ theo dõi riêng
           </p>
         </div>
 
@@ -596,12 +653,14 @@ export default function ReportsPage() {
         <div className="ui-card p-12 text-center text-slate-400">
           Đang tải báo cáo...
         </div>
+      ) : loadError ? (
+        <div className="ui-card p-6 text-rose-700">Không tải được báo cáo: {loadError} <button className="ml-3 font-bold underline" onClick={() => void loadData()}>Thử lại</button></div>
       ) : (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             <div className="ui-card p-6">
               <div className="text-sm font-bold text-slate-400">
-                💰 TỔNG THU
+                💰 TIỀN THỰC THU
               </div>
               <div className="mt-2 text-3xl font-black text-emerald-600">
                 {money(totalThu)}
@@ -613,7 +672,7 @@ export default function ReportsPage() {
 
             <div className="ui-card p-6">
               <div className="text-sm font-bold text-slate-400">
-                💸 HOÀN TIỀN
+                💸 HOÀN TIỀN THỰC TẾ
               </div>
               <div className="mt-2 text-3xl font-black text-amber-600">
                 {money(totalRefund)}
@@ -625,14 +684,26 @@ export default function ReportsPage() {
 
             <div className="ui-card p-6">
               <div className="text-sm font-bold text-slate-400">
-                💼 DOANH THU RÒNG
+                💼 THU RÒNG (DÒNG TIỀN)
               </div>
               <div className="mt-2 text-3xl font-black text-blue-600">
-                {money(netRevenue)}
+                {money(netCashIn)}
               </div>
               <div className="mt-2 text-sm text-slate-400">
-                Tổng thu − Hoàn tiền
+                Thực thu − Hoàn tiền thực tế
               </div>
+            </div>
+
+            <div className="ui-card p-6">
+              <div className="text-sm font-bold text-slate-400">📆 DOANH THU THEO KỲ HỌC</div>
+              <div className="mt-2 text-3xl font-black text-indigo-700">{money(periodRevenue)}</div>
+              <div className="mt-2 text-sm text-slate-400">Học phí đã thu theo tháng học − hoàn theo kỳ + thu khác</div>
+            </div>
+
+            <div className="ui-card p-6">
+              <div className="text-sm font-bold text-slate-400">⏭ THU TRƯỚC KỲ SAU</div>
+              <div className="mt-2 text-3xl font-black text-cyan-700">{money(advanceCollected)}</div>
+              <div className="mt-2 text-sm text-slate-400">Đã nằm trong thực thu, chưa tính vào doanh thu kỳ đang xem</div>
             </div>
 
             <div className="ui-card p-6">
@@ -649,7 +720,7 @@ export default function ReportsPage() {
 
             <div className="ui-card p-6">
               <div className="text-sm font-bold text-slate-400">
-                📈 CÒN LẠI
+                📈 CÒN LẠI (DÒNG TIỀN)
               </div>
               <div
                 className={`mt-2 text-3xl font-black ${
@@ -661,7 +732,7 @@ export default function ReportsPage() {
                 {money(remaining)}
               </div>
               <div className="mt-2 text-sm text-slate-400">
-                Doanh thu ròng − Chi
+                Thu ròng − Chi
               </div>
             </div>
           </section>
@@ -726,13 +797,12 @@ export default function ReportsPage() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-400">
-                Tổng thu (gồm học phí + thu khác) − Hoàn − Chi = Còn lại
+                Thực thu − hoàn tiền − chi = dòng tiền còn lại; doanh thu theo kỳ được tính riêng
               </p>
             </div>
 
             {branchSummary.length === 0 &&
-            unassignedThu === 0 &&
-            unassignedChi === 0 ? (
+            (branchFilter || (unassignedThu === 0 && unassignedEarned === 0 && unassignedChi === 0)) ? (
               <div className="p-10 text-center text-slate-400">
                 Chưa có dữ liệu trong kỳ này.
               </div>
@@ -742,7 +812,9 @@ export default function ReportsPage() {
                   <thead>
                     <tr className="border-b border-slate-100 text-left text-sm text-slate-400">
                       <th className="p-4">Cơ sở</th>
-                      <th className="p-4 text-right">Tổng thu</th>
+                      <th className="p-4 text-right">Thực thu</th>
+                      <th className="p-4 text-right">Theo kỳ học</th>
+                      <th className="p-4 text-right">Thu trước</th>
                       <th className="p-4 text-right">Thu khác</th>
                       <th className="p-4 text-right">Hoàn</th>
                       <th className="p-4 text-right">Chi</th>
@@ -765,6 +837,8 @@ export default function ReportsPage() {
                         <td className="p-4 text-right font-bold text-emerald-600">
                           {money(branch.thu)}
                         </td>
+                        <td className="p-4 text-right font-bold text-indigo-700">{money(branch.earned)}</td>
+                        <td className="p-4 text-right font-bold text-cyan-700">{money(branch.advance)}</td>
 
                         <td className="p-4 text-right font-bold text-cyan-600">
                           {money(branch.otherThu)}
@@ -790,7 +864,8 @@ export default function ReportsPage() {
                       </tr>
                     ))}
 
-                    {(unassignedThu > 0 ||
+                    {!branchFilter && (unassignedThu !== 0 ||
+                      unassignedEarned !== 0 ||
                       unassignedRefund > 0 ||
                       unassignedChi > 0) && (
                       <tr className="border-b border-slate-50 bg-slate-50">
@@ -801,6 +876,8 @@ export default function ReportsPage() {
                         <td className="p-4 text-right font-bold text-emerald-600">
                           {money(unassignedThu)}
                         </td>
+                        <td className="p-4 text-right font-bold text-indigo-700">{money(unassignedEarned)}</td>
+                        <td className="p-4 text-right font-bold text-cyan-700">{money(unassignedAdvance)}</td>
 
                         <td className="p-4 text-right font-bold text-cyan-600">
                           {money(unassignedOtherThu)}
@@ -830,6 +907,8 @@ export default function ReportsPage() {
                       <td className="p-4 text-right font-black text-emerald-600">
                         {money(totalThu)}
                       </td>
+                      <td className="p-4 text-right font-black text-indigo-700">{money(periodRevenue)}</td>
+                      <td className="p-4 text-right font-black text-cyan-700">{money(advanceCollected)}</td>
 
                       <td className="p-4 text-right font-black text-cyan-600">
                         {money(otherThu)}
