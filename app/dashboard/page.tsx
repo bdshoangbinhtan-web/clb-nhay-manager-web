@@ -233,12 +233,6 @@ export default function DashboardPage() {
           .select("id,student_code,full_name,status,created_at")
           .order("created_at", { ascending: false }),
         supabase
-          .from("tuition_adjustments")
-          .select("id,amount,action,created_at,tuition:tuition_id!inner(billing_month,branch_id,note)")
-          .eq("action", "refund")
-          .gte("tuition.billing_month", previousMonthStart)
-          .lt("tuition.billing_month", nextMonthStart),
-        supabase
           .from("classes")
           .select(
             "id,name,branch_id,status,monthly_fee,schedule_days,schedule_start,schedule_end"
@@ -272,6 +266,12 @@ export default function DashboardPage() {
           .gte("created_at", `${currentMonthStart}T00:00:00+07:00`)
           .lt("created_at", `${nextMonthStart}T00:00:00+07:00`)
           .order("created_at", { ascending: false }),
+        supabase
+          .from("tuition_adjustments")
+          .select("id,amount,action,created_at,tuition:tuition_id!inner(billing_month,branch_id,note)")
+          .eq("action", "refund")
+          .gte("tuition.billing_month", previousMonthStart)
+          .lt("tuition.billing_month", nextMonthStart),
 
         supabase
           .from("class_students")
