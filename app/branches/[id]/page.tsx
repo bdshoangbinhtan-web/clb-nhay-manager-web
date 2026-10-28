@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { activeStaffRole } from "@/lib/active-staff-role";
+import { compareStudentsNewestFirst } from "@/lib/student-list-order";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type ClassItem = {
@@ -27,6 +28,9 @@ type Student = {
   id: string;
   student_code: string;
   full_name: string;
+  join_date: string | null;
+  created_at: string | null;
+  parent_phone: string | null;
 };
 
 type Teacher = {
@@ -148,7 +152,7 @@ export default function ClassDetailPage() {
 
         supabase
           .from("class_students")
-          .select("student_id, students!inner(id,student_code,full_name,status)")
+          .select("student_id, students!inner(id,student_code,full_name,status,join_date,created_at,parent_phone)")
           .eq("class_id", classId)
           .eq("status", "active")
           .eq("students.status", "active"),
@@ -171,7 +175,8 @@ export default function ClassDetailPage() {
 
     const studentList = (classStudents ?? [])
       .flatMap((row: any) => row.students ?? [])
-      .filter((student: Student) => student?.id && student?.full_name);
+      .filter((student: Student) => student?.id && student?.full_name)
+      .sort(compareStudentsNewestFirst);
 
     setStudents(studentList);
 
@@ -397,10 +402,15 @@ export default function ClassDetailPage() {
                   key={student.id}
                   className="rounded-2xl bg-slate-50 px-4 py-3 font-bold text-slate-800"
                 >
-                  {student.full_name}
-                  <span className="ml-2 text-xs font-black text-blue-600">
-                    {student.student_code}
-                  </span>
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span>{student.full_name}</span>
+                    {student.parent_phone?.trim() ? (
+                      <span className="whitespace-nowrap text-sm font-semibold text-slate-600">📞 {student.parent_phone}</span>
+                    ) : null}
+                    <span className="text-xs font-black text-blue-600">
+                      {student.student_code}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
