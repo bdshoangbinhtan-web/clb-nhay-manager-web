@@ -248,6 +248,7 @@ export default function DashboardPage() {
           .select("id,amount,payment_date,payment_method,tuition:tuition_id(billing_month,branch_id,note)")
           .gte("payment_date", previousMonthStart)
           .lt("payment_date", nextMonthStart)
+          .order("payment_date", { ascending: false })
           .order("id")
           .range(from, to)),
         loadAllPages(async (from, to) => await supabase
