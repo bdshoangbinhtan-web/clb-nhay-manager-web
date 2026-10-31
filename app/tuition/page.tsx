@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
+import { formatTuitionCollectionDate, getTuitionCollectionDates } from "@/lib/tuition/payment-dates";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import { usePrivacyView } from "@/components/layout/privacy-view-context";
 import { PaymentMethodFields, type PaymentMethod, type TransferAccount } from "@/components/payment-method-fields";
@@ -129,6 +130,22 @@ function monthLabel(value: string) {
   if (!value) return "";
   const [y, m] = value.split("-");
   return `Tháng ${Number(m)}/${y}`;
+}
+
+function CollectionDatesDisplay({ dates }: { dates: string[] }) {
+  if (dates.length === 0) {
+    return <span className="text-slate-400">—</span>;
+  }
+
+  return (
+    <span className="inline-flex flex-col gap-1">
+      {dates.map((date) => (
+        <span key={date} className="whitespace-nowrap">
+          {formatTuitionCollectionDate(date)}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function lessonsInMonth(
@@ -1392,6 +1409,15 @@ export default function TuitionPage() {
     return paymentsByTuition.get(tuitionId) ?? [];
   }
 
+  // Ngày thu là ngày giao dịch thực tế, không phải tháng học phí.
+  function datesForTuition(item: Tuition | undefined) {
+    return getTuitionCollectionDates(
+      item,
+      item ? paymentsForTuition(item.id) : [],
+      !privacyView
+    );
+  }
+
   const filteredTuition = useMemo(() => {
     const billingDate = `${billingMonth.slice(0, 7)}-01`;
     const q = search.trim().toLowerCase();
@@ -2327,11 +2353,12 @@ export default function TuitionPage() {
                   (monthKey(membership.end_date) ?? "9999-12") >= billingMonth;
                 const isWaived = !!item?.waived;
                 const fullyPaid = !!item && !isWaived && remain <= 0 && due > 0;
+                const collectionDates = datesForTuition(item);
 
                 return (
                   <div
                     key={student.id}
-                    className="grid gap-4 p-5 lg:grid-cols-[minmax(280px,1fr)_430px_170px] lg:items-center"
+                    className="grid gap-4 p-5 xl:grid-cols-[minmax(220px,1fr)_minmax(490px,560px)_170px] xl:items-center"
                   >
                     <div className="min-w-0">
                       <div className="font-black text-slate-800">
@@ -2353,7 +2380,7 @@ export default function TuitionPage() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-6 text-sm">
+                    <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
                       <div>
                         <div className="text-xs text-slate-400">Phải thu</div>
                         <div className="mt-1 font-black">
@@ -2372,6 +2399,13 @@ export default function TuitionPage() {
                         <div className="text-xs text-slate-400">Còn lại</div>
                         <div className="mt-1 font-black text-rose-500">
                           {money(remain)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs text-slate-400">Ngày thu</div>
+                        <div className="mt-1 font-black text-blue-700" title="Ngày nhận tiền thực tế, kể cả học phí thu trước">
+                          <CollectionDatesDisplay dates={collectionDates} />
                         </div>
                       </div>
                     </div>
@@ -2464,6 +2498,7 @@ export default function TuitionPage() {
                   item.class_id === row.classItem.id &&
                   monthKey(item.billing_month) === period
               );
+              const collectionDates = datesForTuition(existingTuition);
               const canDeleteExisting = existingTuition && Number(existingTuition.amount_paid || 0) === 0 &&
                 paymentsForTuition(existingTuition.id).length === 0 &&
                 !tuitionAdjustments.some((a) => a.tuition_id === existingTuition.id || a.target_tuition_id === existingTuition.id);
@@ -2479,10 +2514,11 @@ export default function TuitionPage() {
                       {row.due.paidThroughMonth && <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Đã đóng đến {monthLabel(row.due.paidThroughMonth)}</span>}
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs sm:min-w-[330px]">
+                  <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4 xl:min-w-[440px]">
                     <div><div className="text-slate-400">Phải thu</div><strong className="mt-1 block text-sm">{money(row.suggestedAmount)}</strong></div>
                     <div><div className="text-slate-400">Đã thu</div><strong className="mt-1 block text-sm text-emerald-700">{money(row.due.amountPaid)}</strong></div>
                     <div><div className="text-slate-400">Còn lại</div><strong className="mt-1 block text-sm text-rose-700">{money(row.due.remaining > 0 ? row.due.remaining : row.suggestedAmount)}</strong></div>
+                    <div><div className="text-slate-400">Ngày thu</div><strong className="mt-1 block text-sm text-blue-700"><CollectionDatesDisplay dates={collectionDates} /></strong></div>
                   </div>
                   <div className="flex flex-wrap shrink-0 justify-end gap-2">
                     <button type="button" className="ui-btn ui-btn-primary min-h-11" onClick={() => openCollectionForDueRow(row)}>Thu tiền</button>
@@ -2564,6 +2600,7 @@ export default function TuitionPage() {
                   <th className="p-4 text-right">Phải thu</th>
                   <th className="p-4 text-right">Đã thu</th>
                   <th className="p-4 text-right">Còn lại</th>
+                  <th className="p-4">Ngày thu</th>
                   <th className="p-4">Trạng thái</th>
                   <th className="p-4"></th>
                 </tr>
@@ -2608,6 +2645,10 @@ export default function TuitionPage() {
 
                       <td className="p-4 text-right font-black">
                         {money(remain)}
+                      </td>
+
+                      <td className="p-4 font-bold text-blue-700" title="Ngày nhận tiền thực tế, kể cả thu trước tháng sau">
+                        <CollectionDatesDisplay dates={datesForTuition(item)} />
                       </td>
 
                       <td className="p-4">
