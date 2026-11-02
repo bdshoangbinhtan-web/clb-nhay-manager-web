@@ -39,6 +39,19 @@ export default function FinancePage() {
   const [openingNote, setOpeningNote] = useState("");
   const [showTransferBreakdown, setShowTransferBreakdown] = useState(false);
 
+  // A financial monitor finding can open the exact day and branch for review.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const dateParam = params.get("date");
+    const branchParam = params.get("branch");
+    if (dateParam && /^\\d{4}-\\d{2}-\\d{2}$/.test(dateParam) && dateParam <= vietnamToday()) {
+      setDate(dateParam);
+    }
+    if (branchParam && /^[0-9a-f-]{36}$/i.test(branchParam)) {
+      setBranchFilter(branchParam);
+    }
+  }, []);
+
   const activeBranchId = role === "manager" ? myBranchId : branchFilter || null;
 
   const loadData = useCallback(async () => {
