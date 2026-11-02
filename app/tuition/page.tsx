@@ -17,6 +17,7 @@ import {
   determineActiveClasses,
   getFirstUnpaidMonth,
   getMembershipTuitionStatus,
+  getClassTuitionRowEligibility,
   monthKey,
   periodDate,
   TUITION_TRACKING_START_MONTH,
@@ -2342,15 +2343,32 @@ export default function TuitionPage() {
                 const membership = activeMemberships.find((entry) =>
                   entry.student_id === student.id && entry.class_id === selectedTuitionClass.id
                 );
+                const eligibility = getClassTuitionRowEligibility(
+                  student.status, selectedTuitionClass.status, membership, billingMonth
+                );
+                const canCollectPeriod = eligibility.canCollectPeriod;
                 const effectiveItem = item && tuitionForDueStatus.find((entry) => entry.id === item.id);
-                const due = Number(effectiveItem?.effective_amount_due ?? item?.amount_due ?? (
-                  membership ? suggestedTuitionAmount(student, selectedTuitionClass, billingMonth, membership.start_date) : 0
-                ));
+                // For an untracked/inactive student, do not display the class fee as a
+                // recorded debt. An existing tuition record must keep its real amounts.
+                const estimatedDue = canCollectPeriod && membership
+                  ? suggestedTuitionAmount(student, selectedTuitionClass, billingMonth, membership.start_date)
+                  : 0;
+                const due = Number(effectiveItem?.effective_amount_due ?? item?.amount_due ?? estimatedDue);
                 const paid = Number(effectiveItem?.effective_amount_paid ?? item?.amount_paid ?? 0);
                 const remain = Math.max(due - paid, 0);
-                const canCollectPeriod = billingMonth >= TUITION_TRACKING_START_MONTH &&
-                  !!membership && student.status === "active" &&
-                  (monthKey(membership.end_date) ?? "9999-12") >= billingMonth;
+                const showAmounts = !!item || canCollectPeriod;
+                const estimatedOnly = !item && canCollectPeriod;
+                const statusLabel = eligibility.status === "student_inactive"
+                  ? "Học viên không hoạt động"
+                  : eligibility.status === "class_inactive"
+                    ? "Lớp không hoạt động"
+                    : eligibility.status === "before_membership"
+                      ? "Chưa đến tháng bắt đầu học"
+                      : eligibility.status === "after_membership"
+                        ? "Đã kết thúc học lớp"
+                        : eligibility.status === "pre_tracking"
+                          ? "Kỳ chưa theo dõi"
+                          : "Chưa có đăng ký lớp hiệu lực";
                 const isWaived = !!item?.waived;
                 const fullyPaid = !!item && !isWaived && remain <= 0 && due > 0;
                 const collectionDates = datesForTuition(item);
@@ -2374,17 +2392,19 @@ export default function TuitionPage() {
                           ? `Kỳ ${monthLabel(billingMonth)} · đã đóng từ lớp trước khi chuyển`
                           : item
                           ? `Kỳ ${monthLabel(billingMonth)}`
-                          : viewingPreLaunchMonth
-                            ? "Dữ liệu lịch sử · không tự tính công nợ"
-                            : `Kỳ ${monthLabel(billingMonth)} · chưa phát sinh thanh toán`}
+                          : !canCollectPeriod
+                            ? `Kỳ ${monthLabel(billingMonth)} · chưa có học phí ghi nhận, không tính công nợ`
+                            : viewingPreLaunchMonth
+                              ? "Dữ liệu lịch sử · không tự tính công nợ"
+                              : `Kỳ ${monthLabel(billingMonth)} · chưa ghi nhận thu tiền`}
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
                       <div>
-                        <div className="text-xs text-slate-400">Phải thu</div>
+                        <div className="text-xs text-slate-400">{estimatedOnly ? "Dự kiến phải thu" : "Phải thu"}</div>
                         <div className="mt-1 font-black">
-                          {money(due)}
+                          {showAmounts ? money(due) : "—"}
                         </div>
                       </div>
 
@@ -2396,9 +2416,9 @@ export default function TuitionPage() {
                       </div>
 
                       <div>
-                        <div className="text-xs text-slate-400">Còn lại</div>
-                        <div className="mt-1 font-black text-rose-500">
-                          {money(remain)}
+                        <div className="text-xs text-slate-400">{estimatedOnly ? "Dự kiến chưa thu" : "Còn lại"}</div>
+                        <div className={`mt-1 font-black ${estimatedOnly ? "text-slate-600" : "text-rose-500"}`}>
+                          {showAmounts ? money(remain) : "—"}
                         </div>
                       </div>
 
@@ -2419,6 +2439,13 @@ export default function TuitionPage() {
                         <span className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-black text-emerald-700">
                           🟢 {item?.covered_by_transfer ? "Đã đóng · chuyển lớp" : billingMonth > currentMonth ? "Đã đóng trước" : "Đã đóng đủ"}
                         </span>
+                      ) : !canCollectPeriod ? (
+                        <span
+                          className="rounded-full bg-slate-100 px-4 py-2 text-center text-sm font-black text-slate-600"
+                          title="Không tự tính nợ mới. Các phiếu thu và học phí đã ghi nhận (nếu có) vẫn được giữ nguyên."
+                        >
+                          ⚪ {statusLabel}
+                        </span>
                       ) : item && (billingMonth <= currentMonth || canCollectPeriod) ? (
                         <button
                           type="button"
@@ -2437,7 +2464,7 @@ export default function TuitionPage() {
                         </button>
                       ) : (
                         <span className="rounded-full bg-amber-100 px-4 py-2 text-sm font-black text-amber-700">
-                          🟡 Chưa theo dõi
+                          🟡 Chưa phát sinh học phí
                         </span>
                       )}
 
