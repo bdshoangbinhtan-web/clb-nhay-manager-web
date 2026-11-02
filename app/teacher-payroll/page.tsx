@@ -1466,16 +1466,16 @@ export default function TeacherPayrollPage() {
                         <div className="flex flex-wrap items-center justify-between gap-4">
                           <div>
                             <div className="text-sm font-black text-emerald-800">
-                              🎁 PHỤ CẤP
+                              🎁 PHỤ CẤP / BỔ SUNG LƯƠNG
                             </div>
                             <div className="mt-1 text-xs font-semibold text-emerald-700/80">
-                              Cộng riêng cho giáo viên trong kỳ lương này.
+                              Dùng cho tiền chuyên cần hoặc bù lương những buổi tháng trước chưa chấm công. Khoản này được cộng vào tổng phải trả.
                             </div>
                           </div>
 
                           <div className="min-w-[220px]">
                             <div className="text-xs font-black text-slate-400">
-                              SỐ TIỀN PHỤ CẤP
+                              TIỀN PHỤ CẤP / BÙ LƯƠNG
                             </div>
 
                             {locked ? (
@@ -1523,7 +1523,7 @@ export default function TeacherPayrollPage() {
                                   e.target.value
                                 )
                               }
-                              placeholder="Ví dụ: dạy đủ buổi, hỗ trợ sự kiện..."
+                              placeholder="Ví dụ: chuyên cần tháng 10, bù 2 buổi tháng 9 chưa chấm công..."
                               className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-emerald-500"
                             />
                           </div>
