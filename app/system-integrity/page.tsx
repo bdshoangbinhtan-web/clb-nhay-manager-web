@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { getIntegrityGuide } from "@/lib/system-integrity-guide";
 
 type Severity = "info" | "warning" | "error" | "critical";
 type IssueStatus = "open" | "resolved" | "all";
@@ -82,17 +83,17 @@ const categoryLabels: Record<string, string> = {
 
 const severityInfo: Record<Severity, { label: string; badge: string; border: string }> = {
   critical: {
-    label: "Nghiêm trọng",
+    label: "Cần kiểm tra ngay",
     badge: "bg-rose-100 text-rose-700",
     border: "border-rose-200",
   },
   error: {
-    label: "Lỗi",
+    label: "Cần xử lý",
     badge: "bg-orange-100 text-orange-700",
     border: "border-orange-200",
   },
   warning: {
-    label: "Cảnh báo",
+    label: "Cần lưu ý",
     badge: "bg-amber-100 text-amber-700",
     border: "border-amber-200",
   },
@@ -319,25 +320,25 @@ export default function SystemIntegrityPage() {
 
   const summary = [
     {
-      label: "PASS",
+      label: "Mục kiểm tra đạt",
       value: latestRun?.passed_checks ?? 0,
       color: "text-emerald-700",
       background: "bg-emerald-50",
     },
     {
-      label: "WARNING",
+      label: "Cảnh báo cần lưu ý",
       value: latestRun?.warning_count ?? 0,
       color: "text-amber-700",
       background: "bg-amber-50",
     },
     {
-      label: "ERROR",
+      label: "Vấn đề cần xử lý",
       value: latestRun?.error_count ?? 0,
       color: "text-orange-700",
       background: "bg-orange-50",
     },
     {
-      label: "CRITICAL",
+      label: "Cần kiểm tra ngay",
       value: latestRun?.critical_count ?? 0,
       color: "text-rose-700",
       background: "bg-rose-50",
@@ -365,7 +366,7 @@ export default function SystemIntegrityPage() {
           disabled={running}
           className="ui-btn ui-btn-primary min-w-48 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {running ? "Đang kiểm tra..." : "Chạy kiểm tra ngay"}
+          {running ? "Đang kiểm tra..." : "Kiểm tra dữ liệu ngay"}
         </button>
       </section>
 
@@ -388,7 +389,7 @@ export default function SystemIntegrityPage() {
             <h2 className="text-lg font-black text-slate-900">Lần kiểm tra gần nhất</h2>
             {latestRun ? (
               <p className="mt-1 text-sm text-slate-500">
-                {formatDateTime(latestRun.started_at)} · {durationLabel(latestRun.duration_ms)} · {latestRun.total_checks} checks
+                {formatDateTime(latestRun.started_at)} · {durationLabel(latestRun.duration_ms)} · {latestRun.total_checks} hạng mục
               </p>
             ) : (
               <p className="mt-1 text-sm text-slate-500">Chưa có lần kiểm tra nào.</p>
@@ -424,8 +425,8 @@ export default function SystemIntegrityPage() {
               onChange={(event) => setStatusFilter(event.target.value as IssueStatus)}
               className="ui-input mt-1"
             >
-              <option value="open">Đang mở</option>
-              <option value="resolved">Đã xử lý</option>
+              <option value="open">Chưa hết bất thường</option>
+              <option value="resolved">Đã hết bất thường</option>
               <option value="all">Tất cả</option>
             </select>
           </label>
@@ -437,10 +438,10 @@ export default function SystemIntegrityPage() {
               onChange={(event) => setSeverityFilter(event.target.value)}
               className="ui-input mt-1"
             >
-              <option value="all">Tất cả mức độ</option>
-              <option value="critical">Nghiêm trọng</option>
-              <option value="error">Lỗi</option>
-              <option value="warning">Cảnh báo</option>
+              <option value="all">Tất cả mức độ ưu tiên</option>
+              <option value="critical">Cần kiểm tra ngay</option>
+              <option value="error">Cần xử lý</option>
+              <option value="warning">Cần lưu ý</option>
               <option value="info">Thông tin</option>
             </select>
           </label>
@@ -472,7 +473,7 @@ export default function SystemIntegrityPage() {
           <div>
             <h2 className="text-xl font-black text-slate-900">Danh sách vấn đề</h2>
             <p className="mt-1 text-sm text-slate-500">
-              {issueStats.total} issue theo bộ lọc hiện tại
+              {issueStats.total} trường hợp theo bộ lọc hiện tại
             </p>
           </div>
         </div>
@@ -481,8 +482,8 @@ export default function SystemIntegrityPage() {
           <div className="ui-card p-12 text-center text-slate-400">Đang tải kết quả...</div>
         ) : issues.length === 0 ? (
           <div className="ui-card p-10 text-center">
-            <div className="text-lg font-black text-emerald-700">Không có issue phù hợp</div>
-            <p className="mt-2 text-sm text-slate-500">Dữ liệu sạch theo các check và bộ lọc hiện tại.</p>
+            <div className="text-lg font-black text-emerald-700">Không có vấn đề trong bộ lọc này</div>
+            <p className="mt-2 text-sm text-slate-500">Hãy đổi bộ lọc hoặc chạy kiểm tra để xem tình trạng dữ liệu mới nhất.</p>
           </div>
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
