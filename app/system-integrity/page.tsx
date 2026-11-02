@@ -181,7 +181,12 @@ function issueMoneyDifference(issue: IntegrityIssue) {
   if (issue.check_key === "PAY001_PAYROLL_TOTAL_MISMATCH") {
     const total = Number(context.total_amount);
     const detail = Number(context.detail_total);
-    return Number.isFinite(total) && Number.isFinite(detail) ? total - detail : null;
+    // Historical resolved alerts may predate the allowance-aware check.
+    if (context.allowance === undefined || context.allowance === null) return null;
+    const allowance = Number(context.allowance);
+    return [total, detail, allowance].every(Number.isFinite)
+      ? total - detail - allowance
+      : null;
   }
   if (issue.check_key === "TUI001_TUITION_OVERPAID") {
     const paid = Number(context.amount_paid);
@@ -697,7 +702,7 @@ export default function SystemIntegrityPage() {
                 </div>
                 {selectedIssue.check_key === "PAY001_PAYROLL_TOTAL_MISMATCH" ? (
                   <>
-                    <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <div className="rounded-xl border border-slate-200 p-4">
                         <div className="text-xs font-bold text-slate-500">Tổng bảng lương</div>
                         <div className="mt-2 text-xl font-black text-slate-900">{formatMoney(context.total_amount)}</div>
@@ -706,13 +711,18 @@ export default function SystemIntegrityPage() {
                         <div className="text-xs font-bold text-slate-500">Tổng các buổi dạy</div>
                         <div className="mt-2 text-xl font-black text-slate-900">{formatMoney(context.detail_total)}</div>
                       </div>
+                      <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                        <div className="text-xs font-bold text-emerald-800">Phụ cấp / Bù lương</div>
+                        <div className="mt-2 text-xl font-black text-emerald-800">{context.allowance !== undefined ? formatMoney(context.allowance) : "Chưa có trong cảnh báo cũ"}</div>
+                      </div>
                       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                        <div className="text-xs font-bold text-amber-700">Khoản cần đối chiếu</div>
+                        <div className="text-xs font-bold text-amber-700">Chênh lệch sau phụ cấp</div>
                         <div className="mt-2 text-xl font-black text-amber-800">{issueMoneyDifference(selectedIssue) === null ? "—" : formatMoney(Math.abs(issueMoneyDifference(selectedIssue)!))}</div>
                       </div>
                     </div>
-                    <p className="text-sm leading-6 text-amber-800">
-                      Lưu ý: Tổng bảng lương có thể bao gồm <b>phụ cấp</b>, trong khi tổng các buổi dạy chưa cộng phụ cấp. Vì vậy, chênh lệch này chưa chắc là sai dữ liệu.
+                    <p className="text-sm leading-6 text-slate-600">
+                      Tiền chuyên cần và tiền bù những buổi tháng trước chưa chấm công là khoản hợp lệ. Chỉ báo lệch khi <b>tổng bảng lương khác tiền các buổi dạy cộng phụ cấp</b>.
+                      {selectedIssue.status === "resolved" && context.allowance === undefined ? " Cảnh báo này là dữ liệu cũ đã được đối chiếu và đóng sau khi xét phụ cấp." : ""}
                     </p>
                   </>
                 ) : paymentMismatch ? (
