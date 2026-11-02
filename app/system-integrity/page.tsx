@@ -399,7 +399,7 @@ export default function SystemIntegrityPage() {
             Kiểm tra sức khỏe dữ liệu
           </h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-500 sm:text-base">
-            Phát hiện sai lệch giữa buổi học, điểm danh, dạy thay, lương và học phí. Công cụ chỉ kiểm tra, không tự sửa dữ liệu nghiệp vụ.
+            Tìm các khoản lương, học phí và buổi học cần đối chiếu. Mỗi trường hợp đều có giải thích và hướng kiểm tra dễ hiểu.
           </p>
         </div>
 
@@ -422,6 +422,9 @@ export default function SystemIntegrityPage() {
             <div className={`mt-2 text-4xl font-black ${item.color}`}>
               {item.value}
             </div>
+            <p className="mt-1 text-xs font-medium text-slate-500">
+              {item.label === "Mục kiểm tra đạt" ? "Số hạng mục không phát hiện bất thường" : "Số trường hợp cần đối chiếu"}
+            </p>
           </div>
         ))}
       </section>
@@ -451,6 +454,13 @@ export default function SystemIntegrityPage() {
             </span>
           )}
         </div>
+
+        {latestRun && latestRun.status === "completed" && (
+          <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-600">
+            <b>{latestRun.passed_checks}/{latestRun.total_checks} hạng mục đạt.</b>{" "}
+            Những con số ở các ô còn lại là số trường hợp cần xem lại, không phải số lần hệ thống hỏng.
+          </p>
+        )}
 
         {latestRun?.status === "failed" && latestRun.error_message && (
           <div className="mt-4 rounded-2xl bg-rose-50 p-4 text-sm font-semibold text-rose-700">
@@ -514,9 +524,9 @@ export default function SystemIntegrityPage() {
       <section className="space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-xl font-black text-slate-900">Danh sách vấn đề</h2>
+            <h2 className="text-xl font-black text-slate-900">Các trường hợp cần đối chiếu</h2>
             <p className="mt-1 text-sm text-slate-500">
-              {issueStats.total} trường hợp theo bộ lọc hiện tại
+              {issueStats.total} trường hợp theo bộ lọc hiện tại{issueStats.total > issues.length ? ` · Đang xem ${issues.length}` : ""}
             </p>
           </div>
         </div>
@@ -604,11 +614,10 @@ export default function SystemIntegrityPage() {
         )}
       </section>
 
-      <section className="ui-card overflow-hidden">
-        <div className="border-b border-slate-100 p-5">
-          <h2 className="text-xl font-black text-slate-900">Lịch sử kiểm tra</h2>
-          <p className="mt-1 text-sm text-slate-500">30 lần chạy gần nhất, kể cả lần thất bại.</p>
-        </div>
+      <details className="ui-card overflow-hidden">
+        <summary className="cursor-pointer p-5 text-lg font-black text-slate-900">
+          Xem lịch sử kiểm tra <span className="ml-2 text-sm font-normal text-slate-500">(30 lần gần nhất)</span>
+        </summary>
 
         <div className="overflow-x-auto">
           <table className="ui-table min-w-[820px]">
@@ -616,10 +625,10 @@ export default function SystemIntegrityPage() {
               <tr>
                 <th>Thời gian</th>
                 <th>Trạng thái</th>
-                <th>PASS</th>
-                <th>WARNING</th>
-                <th>ERROR</th>
-                <th>CRITICAL</th>
+                <th>Mục đạt</th>
+                <th>Lưu ý</th>
+                <th>Cần xử lý</th>
+                <th>Ưu tiên</th>
                 <th>Thời lượng</th>
                 <th></th>
               </tr>
@@ -647,7 +656,7 @@ export default function SystemIntegrityPage() {
             </tbody>
           </table>
         </div>
-      </section>
+      </details>
 
       {selectedIssue && (() => {
         const context = getContextRecord(selectedIssue);
@@ -760,7 +769,7 @@ export default function SystemIntegrityPage() {
                 )}
 
                 <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <summary className="cursor-pointer font-black text-slate-700">Chi tiết kỹ thuật</summary>
+                  <summary className="cursor-pointer font-black text-slate-700">Xem dữ liệu kỹ thuật (dành cho người hỗ trợ)</summary>
                   <div className="mt-4 space-y-3">
                     <div className="grid gap-1 border-b border-slate-200 pb-3 sm:grid-cols-[180px_1fr]">
                       <code className="text-xs font-bold text-slate-500">check_key</code>
@@ -809,9 +818,9 @@ export default function SystemIntegrityPage() {
               )}
               {(selectedRun.check_results || []).map((result) => (
                 <div key={result.key} className="flex flex-col gap-2 rounded-2xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <code className="break-all text-xs font-bold text-slate-700">{result.key}</code>
+                  <div className="font-semibold text-slate-700">{getIntegrityGuide(result.key).title}</div>
                   <span className={`rounded-full px-2.5 py-1 text-xs font-black ${result.status === "passed" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
-                    {result.status === "passed" ? "PASS" : `${result.issues} ISSUE`}
+                    {result.status === "passed" ? "Đạt" : `${result.issues} trường hợp`}
                   </span>
                 </div>
               ))}
