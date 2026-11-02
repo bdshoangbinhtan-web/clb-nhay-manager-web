@@ -1272,7 +1272,7 @@ export default function TuitionPage() {
       "Lớp: " + classLabel + "\nKỳ: " + monthLabel(item.billing_month.slice(0, 7)) + "\n" +
       "Số chưa đóng: " + money(Number(item.amount_due)) + "\n\n" +
       "Nhập lý do miễn thu. Tiền đã đóng các tháng khác vẫn giữ nguyên:",
-      "Nghỉ học không báo – Không thu tháng này"
+      "Không thu học phí tháng này"
     );
     if (reason === null) return;
     if (reason.trim().length < 5 || reason.trim().length > 300) {
@@ -1283,7 +1283,7 @@ export default function TuitionPage() {
       (student?.full_name ?? "") + " · " + classLabel + "\n" +
       "Số tiền miễn thu: " + money(Number(item.amount_due)) + "\n\n" +
       "Tháng này sẽ không tự phát sinh nợ lại kể cả khi bé học lại. " +
-      "Nếu bé đã nghỉ, hãy chuyển trạng thái sang TẠM NGƯNG để dừng tính những tháng kế tiếp."
+      "Nếu bé đã nghỉ, hãy cập nhật trạng thái học viên thành Không hoạt động để không tính những tháng tiếp theo."
     )) return;
 
     setDeletingTuitionId(item.id);
