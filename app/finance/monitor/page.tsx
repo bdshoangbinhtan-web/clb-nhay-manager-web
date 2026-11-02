@@ -252,7 +252,7 @@ export default function FinanceMonitorPage() {
     {loading && !audit ? <div className="ui-card p-8 text-center text-slate-500">Đang kiểm tra dữ liệu sổ quỹ...</div> :
     <div className="space-y-5">
       <section className="grid gap-3 sm:grid-cols-3">
-        <Metric label="Trường hợp cần xem" value={unreviewed} detail="Chưa hoàn tất đối chiếu" tone="rose" />
+        <Metric label="Chứng từ còn được phát hiện" value={issues.length} detail={`${unreviewed} trường hợp chưa xác minh xong`} tone="rose" />
         <Metric label="Ngày / cơ sở chưa chốt" value={pending.length} detail="Chỉ tính ngày đã có giao dịch" tone="amber" />
         <Metric label="Giao dịch đảo trong lịch sử" value={history.length} detail="Không tự xem là lỗi" tone="slate" />
       </section>
