@@ -5,6 +5,7 @@ import {
   determineActiveClasses,
   getFirstUnpaidMonth,
   getMembershipTuitionStatus,
+  getClassTuitionRowEligibility,
   type TuitionMembership,
   type TuitionRecord,
 } from "../lib/tuition/due-status.ts";
@@ -146,4 +147,27 @@ test("effective due applies canceled amounts, payment ledger totals, and carry-f
   assert.equal(effective[0].effective_amount_due, 100000);
   assert.equal(effective[0].effective_amount_paid, 100000);
   assert.equal(effective[1].effective_amount_paid, 200000);
+});
+
+test("class tuition list never invents debt for an inactive student without a tuition record", () => {
+  const inactive = getClassTuitionRowEligibility("inactive", "active", membership, "2026-11");
+  assert.equal(inactive.canCollectPeriod, false);
+  assert.equal(inactive.status, "student_inactive");
+
+  const active = getClassTuitionRowEligibility("active", "active", membership, "2026-11");
+  assert.equal(active.canCollectPeriod, true);
+  assert.equal(active.status, "collectible");
+
+  assert.equal(getClassTuitionRowEligibility("active", "active", undefined, "2026-11").status, "no_active_membership");
+  assert.equal(getClassTuitionRowEligibility("active", "active", membership, "2026-09").status, "pre_tracking");
+  assert.equal(getClassTuitionRowEligibility("active", "inactive", membership, "2026-11").status, "class_inactive");
+});
+
+test("class tuition row respects enrollment start and end month boundaries", () => {
+  const future = { ...membership, start_date: "2026-12-01" };
+  assert.equal(getClassTuitionRowEligibility("active", "active", future, "2026-11").status, "before_membership");
+  assert.equal(getClassTuitionRowEligibility("active", "active", future, "2026-12").canCollectPeriod, true);
+  const ended = { ...membership, end_date: "2026-10-31" };
+  assert.equal(getClassTuitionRowEligibility("active", "active", ended, "2026-11").status, "after_membership");
+  assert.equal(getClassTuitionRowEligibility("active", "active", ended, "2026-10").canCollectPeriod, true);
 });
