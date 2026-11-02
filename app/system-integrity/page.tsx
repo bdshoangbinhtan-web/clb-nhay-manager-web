@@ -163,6 +163,39 @@ function isTuitionPaymentMismatch(issue: IntegrityIssue) {
   );
 }
 
+function issueSubject(issue: IntegrityIssue) {
+  const context = getContextRecord(issue);
+  const person = context.teacher_name || context.student_name;
+  const className = context.class_name;
+  const period = context.payroll_month || context.billing_month;
+  const parts = [
+    person ? String(person) : null,
+    className ? String(className) : null,
+    period ? formatMonth(period) : issue.related_date ? formatDate(issue.related_date) : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : "Trường hợp cần kiểm tra";
+}
+
+function issueMoneyDifference(issue: IntegrityIssue) {
+  const context = getContextRecord(issue);
+  if (issue.check_key === "PAY001_PAYROLL_TOTAL_MISMATCH") {
+    const total = Number(context.total_amount);
+    const detail = Number(context.detail_total);
+    return Number.isFinite(total) && Number.isFinite(detail) ? total - detail : null;
+  }
+  if (issue.check_key === "TUI001_TUITION_OVERPAID") {
+    const paid = Number(context.amount_paid);
+    const due = Number(context.amount_due);
+    return Number.isFinite(paid) && Number.isFinite(due) ? paid - due : null;
+  }
+  if (issue.check_key === "TUI002_PAYMENT_TOTAL_MISMATCH") {
+    const total = Number(context.payment_total);
+    const paid = Number(context.amount_paid);
+    return Number.isFinite(total) && Number.isFinite(paid) ? total - paid : null;
+  }
+  return null;
+}
+
 function durationLabel(value: number | null) {
   if (value === null) return "—";
   if (value < 1000) return `${value} ms`;
@@ -196,6 +229,16 @@ export default function SystemIntegrityPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedIssue, setSelectedIssue] = useState<IntegrityIssue | null>(null);
   const [selectedRun, setSelectedRun] = useState<IntegrityRun | null>(null);
+
+  const groupedIssues = useMemo(() => {
+    const groups = new Map<string, IntegrityIssue[]>();
+    for (const issue of issues) {
+      const items = groups.get(issue.check_key) ?? [];
+      items.push(issue);
+      groups.set(issue.check_key, items);
+    }
+    return [...groups.entries()].map(([checkKey, items]) => ({ checkKey, items }));
+  }, [issues]);
 
   useEffect(() => {
     let cancelled = false;
