@@ -1577,8 +1577,8 @@ export default function TuitionPage() {
   }
 
   // The action in search applies to this month, not to an older overdue month.
-  function currentMonthWaiverTarget(row: (typeof membershipTuitionRows)[number]): Tuition | null {
-    if (!isAdmin || row.student.status !== "active" || row.classItem.status !== "active") return null;
+  function currentMonthWaiverTarget(row: { student: Student; classItem: ClassItem; membership: ClassMembership }): Tuition | null {
+    if (!isAdmin || row.classItem.status !== "active") return null;
     if (currentMonth < TUITION_TRACKING_START_MONTH) return null;
     const started = monthKey(row.membership.start_date);
     const ended = monthKey(row.membership.end_date);
@@ -1615,6 +1615,18 @@ export default function TuitionPage() {
 
   function waiversForStudent(studentId: string) {
     return activeTuitionWaivers.filter((waiver) => waiver.student_id === studentId);
+  }
+
+  function inactiveStudentWaiverTargets(student: Student) {
+    if (!isAdmin || student.status === "active") return [];
+    return activeMemberships
+      .filter((membership) => membership.student_id === student.id)
+      .flatMap((membership) => {
+        const classItem = classById.get(membership.class_id);
+        if (!classItem) return [];
+        const target = currentMonthWaiverTarget({ student, classItem, membership });
+        return target ? [{ classItem, target }] : [];
+      });
   }
 
   function openCollectionForDueRow(row: (typeof membershipTuitionRows)[number]) {
@@ -1661,6 +1673,15 @@ export default function TuitionPage() {
                         </div>
                       </div>;
                     })}</div>}
+                  {inactiveStudentWaiverTargets(student).map(({classItem,target}) => (
+                    <div key={classItem.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 text-sm">
+                      <span>{classItem.name} · {monthLabel(currentMonth)} · Học viên không hoạt động</span>
+                      <button type="button" className="ui-btn min-h-10" onMouseDown={(event) => event.preventDefault()}
+                        disabled={deletingTuitionId !== null} onClick={() => void deleteTuition(target)}>
+                        Không thu tháng này
+                      </button>
+                    </div>
+                  ))}
                   {isAdmin && waiversForStudent(student.id).map((waiver) => (
                     <div key={waiver.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-emerald-50 p-3 text-sm">
                       <span>Đã miễn {monthLabel(monthKey(waiver.billing_month) ?? currentMonth)} · {className(waiver.class_id)} · {waiver.reason}</span>
@@ -1797,7 +1818,16 @@ export default function TuitionPage() {
                           })}
                         </div>
                       )}
-                      {isAdmin && waiversForStudent(student.id).map((waiver) => (
+                      {inactiveStudentWaiverTargets(student).map(({classItem,target}) => (
+                    <div key={classItem.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 text-sm">
+                      <span>{classItem.name} · {monthLabel(currentMonth)} · Học viên không hoạt động</span>
+                      <button type="button" className="ui-btn min-h-10" onMouseDown={(event) => event.preventDefault()}
+                        disabled={deletingTuitionId !== null} onClick={() => void deleteTuition(target)}>
+                        Không thu tháng này
+                      </button>
+                    </div>
+                  ))}
+                  {isAdmin && waiversForStudent(student.id).map((waiver) => (
                         <div key={waiver.id} className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-emerald-50 p-3 text-sm">
                           <span>Đã miễn {monthLabel(monthKey(waiver.billing_month) ?? currentMonth)} · {className(waiver.class_id)} · {waiver.reason}</span>
                           <button type="button" className="ui-btn min-h-10" onMouseDown={(event) => event.preventDefault()} disabled={restoringWaiverId !== null}
