@@ -10,6 +10,14 @@ const migration = readFileSync(
   "utf8"
 );
 
+const allowanceFix = readFileSync(
+  new URL(
+    "../supabase/migrations/20261102042701_fix_payroll_integrity_to_include_legitimate_allowances.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+
 const page = readFileSync(
   new URL("../app/system-integrity/page.tsx", import.meta.url),
   "utf8"
@@ -105,7 +113,7 @@ test("database and application restrict the checker to Admin", () => {
 
 test("UI provides summary, filters, history, pagination and issue details", () => {
   for (const label of [
-    "Mục kiểm tra đạt",
+    "Hạng mục đạt (lần trước)",
     "Cảnh báo cần lưu ý",
     "Vấn đề cần xử lý",
     "Cần kiểm tra ngay",
@@ -130,4 +138,15 @@ test("UI provides summary, filters, history, pagination and issue details", () =
   assert.match(page, /groupedIssues\.map/);
   assert.match(page, /issueMoneyDifference\(issue\)/);
 
+});
+
+test("payroll integrity includes saved allowance and retires only reconciled false alerts", () => {
+  assert.match(allowanceFix, /private\.teacher_payroll_allowance\(p\.note\)/);
+  assert.match(allowanceFix, /p\.total_amount - coalesce\(d\.detail_total, 0\) - private\.teacher_payroll_allowance/);
+  assert.match(allowanceFix, /i\.check_key = 'PAY001_PAYROLL_TOTAL_MISMATCH'/);
+  assert.match(allowanceFix, /i\.entity_id = r\.id/);
+  assert.match(allowanceFix, /and i\.status = 'open'/);
+  assert.match(page, /issueStats\.critical_count/);
+  assert.match(page, /issueStats\.warning_count/);
+  assert.match(page, /issueStats\.error_count/);
 });
