@@ -239,8 +239,6 @@ export default function TuitionPage() {
   const urlContextAppliedRef = useRef(false);
 
   const [isAdmin, setIsAdmin] = useState(false);
-  const [showAdminUnpaid, setShowAdminUnpaid] = useState(false);
-  const [adminUnpaidSearch, setAdminUnpaidSearch] = useState("");
   const [deletingTuitionId, setDeletingTuitionId] = useState<string | null>(null);
   const [restoringWaiverId, setRestoringWaiverId] = useState<string | null>(null);
   const [tuitionWaivers, setTuitionWaivers] = useState<TuitionWaiver[]>([]);
@@ -1466,62 +1464,6 @@ export default function TuitionPage() {
     [filteredTuition, visibleTuitionCount]
   );
 
-  // The Admin panel includes stored unpaid records across every branch/month,
-  // plus virtual debt when no tuition row was ever inserted.
-  const adminUnpaidTuition = useMemo(() => {
-    const candidates = new Map<string, Tuition>();
-    const keyFor = (id: string, classId: string | null, period: string) =>
-      [id, classId ?? "no-class", period].join("__");
-    for (const item of tuition) {
-      if (Number(item.amount_due || 0) <= 0 || Number(item.amount_paid || 0) !== 0) continue;
-      const period = monthKey(item.billing_month);
-      if (!period || (item.class_id && waivedTuitionKeys.has(keyFor(item.student_id, item.class_id, period)))) continue;
-      candidates.set(keyFor(item.student_id, item.class_id, period), item);
-    }
-    for (const row of membershipTuitionRows) {
-      const period = row.due.firstUnpaidMonth;
-      if (!period || period > currentMonth || !["DUE", "OVERDUE"].includes(row.due.status)) continue;
-      const key = keyFor(row.student.id, row.classItem.id, period);
-      if (waivedTuitionKeys.has(key) || candidates.has(key)) continue;
-      if (tuition.some((item) => item.student_id === row.student.id &&
-        item.class_id === row.classItem.id && monthKey(item.billing_month) === period)) continue;
-      const estimated = Number(row.suggestedAmount || 0);
-      if (estimated <= 0) continue;
-      candidates.set(key, {
-        id: "projected:" + key,
-        student_id: row.student.id,
-        class_id: row.classItem.id,
-        branch_id: row.classItem.branch_id,
-        billing_month: periodDate(period),
-        description: "Công nợ tự tính, chưa có phiếu",
-        amount_due: estimated,
-        amount_paid: 0,
-        payment_date: null,
-        note: null,
-        status: "unpaid",
-      });
-    }
-    const q = adminUnpaidSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-    return [...candidates.values()]
-      .filter((item) => {
-        if (!q) return true;
-        const student = studentById.get(item.student_id);
-        const branch = branchById.get(item.branch_id ?? student?.branch_id ?? "")?.name ?? "";
-        const haystack = [
-          student?.full_name ?? "", student?.student_code ?? "",
-          classById.get(item.class_id ?? "")?.name ?? "",
-          branch, monthKey(item.billing_month) ?? ""
-        ].join(" ").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-        return haystack.includes(q);
-      })
-      .sort((a, b) => {
-        const aActive = studentById.get(a.student_id)?.status === "active" ? 1 : 0;
-        const bActive = studentById.get(b.student_id)?.status === "active" ? 1 : 0;
-        return aActive - bActive || b.billing_month.localeCompare(a.billing_month);
-      });
-  }, [adminUnpaidSearch, tuition, waivedTuitionKeys, membershipTuitionRows, currentMonth,
-    studentById, classById, branchById]);
-
   const filteredStudents = useMemo(() => {
     const q = studentSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
 
@@ -1634,109 +1576,45 @@ export default function TuitionPage() {
     focusCollectionForm();
   }
 
+  // The action in search applies to this month, not to an older overdue month.
+  function currentMonthWaiverTarget(row: (typeof membershipTuitionRows)[number]): Tuition | null {
+    if (!isAdmin || row.student.status !== "active" || row.classItem.status !== "active") return null;
+    if (currentMonth < TUITION_TRACKING_START_MONTH) return null;
+    const started = monthKey(row.membership.start_date);
+    const ended = monthKey(row.membership.end_date);
+    if ((started && currentMonth < started) || (ended && currentMonth > ended)) return null;
+    if (waivedTuitionKeys.has([row.student.id, row.classItem.id, currentMonth].join("__"))) return null;
+    const item = tuition.find((entry) =>
+      entry.student_id === row.student.id &&
+      entry.class_id === row.classItem.id &&
+      monthKey(entry.billing_month) === currentMonth
+    );
+    if (item && (
+      Number(item.amount_paid || 0) !== 0 ||
+      paymentsForTuition(item.id).length > 0 ||
+      tuitionAdjustments.some((adjustment) =>
+        adjustment.tuition_id === item.id || adjustment.target_tuition_id === item.id
+      )
+    )) return null;
+    return item ?? {
+      id: "projected:" + [row.student.id, row.classItem.id, currentMonth].join("__"),
+      student_id: row.student.id, class_id: row.classItem.id, branch_id: row.classItem.branch_id,
+      billing_month: periodDate(currentMonth), description: "Không thu tháng này",
+      amount_due: suggestedTuitionAmount(row.student, row.classItem, currentMonth, row.membership.start_date),
+      amount_paid: 0, payment_date: null, note: null, status: "unpaid",
+    };
+  }
+
+  function waiversForStudent(studentId: string) {
+    return activeTuitionWaivers.filter((waiver) => waiver.student_id === studentId);
+  }
+
   function openCollectionForDueRow(row: (typeof membershipTuitionRows)[number]) {
     const period = row.due.firstUnpaidMonth;
     if (!period) return;
     const remaining = Math.max(row.due.amountDue > 0 ? row.due.remaining : row.suggestedAmount, 0);
     openCollectionForPeriod(row.student, row.classItem, period, remaining);
   }
-
-  // Display the Admin delete action at the top in BOTH normal and privacy views.
-  // The server RPC still enforces active Admin permission on every deletion.
-  const adminDeletePanel = isAdmin ? (
-    <section id="admin-delete-tuition" className="ui-card scroll-mt-24 border border-rose-200 p-5 sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-black">🗑️ Xóa / miễn thu học phí toàn hệ thống · Admin</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Tìm học viên ở mọi cơ sở: phiếu chưa thu và công nợ tự tính chưa có phiếu. Chỉ Admin được miễn thu từng tháng. Giữ nguyên mọi khoản đã đóng.
-              </p>
-            </div>
-            <button type="button" className="ui-btn ui-btn-primary" onClick={() => setShowAdminUnpaid((value) => !value)}>
-              {showAdminUnpaid ? "Đóng danh sách" : `🗑️ Xóa học phí · Admin (${adminUnpaidTuition.length})`}
-            </button>
-          </div>
-          {showAdminUnpaid && (
-            <div className="mt-4 space-y-3">
-              <input
-                className="ui-input w-full sm:max-w-sm"
-                value={adminUnpaidSearch}
-                onChange={(event) => setAdminUnpaidSearch(event.target.value)}
-                placeholder="🔎 Tìm tên, mã học viên, lớp hoặc cơ sở..."
-              />
-              {adminUnpaidTuition.length === 0 ? (
-                <p className="text-sm text-slate-500">Không có khoản học phí chưa thu nào đã lưu phù hợp.</p>
-              ) : (
-                <div className="divide-y divide-slate-100 rounded-xl border border-slate-100">
-                  {adminUnpaidTuition.slice(0, 100).map((item) => {
-                    const hasHistory = paymentsForTuition(item.id).length > 0 ||
-                      tuitionAdjustments.some((row) => row.tuition_id === item.id || row.target_tuition_id === item.id);
-                    const inactive = studentById.get(item.student_id)?.status !== "active";
-                    return (
-                      <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4">
-                        <div>
-                          <div className="font-bold text-slate-800">
-                            {studentName(item.student_id)}
-                            {inactive && <span className="ml-2 text-xs font-bold text-amber-700">Tạm ngưng</span>}
-                            {item.id.startsWith("projected:") && <span className="ml-2 text-xs font-bold text-blue-700">Nợ tự tính · chưa có phiếu</span>}
-                          </div>
-                          <div className="text-sm text-slate-500">
-                            {className(item.class_id)} · {branchById.get(item.branch_id ?? "")?.name ?? ""} · {monthLabel(item.billing_month.slice(0, 7))} · Chưa thu {money(Number(item.amount_due))}
-                          </div>
-                          {hasHistory && <div className="text-xs text-amber-700">Có lịch sử giao dịch/điều chỉnh — không thể xóa</div>}
-                        </div>
-                        <button
-                          type="button"
-                          className="ui-btn min-h-11 whitespace-nowrap"
-                          disabled={hasHistory || deletingTuitionId !== null}
-                          onClick={() => deleteTuition(item)}
-                        >
-                          {deletingTuitionId === item.id ? "Đang xóa..." : "🗑️ Xóa học phí"}
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {adminUnpaidTuition.length > 100 && (
-                    <div className="p-3 text-sm text-slate-500">Đang hiển thị 100 khoản đầu tiên. Hãy tìm theo tên để thu hẹp danh sách.</div>
-                  )}
-                </div>
-              )}
-              <p className="text-xs text-slate-500">
-                Miễn thu chỉ áp dụng cho tháng đã chọn; nếu bé đã nghỉ, đổi Tạm ngưng để ngừng tính những tháng tiếp theo.
-              </p>
-              {activeTuitionWaivers.length > 0 && (
-                <div className="mt-6 rounded-xl border border-slate-200 p-3">
-                  <div className="mb-3 text-sm font-black">✅ Tháng đã miễn thu ({activeTuitionWaivers.length}) · Có thể hoàn tác</div>
-                  <div className="max-h-64 divide-y divide-slate-100 overflow-y-auto">
-                    {activeTuitionWaivers
-                      .filter((waiver) => {
-                        const q = adminUnpaidSearch.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-                        if (!q) return true;
-                        const student = studentById.get(waiver.student_id);
-                        const haystack = [student?.full_name,student?.student_code,classById.get(waiver.class_id)?.name,monthKey(waiver.billing_month)]
-                          .join(" ").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-                        return haystack.includes(q);
-                      })
-                      .slice(0, 40).map((waiver) => (
-                      <div key={waiver.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
-                        <div className="text-sm">
-                          <div className="font-bold">{studentName(waiver.student_id)} · {monthLabel(waiver.billing_month.slice(0, 7))}</div>
-                          <div className="text-slate-500">{className(waiver.class_id)} · {waiver.reason}</div>
-                        </div>
-                        <button type="button" className="ui-btn whitespace-nowrap"
-                          disabled={restoringWaiverId !== null || deletingTuitionId !== null}
-                          onClick={() => restoreTuitionWaiver(waiver)}>
-                          {restoringWaiverId === waiver.id ? "Đang hoàn tác..." : "↩ Bỏ miễn thu"}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-  ) : null;
 
   if (privacyView) {
     return (
@@ -1748,7 +1626,6 @@ export default function TuitionPage() {
           </div>
           <div className="rounded-xl bg-blue-50 px-3 py-2 text-sm font-bold text-blue-800">Chuyển khoản</div>
         </header>
-        {adminDeletePanel}
         <section className="ui-card space-y-4 p-5">
           <input autoComplete="off" className="ui-input min-h-12 w-full" placeholder="Tìm tên hoặc mã học viên..."
             value={studentSearch} onChange={(event) => { setStudentSearch(event.target.value); setShowStudentSearch(true); }} />
@@ -1765,9 +1642,23 @@ export default function TuitionPage() {
                         (row.due.amountDue > 0 ? row.due.remaining > 0 : row.suggestedAmount > 0);
                       return <div key={row.classItem.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-3">
                         <span className="text-sm">{row.classItem.name} · {period ? monthLabel(period) : "Đã đóng đủ"}</span>
-                        {canCollect && <button type="button" className="ui-btn ui-btn-blue" onClick={() => openCollectionForDueRow(row)}>Thu học phí</button>}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canCollect && <button type="button" className="ui-btn ui-btn-blue" onClick={() => openCollectionForDueRow(row)}>Thu học phí</button>}
+                          {currentMonthWaiverTarget(row) && (
+                            <button type="button" className="ui-btn" disabled={deletingTuitionId !== null}
+                              onClick={() => { const target = currentMonthWaiverTarget(row); if (target) void deleteTuition(target); }}>
+                              Không thu {monthLabel(currentMonth)}
+                            </button>
+                          )}
+                        </div>
                       </div>;
                     })}</div>}
+                  {isAdmin && waiversForStudent(student.id).map((waiver) => (
+                    <div key={waiver.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-emerald-50 p-3 text-sm">
+                      <span>Đã miễn {monthLabel(monthKey(waiver.billing_month) ?? currentMonth)} · {className(waiver.class_id)} · {waiver.reason}</span>
+                      <button type="button" className="ui-btn" disabled={restoringWaiverId !== null} onClick={() => void restoreTuitionWaiver(waiver)}>↩ Bỏ miễn thu</button>
+                    </div>
+                  ))}
                 </div>;
               })}</div>)}
         </section>
@@ -1821,7 +1712,6 @@ export default function TuitionPage() {
         </div>
       </section>
 
-      {adminDeletePanel}
 
       <section className="rounded-3xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-sm sm:p-7">
         <label className="block">
@@ -1886,12 +1776,26 @@ export default function TuitionPage() {
                                     {statusLabel}
                                   </span>
                                 </div>
-                                {canCollect && <button type="button" className="ui-btn ui-btn-primary min-h-11 shrink-0" onMouseDown={(event) => event.preventDefault()} onClick={() => openCollectionForDueRow(row)}>{isAdvance ? `Thu trước tháng ${Number(period.slice(5, 7))}` : "Thu tiền"}</button>}
+                                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                                  {canCollect && <button type="button" className="ui-btn ui-btn-primary min-h-11" onMouseDown={(event) => event.preventDefault()} onClick={() => openCollectionForDueRow(row)}>{isAdvance ? `Thu trước tháng ${Number(period.slice(5, 7))}` : "Thu tiền"}</button>}
+                                  {currentMonthWaiverTarget(row) && <button type="button" className="ui-btn min-h-11"
+                                    onMouseDown={(event) => event.preventDefault()} disabled={deletingTuitionId !== null}
+                                    onClick={() => { const target = currentMonthWaiverTarget(row); if (target) void deleteTuition(target); }}>
+                                    Không thu {monthLabel(currentMonth)}
+                                  </button>}
+                                </div>
                               </div>
                             );
                           })}
                         </div>
                       )}
+                      {isAdmin && waiversForStudent(student.id).map((waiver) => (
+                        <div key={waiver.id} className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-emerald-50 p-3 text-sm">
+                          <span>Đã miễn {monthLabel(monthKey(waiver.billing_month) ?? currentMonth)} · {className(waiver.class_id)} · {waiver.reason}</span>
+                          <button type="button" className="ui-btn min-h-10" onMouseDown={(event) => event.preventDefault()} disabled={restoringWaiverId !== null}
+                            onClick={() => void restoreTuitionWaiver(waiver)}>↩ Bỏ miễn thu</button>
+                        </div>
+                      ))}
                     </div>
                   );
                 })}
