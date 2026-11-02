@@ -123,6 +123,7 @@ export default function FinanceMonitorPage() {
   const [audit, setAudit] = useState<Audit | null>(null);
   const [tab, setTab] = useState<Tab>("issues");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [severityFilter, setSeverityFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expandedIssue, setExpandedIssue] = useState("");
@@ -172,8 +173,10 @@ export default function FinanceMonitorPage() {
   const pending = audit?.pending_closings ?? [];
   const history = audit?.history ?? [];
   const unreviewed = issues.filter((issue) => !["verified","fixed"].includes(issue.review_status ?? "unchecked")).length;
-  const displayedIssues = issues.filter((issue) => statusFilter === "all" ||
-    (issue.review_status ?? "unchecked") === statusFilter);
+  const displayedIssues = issues.filter((issue) =>
+    (statusFilter === "all" || (issue.review_status ?? "unchecked") === statusFilter) &&
+    (severityFilter === "all" || issue.severity === severityFilter)
+  );
   const groupedIssues = Object.entries(displayedIssues.reduce<Record<string, AuditIssue[]>>((acc, issue) => {
     (acc[issue.issue_type] ??= []).push(issue);
     return acc;
@@ -270,10 +273,17 @@ export default function FinanceMonitorPage() {
             <h2 className="text-xl font-black">Chứng từ và dòng tiền cần đối chiếu</h2>
             <p className="mt-1 text-sm text-slate-500">Chưa có kết quả kiểm quỹ thì không thể kết luận tiền mặt đã khớp thực tế.</p>
           </div>
-          <select className="ui-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Lọc trạng thái xác minh">
-            <option value="all">Tất cả trạng thái</option>
-            {Object.entries(reviewNames).map(([value,name]) => <option key={value} value={value}>{name}</option>)}
-          </select>
+          <div className="flex flex-wrap gap-2">
+            <select className="ui-input" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} aria-label="Lọc mức độ ưu tiên">
+              <option value="all">Tất cả mức độ</option>
+              <option value="error">Cần xử lý / xác minh</option>
+              <option value="warning">Cần lưu ý</option>
+            </select>
+            <select className="ui-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Lọc trạng thái xác minh">
+              <option value="all">Tất cả trạng thái</option>
+              {Object.entries(reviewNames).map(([value,name]) => <option key={value} value={value}>{name}</option>)}
+            </select>
+          </div>
         </div>
         {displayedIssues.length === 0
           ? <div className="ui-card p-6 text-sm text-emerald-800">Không có chứng từ bất thường theo bộ lọc hiện tại. Hãy mở mục Chốt quỹ để kiểm tra những ngày chưa xác nhận tiền thực tế.</div>
@@ -315,7 +325,9 @@ export default function FinanceMonitorPage() {
                   </div>
                   {expandedIssue === issue.issue_key && <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <p className="text-sm text-slate-700">{issue.message}</p>
-                    <Link href={guide.href} className="text-sm font-bold text-blue-700 underline">Mở mục liên quan để kiểm tra</Link>
+                    {issue.transaction_id && issue.student_name && ["payment_amount_mismatch","missing_ledger"].includes(issue.issue_type)
+                      ? <Link href={`/tuition/receipt/${issue.transaction_id}`} className="text-sm font-bold text-blue-700 underline">Mở phiếu thu gốc</Link>
+                      : <Link href={guide.href} className="text-sm font-bold text-blue-700 underline">Mở mục liên quan để kiểm tra</Link>}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="text-sm font-bold">Trạng thái xác minh
                         <select className="ui-input mt-1 w-full" value={reviewStatus} onChange={(e) => setReviewStatus(e.target.value as ReviewStatus)}>
@@ -363,7 +375,7 @@ export default function FinanceMonitorPage() {
                     <div className="font-black">{showDate(row.business_date)}</div>
                     <div className="mt-1 text-slate-500">{row.transaction_count} dòng giao dịch · Chưa chốt: {row.pending_account_names.join(", ")}</div>
                   </div>
-                  <Link href="/finance" className="font-bold text-blue-700 underline">Mở sổ quỹ</Link>
+                  <Link href={`/finance?date=${row.business_date}&branch=${row.branch_id}`} className="font-bold text-blue-700 underline">Mở sổ quỹ ngày này</Link>
                 </div>)}
               </div>
             </details>
