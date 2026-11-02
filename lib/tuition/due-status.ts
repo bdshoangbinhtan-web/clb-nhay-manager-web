@@ -36,6 +36,50 @@ export type TuitionDueStatus =
 
 export const TUITION_TRACKING_START_MONTH = "2026-10";
 
+export type ClassTuitionRowEligibilityStatus =
+  | "collectible"
+  | "student_inactive"
+  | "class_inactive"
+  | "no_active_membership"
+  | "pre_tracking"
+  | "before_membership"
+  | "after_membership";
+
+export type ClassTuitionRowEligibility = {
+  canCollectPeriod: boolean;
+  status: ClassTuitionRowEligibilityStatus;
+};
+
+/**
+ * Determines whether tuition may be collected for an unrecorded class period.
+ * UI can show an estimate only for eligible students; existing tuition records
+ * are handled separately so historical debts/payments are never erased.
+ */
+export function getClassTuitionRowEligibility(
+  studentStatus: string | null,
+  classStatus: string | null,
+  membership: TuitionMembership | undefined,
+  billingMonth: string
+): ClassTuitionRowEligibility {
+  const ineligible = (status: Exclude<ClassTuitionRowEligibilityStatus, "collectible">) => ({
+    canCollectPeriod: false,
+    status,
+  });
+
+  if (studentStatus !== "active") return ineligible("student_inactive");
+  if (classStatus !== "active") return ineligible("class_inactive");
+  if (!membership || membership.status !== "active") return ineligible("no_active_membership");
+  if (billingMonth < TUITION_TRACKING_START_MONTH) return ineligible("pre_tracking");
+
+  const startMonth = monthKey(membership.start_date);
+  const endMonth = monthKey(membership.end_date);
+  if (startMonth && billingMonth < startMonth) return ineligible("before_membership");
+  if (endMonth && billingMonth > endMonth) return ineligible("after_membership");
+
+  return { canCollectPeriod: true, status: "collectible" };
+}
+
+
 export type MembershipTuitionStatus = {
   status: TuitionDueStatus;
   firstUnpaidMonth: string | null;
