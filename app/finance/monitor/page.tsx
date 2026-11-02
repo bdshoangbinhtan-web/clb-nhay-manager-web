@@ -251,7 +251,7 @@ export default function FinanceMonitorPage() {
       <section className="grid gap-3 sm:grid-cols-3">
         <Metric label="Trường hợp cần xem" value={unreviewed} detail="Chưa hoàn tất đối chiếu" tone="rose" />
         <Metric label="Ngày / cơ sở chưa chốt" value={pending.length} detail="Chỉ tính ngày đã có giao dịch" tone="amber" />
-        <Metric label="Giao dịch đảo hợp lệ cần lưu lịch sử" value={history.length} detail="Không tự xem là lỗi" tone="slate" />
+        <Metric label="Giao dịch đảo trong lịch sử" value={history.length} detail="Không tự xem là lỗi" tone="slate" />
       </section>
 
       <nav className="flex flex-wrap gap-2 border-b border-slate-200 pb-3" aria-label="Khu vực giám sát tài chính">
@@ -381,7 +381,7 @@ export default function FinanceMonitorPage() {
               <div>
                 <div className="font-bold">{item.ledger_description || item.message}</div>
                 <div className="mt-1 text-xs text-slate-500">{showDate(item.business_date)}{item.branch_name ? ` · ${item.branch_name}` : ""}{item.account_name ? ` · ${item.account_name}` : ""}</div>
-                <div className="mt-1 text-xs text-slate-600">Đã ghi nhận giao dịch đảo · lưu lại để tra cứu</div>
+                <div className="mt-1 text-xs text-slate-600">Có giao dịch đảo · cần giữ lịch sử để đối chiếu</div>
               </div>
               {item.amount !== null && <strong>{money(Math.abs(Number(item.amount)))}</strong>}
             </div>)}
