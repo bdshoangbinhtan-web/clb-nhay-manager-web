@@ -1589,6 +1589,14 @@ export default function TuitionPage() {
       entry.class_id === row.classItem.id &&
       monthKey(entry.billing_month) === currentMonth
     );
+    const effective = tuitionForDueStatus.find((entry) =>
+      entry.student_id === row.student.id &&
+      entry.class_id === row.classItem.id &&
+      monthKey(entry.billing_month) === currentMonth
+    );
+    // A paid period inherited through a verified class transfer is also protected.
+    if (effective?.covered_by_transfer ||
+      Number(effective?.effective_amount_paid ?? effective?.amount_paid ?? 0) > 0) return null;
     if (item && (
       Number(item.amount_paid || 0) !== 0 ||
       paymentsForTuition(item.id).length > 0 ||
