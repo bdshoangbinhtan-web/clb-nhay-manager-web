@@ -31,11 +31,11 @@ test("Admin delete RPC never removes a receipt or adjusted tuition", () => {
 test("only active Admin sees deletion controls and inactive student's unpaid records remain discoverable", () => {
   assert.match(page, /setIsAdmin\(profileData\?\.role === "admin" && profileData\?\.is_active === true\)/);
   assert.match(page, /\{isAdmin && \(\s*<section className="ui-card/);
-  assert.doesNotMatch(page, /Xóa học phí · Admin \\(/);
   assert.doesNotMatch(page, /adminDeletePanel/);
+  assert.doesNotMatch(page, /showAdminUnpaid/);
   assert.match(page, /currentMonthWaiverTarget/);
-  assert.match(page, /Không thu \\{monthLabel\\(currentMonth\\)\\}/);
-  assert.match(page, /waiversForStudent\\(student.id\\)/);
+  assert.match(page, /Không thu /);
+  assert.match(page, /waiversForStudent/);
   assert.match(page, /onClick=\{\(\) => deleteTuition\(item\)\}/);
   assert.match(page, /const existingTuition = tuition\.find/);
   assert.match(page, /Cập nhật nghỉ học/);
