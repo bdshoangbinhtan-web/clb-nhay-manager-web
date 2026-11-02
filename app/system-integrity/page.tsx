@@ -679,13 +679,43 @@ export default function SystemIntegrityPage() {
                   <div className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black uppercase ${severityInfo[selectedIssue.severity].badge}`}>
                     {severityInfo[selectedIssue.severity].label}
                   </div>
-                  <h2 className="mt-3 text-2xl font-black text-slate-900">{selectedIssue.title}</h2>
+                  <h2 className="mt-3 text-2xl font-black text-slate-900">{getIntegrityGuide(selectedIssue.check_key).title}</h2>
+                  <p className="mt-2 text-sm font-semibold text-slate-600">{issueSubject(selectedIssue)}</p>
                 </div>
                 <button type="button" onClick={() => setSelectedIssue(null)} className="rounded-full bg-slate-100 px-4 py-2 font-black text-slate-600">Đóng</button>
               </div>
 
               <div className="space-y-6 p-6">
-                {paymentMismatch ? (
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Vấn đề được phát hiện</h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">{getIntegrityGuide(selectedIssue.check_key).description}</p>
+                  <h3 className="mt-4 text-sm font-black text-slate-900">Bạn nên làm gì?</h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">{getIntegrityGuide(selectedIssue.check_key).nextStep}</p>
+                  <a className="mt-3 inline-block text-sm font-black text-blue-700 hover:underline" href={getIntegrityGuide(selectedIssue.check_key).href}>
+                    Mở {getIntegrityGuide(selectedIssue.check_key).sectionName} để đối chiếu
+                  </a>
+                </div>
+                {selectedIssue.check_key === "PAY001_PAYROLL_TOTAL_MISMATCH" ? (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-xl border border-slate-200 p-4">
+                        <div className="text-xs font-bold text-slate-500">Tổng bảng lương</div>
+                        <div className="mt-2 text-xl font-black text-slate-900">{formatMoney(context.total_amount)}</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 p-4">
+                        <div className="text-xs font-bold text-slate-500">Tổng các buổi dạy</div>
+                        <div className="mt-2 text-xl font-black text-slate-900">{formatMoney(context.detail_total)}</div>
+                      </div>
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                        <div className="text-xs font-bold text-amber-700">Khoản cần đối chiếu</div>
+                        <div className="mt-2 text-xl font-black text-amber-800">{issueMoneyDifference(selectedIssue) === null ? "—" : formatMoney(Math.abs(issueMoneyDifference(selectedIssue)!))}</div>
+                      </div>
+                    </div>
+                    <p className="text-sm leading-6 text-amber-800">
+                      Lưu ý: Tổng bảng lương có thể bao gồm <b>phụ cấp</b>, trong khi tổng các buổi dạy chưa cộng phụ cấp. Vì vậy, chênh lệch này chưa chắc là sai dữ liệu.
+                    </p>
+                  </>
+                ) : paymentMismatch ? (
                   <>
                     <div>
                       <div className="text-xl font-black text-slate-900">
@@ -756,7 +786,7 @@ export default function SystemIntegrityPage() {
                   </>
                 ) : (
                   <>
-                    <p className="text-sm leading-6 text-slate-600">{selectedIssue.description}</p>
+                    <p className="text-sm leading-6 text-slate-600">Hãy đối chiếu thông tin dưới đây trước khi chỉnh sửa.</p>
                     <div className="grid gap-3 text-sm sm:grid-cols-2">
                       <div><span className="font-black text-slate-500">Nhóm:</span> {categoryLabels[selectedIssue.category] || selectedIssue.category}</div>
                       <div><span className="font-black text-slate-500">Cơ sở:</span> {selectedIssue.branch_name || "—"}</div>
