@@ -7,6 +7,7 @@ import ClassSalaryPanel from "./class-salary-panel";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type PayrollTab = "payroll" | "class-salaries";
+type DetailSort = "date" | "class";
 
 type Teacher = {
   id: string;
@@ -166,6 +167,27 @@ function sortSessionsForDisplay(
   });
 }
 
+function groupSessionsByClass(sessions: DisplaySession[], classMap: Map<string, string>) {
+  const grouped = new Map<string, DisplaySession[]>();
+
+  for (const session of sessions) {
+    const current = grouped.get(session.classId) ?? [];
+    current.push(session);
+    grouped.set(session.classId, current);
+  }
+
+  return [...grouped.entries()]
+    .map(([classId, classSessions]) => ({
+      classId,
+      className: classMap.get(classId) ?? "Lớp không xác định",
+      sessions: sortSessionsForDisplay(classSessions, classMap),
+    }))
+    .sort((a, b) =>
+      a.className.localeCompare(b.className, "vi-VN") ||
+      a.classId.localeCompare(b.classId)
+    );
+}
+
 function PayrollTabs({
   active,
   onChange,
@@ -221,6 +243,7 @@ export default function TeacherPayrollPage() {
   const [working, setWorking] = useState(false);
   const [showTransferAccountFor, setShowTransferAccountFor] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [detailSort, setDetailSort] = useState<DetailSort>("date");
 
   // Tiền Admin chỉnh riêng từng buổi.
   const [amountEdits, setAmountEdits] = useState<Record<string, string>>({});
@@ -1253,8 +1276,46 @@ export default function TeacherPayrollPage() {
                         CHI TIẾT TỪNG BUỔI
                       </div>
 
-                      <div className="space-y-3">
-                        {sortSessionsForDisplay(item.sessions, classMap).map((session) => (
+                      <div className="mb-4 grid grid-cols-2 gap-2" role="group" aria-label="Cách sắp xếp chi tiết buổi dạy">
+                        <button
+                          type="button"
+                          aria-pressed={detailSort === "date"}
+                          onClick={() => setDetailSort("date")}
+                          className={`rounded-xl border px-3 py-3 text-left text-sm font-black transition ${detailSort === "date" ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}
+                        >
+                          📅 Theo ngày
+                          <span className={`mt-1 block text-xs font-medium ${detailSort === "date" ? "text-blue-100" : "text-slate-400"}`}>
+                            Ngày mới nhất trước
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={detailSort === "class"}
+                          onClick={() => setDetailSort("class")}
+                          className={`rounded-xl border px-3 py-3 text-left text-sm font-black transition ${detailSort === "class" ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}
+                        >
+                          🏫 Theo lớp
+                          <span className={`mt-1 block text-xs font-medium ${detailSort === "class" ? "text-blue-100" : "text-slate-400"}`}>
+                            Gom buổi dạy theo từng lớp
+                          </span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-4">
+                        {(detailSort === "date"
+                          ? [{ classId: "", className: "", sessions: sortSessionsForDisplay(item.sessions, classMap) }]
+                          : groupSessionsByClass(item.sessions, classMap)
+                        ).map((group) => (
+                          <div key={group.classId || "date"} className="space-y-3">
+                            {detailSort === "class" && (
+                              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                                <div className="font-black text-blue-900">🏫 {group.className}</div>
+                                <div className="text-sm font-bold text-blue-800">
+                                  {group.sessions.length} buổi · {money(group.sessions.reduce((sum, session) => sum + session.actualAmount, 0))}
+                                </div>
+                              </div>
+                            )}
+                            {group.sessions.map((session) => (
                           <div
                             key={session.id}
                             className="rounded-2xl bg-white p-4"
@@ -1395,6 +1456,8 @@ export default function TeacherPayrollPage() {
                                 )}
                               </div>
                             </div>
+                          </div>
+                            ))}
                           </div>
                         ))}
                       </div>
