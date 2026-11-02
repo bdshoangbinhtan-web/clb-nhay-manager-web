@@ -368,26 +368,26 @@ export default function SystemIntegrityPage() {
 
   const summary = [
     {
-      label: "Mục kiểm tra đạt",
+      label: "Hạng mục đạt (lần trước)",
       value: latestRun?.passed_checks ?? 0,
       color: "text-emerald-700",
       background: "bg-emerald-50",
     },
     {
       label: "Cảnh báo cần lưu ý",
-      value: latestRun?.warning_count ?? 0,
+      value: issueStats.warning_count,
       color: "text-amber-700",
       background: "bg-amber-50",
     },
     {
       label: "Vấn đề cần xử lý",
-      value: latestRun?.error_count ?? 0,
+      value: issueStats.error_count,
       color: "text-orange-700",
       background: "bg-orange-50",
     },
     {
       label: "Cần kiểm tra ngay",
-      value: latestRun?.critical_count ?? 0,
+      value: issueStats.critical_count,
       color: "text-rose-700",
       background: "bg-rose-50",
     },
@@ -428,7 +428,7 @@ export default function SystemIntegrityPage() {
               {item.value}
             </div>
             <p className="mt-1 text-xs font-medium text-slate-500">
-              {item.label === "Mục kiểm tra đạt" ? "Số hạng mục không phát hiện bất thường" : "Số trường hợp cần đối chiếu"}
+              {item.label === "Hạng mục đạt (lần trước)" ? "Kết quả của lần chạy gần nhất" : "Đang cần đối chiếu theo bộ lọc"}
             </p>
           </div>
         ))}
@@ -463,7 +463,7 @@ export default function SystemIntegrityPage() {
         {latestRun && latestRun.status === "completed" && (
           <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-600">
             <b>{latestRun.passed_checks}/{latestRun.total_checks} hạng mục đạt.</b>{" "}
-            Những con số ở các ô còn lại là số trường hợp cần xem lại, không phải số lần hệ thống hỏng.
+            Các ô cảnh báo phía trên cho biết số trường hợp đang có theo bộ lọc hiện tại; kết quả của lần kiểm tra trước được lưu ở lịch sử.
           </p>
         )}
 
