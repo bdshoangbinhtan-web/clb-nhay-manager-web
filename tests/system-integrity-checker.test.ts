@@ -105,16 +105,18 @@ test("database and application restrict the checker to Admin", () => {
 
 test("UI provides summary, filters, history, pagination and issue details", () => {
   for (const label of [
-    "PASS",
-    "WARNING",
-    "ERROR",
-    "CRITICAL",
-    "Chạy kiểm tra ngay",
-    "Danh sách vấn đề",
-    "Lịch sử kiểm tra",
+    "Mục kiểm tra đạt",
+    "Cảnh báo cần lưu ý",
+    "Vấn đề cần xử lý",
+    "Cần kiểm tra ngay",
+    "Kiểm tra dữ liệu ngay",
+    "Các trường hợp cần đối chiếu",
+    "Xem lịch sử kiểm tra",
     "Xem chi tiết",
     "Xem dữ liệu kỹ thuật",
     "Xem thêm",
+    "Tổng bảng lương",
+    "Tổng các buổi dạy",
   ]) {
     assert.match(page, new RegExp(label));
   }
@@ -124,4 +126,8 @@ test("UI provides summary, filters, history, pagination and issue details", () =
   assert.match(page, /p_category:/);
   assert.match(page, /run_system_integrity_checks/);
   assert.match(page, /get_system_integrity_dashboard/);
+  assert.match(page, /getIntegrityGuide\(checkKey\)/);
+  assert.match(page, /groupedIssues\.map/);
+  assert.match(page, /issueMoneyDifference\(issue\)/);
+
 });
