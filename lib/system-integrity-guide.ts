@@ -71,9 +71,9 @@ export const INTEGRITY_GUIDES: Record<string, IntegrityGuide> = {
     href: "/tuition",
   },
   PAY001_PAYROLL_TOTAL_MISMATCH: {
-    title: "Tổng lương cần đối chiếu với các buổi dạy",
-    description: "Tổng tiền trên bảng lương khác với tiền cộng từ các buổi dạy chi tiết.",
-    nextStep: "Kiểm tra phụ cấp trước, sau đó đối chiếu các buổi dạy và khoản điều chỉnh. Nếu phần chênh lệch đúng bằng phụ cấp thì chưa chắc dữ liệu bị sai.",
+    title: "Tổng lương chưa khớp sau khi cộng phụ cấp",
+    description: "Hệ thống đã cộng tiền các buổi dạy với toàn bộ phụ cấp hợp lệ, nhưng tổng lương vẫn có chênh lệch.",
+    nextStep: "Đối chiếu số tiền các buổi dạy, tiền chuyên cần, tiền bù cho những buổi tháng trước chưa chấm công và tổng phải trả. Không tự ý sửa bảng lương đã chốt.",
     sectionName: "Lương giáo viên",
     href: "/teacher-payroll",
   },
