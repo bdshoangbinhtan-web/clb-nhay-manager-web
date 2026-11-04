@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 import { formatTuitionCollectionDate, getTuitionCollectionDates } from "@/lib/tuition/payment-dates";
+import { formatTuitionRecordedTimestamp, newestTuitionPayments } from "@/lib/tuition/recent-payment-history";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 import { usePrivacyView } from "@/components/layout/privacy-view-context";
 import { PaymentMethodFields, type PaymentMethod, type TransferAccount } from "@/components/payment-method-fields";
@@ -83,6 +84,7 @@ type TuitionPayment = {
   payment_method: "cash" | "transfer" | string | null;
   payment_date: string | null;
   receipt_no: string | null;
+  created_at: string | null;
 };
 
 type TuitionWaiver = {
@@ -245,6 +247,8 @@ export default function TuitionPage() {
 
   const [tuition, setTuition] = useState<Tuition[]>([]);
   const [payments, setPayments] = useState<TuitionPayment[]>([]);
+  const [paymentHistoryMethod, setPaymentHistoryMethod] = useState<"all" | "cash" | "transfer">("all");
+  const [paymentHistoryVisibleCount, setPaymentHistoryVisibleCount] = useState(12);
   const [tuitionAdjustments, setTuitionAdjustments] = useState<TuitionAdjustment[]>([]);
   const [transferHistory, setTransferHistory] = useState<TuitionTransferOut[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -435,7 +439,7 @@ export default function TuitionPage() {
         chunks.map((ids) => {
           let query = supabase
             .from("tuition_payments")
-            .select("id,tuition_id,amount,payment_method,payment_date,receipt_no")
+            .select("id,tuition_id,amount,payment_method,payment_date,receipt_no,created_at")
             .in("tuition_id", ids)
             .order("payment_date", { ascending: false });
           if (privacyView) query = query.eq("payment_method", "transfer");
@@ -505,6 +509,19 @@ export default function TuitionPage() {
   const branchById = useMemo(
     () => new Map(branches.map((branch) => [branch.id, branch])),
     [branches]
+  );
+
+  // History is ordered by the actual recorded timestamp, not the selected billing month.
+  // RLS already scopes payment rows to the current user's permitted branches.
+  const recentPaymentHistory = useMemo(
+    () => newestTuitionPayments(payments, tuition),
+    [payments, tuition]
+  );
+  const filteredPaymentHistory = useMemo(
+    () => paymentHistoryMethod === "all"
+      ? recentPaymentHistory
+      : recentPaymentHistory.filter(({ payment }) => payment.payment_method === paymentHistoryMethod),
+    [paymentHistoryMethod, recentPaymentHistory]
   );
 
   const selectedStudent = studentById.get(studentId);
@@ -2013,7 +2030,8 @@ export default function TuitionPage() {
 
       
 
-      <section className="ui-card p-6 sm:p-8">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
+      <section className="ui-card min-w-0 p-6 sm:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="text-xs font-black uppercase tracking-widest text-blue-600">
@@ -2061,7 +2079,7 @@ export default function TuitionPage() {
                   <h3 className="font-black">{branch.name}</h3>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
                   {branchClasses.map((item) => {
                     const stats = classStats(item.id);
                     const selected = selectedTuitionClassId === item.id;
@@ -2135,7 +2153,118 @@ export default function TuitionPage() {
         </div>
       </section>
 
-
+      <aside
+        aria-label="Lịch sử thu học phí"
+        className="ui-card min-w-0 p-5 xl:sticky xl:top-6"
+      >
+        <div className="text-xs font-black uppercase tracking-widest text-blue-600">
+          GIAO DỊCH GẦN NHẤT
+        </div>
+        <h2 className="mt-1 text-xl font-black text-slate-900">
+          🧾 Lịch sử thu học phí
+        </h2>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">
+          Hiển thị các khoản thực thu mới nhất, không phụ thuộc kỳ học phí đang chọn.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2" aria-label="Lọc phương thức thu">
+          {([
+            ["all", "Tất cả"],
+            ["cash", "Tiền mặt"],
+            ["transfer", "Chuyển khoản"],
+          ] as const).map(([method, label]) => (
+            <button
+              key={method}
+              type="button"
+              aria-pressed={paymentHistoryMethod === method}
+              onClick={() => {
+                setPaymentHistoryMethod(method);
+                setPaymentHistoryVisibleCount(12);
+              }}
+              className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                paymentHistoryMethod === method
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+          {loading ? (
+            <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Đang tải lịch sử thu...</p>
+          ) : filteredPaymentHistory.length === 0 ? (
+            <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
+              Chưa có giao dịch thu học phí phù hợp.
+            </p>
+          ) : (
+            filteredPaymentHistory.slice(0, paymentHistoryVisibleCount).map(({ payment, tuition: historyTuition }) => {
+              const historyStudent = studentById.get(historyTuition.student_id);
+              const historyClass = historyTuition.class_id
+                ? classById.get(historyTuition.class_id)
+                : null;
+              const isTransfer = payment.payment_method === "transfer";
+              const isCash = payment.payment_method === "cash";
+              return (
+                <article key={payment.id} className="rounded-2xl border border-slate-200 bg-white p-3.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="break-words text-sm font-black text-slate-900">
+                        {historyStudent?.full_name ?? "Học viên không còn trong danh sách"}
+                      </div>
+                      {historyStudent?.student_code && (
+                        <div className="mt-0.5 text-xs text-slate-500">{historyStudent.student_code}</div>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right text-sm font-black tabular-nums text-emerald-700">
+                      {money(Number(payment.amount))}
+                    </div>
+                  </div>
+                  <div className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${
+                    isTransfer
+                      ? "bg-blue-50 text-blue-700"
+                      : isCash
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-slate-100 text-slate-600"
+                  }`}>
+                    {isTransfer ? "🏦 Chuyển khoản" : isCash ? "💵 Tiền mặt" : "Chưa phân loại"}
+                  </div>
+                  <div className="mt-3 space-y-1.5 text-xs leading-relaxed text-slate-600">
+                    <div><span className="font-semibold text-slate-700">Lớp:</span> {historyClass?.name ?? "Không rõ lớp"}</div>
+                    <div><span className="font-semibold text-slate-700">Kỳ:</span> {monthLabel(historyTuition.billing_month)}</div>
+                    <div><span className="font-semibold text-slate-700">Ngày thu:</span> {payment.payment_date ? formatTuitionCollectionDate(payment.payment_date) : "—"}</div>
+                    <div>
+                      <span className="font-semibold text-slate-700">Giờ ghi nhận:</span>{" "}
+                      <span className="font-bold tabular-nums text-slate-900">{formatTuitionRecordedTimestamp(payment.created_at)}</span>
+                    </div>
+                    {payment.receipt_no && (
+                      <div className="break-all"><span className="font-semibold text-slate-700">Số phiếu:</span> {payment.receipt_no}</div>
+                    )}
+                  </div>
+                  <a
+                    href={`/tuition/receipt/${payment.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-3 inline-flex text-xs font-bold text-blue-700 hover:underline"
+                  >
+                    Xem phiếu thu ↗
+                  </a>
+                </article>
+              );
+            })
+          )}
+        </div>
+        {filteredPaymentHistory.length > paymentHistoryVisibleCount && (
+          <button
+            type="button"
+            className="ui-btn mt-4 w-full justify-center text-sm"
+            onClick={() => setPaymentHistoryVisibleCount((count) => count + 12)}
+          >
+            Xem thêm giao dịch ({filteredPaymentHistory.length - paymentHistoryVisibleCount} còn lại)
+          </button>
+        )}
+      </aside>
+      </div>
 
       {voicePayment && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4">
