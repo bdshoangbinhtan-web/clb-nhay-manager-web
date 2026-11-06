@@ -15,7 +15,7 @@ test("mobile student rows use cards rather than a horizontally scrolling table",
   assert.match(page, /student\.parent_phone/);
   assert.match(page, /student\.student_code/);
   const mobileSection = page.split('data-testid="class-students-mobile"')[1]
-    .split('data-testid="class-students-desktop"')[0];
+    .split('{/* Desktop keeps the existing four-column layout. */}')[0];
   assert.doesNotMatch(mobileSection, /overflow-x-auto|min-w-\[630px\]/);
   assert.match(mobileSection, /changeStudentStatus\(student, active \? "inactive" : "active"\)/);
   assert.match(mobileSection, /href=\{\`\/tuition\?studentId=/);
