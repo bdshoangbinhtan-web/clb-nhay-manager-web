@@ -171,3 +171,14 @@ test("class tuition row respects enrollment start and end month boundaries", () 
   assert.equal(getClassTuitionRowEligibility("active", "active", ended, "2026-11").status, "after_membership");
   assert.equal(getClassTuitionRowEligibility("active", "active", ended, "2026-10").canCollectPeriod, true);
 });
+
+test("a paused month is waived, not counted as tuition paid", () => {
+  const history = [
+    record("2026-10", 600000),
+    { ...record("2026-11", 0, 0), effective_amount_due: 0, effective_amount_paid: 0 },
+  ];
+  const status = getMembershipTuitionStatus(membership, "active", "active", history, "2026-11");
+  assert.equal(status.firstUnpaidMonth, "2026-12");
+  assert.equal(status.paidThroughMonth, "2026-10");
+  assert.notEqual(status.status, "PAID_AHEAD");
+});

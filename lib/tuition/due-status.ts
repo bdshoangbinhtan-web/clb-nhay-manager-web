@@ -411,7 +411,12 @@ export function getMembershipTuitionStatus(
     : naturalAnchor;
   for (let month = anchor; month < firstUnpaidMonth; month = addMonth(month)) {
     const row = history.find((item) => item.period === month);
-    if (!row || Number(row.effective_amount_paid ?? row.amount_paid) < Number(row.effective_amount_due ?? row.amount_due)) break;
+    if (!row) break;
+    const due = Number(row.effective_amount_due ?? row.amount_due);
+    const paid = Number(row.effective_amount_paid ?? row.amount_paid);
+    // A suspended/waived period is covered, not paid.
+    if (due <= 0) continue;
+    if (paid < due) break;
     paidThroughMonth = month;
   }
 
@@ -436,6 +441,7 @@ export function getMembershipTuitionStatus(
   } else if (history.some(
     (item) =>
       item.period! > current &&
+      Number(item.effective_amount_due ?? item.amount_due) > 0 &&
       Number(item.effective_amount_paid ?? item.amount_paid) >=
         Number(item.effective_amount_due ?? item.amount_due)
   )) {

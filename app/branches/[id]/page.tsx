@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { vietnamCurrentMonth } from "@/lib/vietnam-date";
 import { activeStaffRole } from "@/lib/active-staff-role";
 import { compareStudentsNewestFirst } from "@/lib/student-list-order";
 import {
@@ -46,6 +47,12 @@ type Teacher = {
   full_name: string;
 };
 
+type ClassTuitionSummary = {
+  amountDue: number;
+  amountPaid: number;
+  waived: boolean;
+};
+
 const DAY_LABELS: Record<string, string> = {
   "2": "T2",
   "3": "T3",
@@ -85,6 +92,7 @@ export default function ClassDetailPage() {
   const [classItem, setClassItem] = useState<ClassItem | null>(null);
   const [branch, setBranch] = useState<Branch | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
+  const [tuitionByStudent, setTuitionByStudent] = useState<Map<string, ClassTuitionSummary>>(new Map());
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [availableTeachers, setAvailableTeachers] = useState<Teacher[]>([]);
   const [role, setRole] = useState<"admin" | "manager" | "">("");
@@ -152,7 +160,8 @@ export default function ClassDetailPage() {
     const classTeacherSelection = "teacher_id, teachers(id,full_name)";
     const teacherSelection = "id,full_name";
 
-    const [{ data: branchData }, { data: classStudents }, { data: classTeachers }, { data: allTeachers }] =
+    const billingMonth = `${vietnamCurrentMonth()}-01`;
+    const [branchResult, studentResult, classTeacherResult, teacherResult, tuitionResult, waiverResult] =
       await Promise.all([
         supabase
           .from("branches")
@@ -176,10 +185,63 @@ export default function ClassDetailPage() {
           .select(teacherSelection)
           .eq("status", "active")
           .order("full_name"),
+
+        supabase.from("tuition")
+          .select("id,student_id,amount_due,amount_paid")
+          .eq("class_id", classId)
+          .eq("billing_month", billingMonth),
+
+        supabase.from("tuition_waivers")
+          .select("student_id")
+          .eq("class_id", classId)
+          .eq("billing_month", billingMonth)
+          .is("revoked_at", null),
     ]);
 
     if (requestId !== loadRequestRef.current) return;
+    if (tuitionResult.error || waiverResult.error || studentResult.error) {
+      setError(tuitionResult.error?.message || waiverResult.error?.message || studentResult.error?.message || "Không tải được học phí.");
+      setLoading(false);
+      return;
+    }
+    const branchData = branchResult.data;
+    const classStudents = studentResult.data;
+    const classTeachers = classTeacherResult.data;
+    const allTeachers = teacherResult.data;
 
+    const invoiceIds = (tuitionResult.data ?? []).map((row) => row.id);
+    const paymentResult = invoiceIds.length
+      ? await supabase.from("tuition_payments").select("tuition_id,amount").in("tuition_id", invoiceIds)
+      : { data: [] as Array<{ tuition_id: string; amount: number }>, error: null };
+    if (requestId !== loadRequestRef.current) return;
+    if (paymentResult.error) {
+      setError(paymentResult.error.message);
+      setLoading(false);
+      return;
+    }
+    const paidByInvoice = new Map<string, number>();
+    for (const payment of paymentResult.data ?? []) {
+      paidByInvoice.set(payment.tuition_id,
+        (paidByInvoice.get(payment.tuition_id) ?? 0) + Number(payment.amount || 0));
+    }
+    const summaries = new Map<string, ClassTuitionSummary>();
+    for (const invoice of tuitionResult.data ?? []) {
+      const previous = summaries.get(invoice.student_id);
+      summaries.set(invoice.student_id, {
+        amountDue: (previous?.amountDue ?? 0) + Number(invoice.amount_due || 0),
+        amountPaid: (previous?.amountPaid ?? 0) + Math.max(Number(invoice.amount_paid || 0), paidByInvoice.get(invoice.id) ?? 0),
+        waived: previous?.waived ?? false,
+      });
+    }
+    for (const waiver of waiverResult.data ?? []) {
+      const previous = summaries.get(waiver.student_id);
+      summaries.set(waiver.student_id, {
+        amountDue: previous?.amountDue ?? 0,
+        amountPaid: previous?.amountPaid ?? 0,
+        waived: true,
+      });
+    }
+    setTuitionByStudent(summaries);
     setBranch(branchData);
 
     const studentList = (classStudents ?? [])
@@ -224,7 +286,7 @@ export default function ClassDetailPage() {
     };
   }, [loadClass, supabase]);
 
-  useRealtimeRefresh(["classes", "students"], loadClass);
+  useRealtimeRefresh(["classes", "students", "tuition"], loadClass);
 
   const studentStatusCounts = useMemo(() => countClassStudentStatuses(students), [students]);
   const visibleStudents = useMemo(
@@ -317,7 +379,7 @@ export default function ClassDetailPage() {
     const pausing = nextStatus === "inactive";
     const accepted = window.confirm(
       pausing
-        ? `Tạm ngưng học viên ${student.full_name}?\n\nThay đổi này áp dụng cho trạng thái học viên trên toàn hệ thống.\nHọc phí đã thu, công nợ và các khoản bảo lưu/hoàn tiền KHÔNG tự thay đổi.\n\nNếu cần xử lý học phí, hãy dùng chức năng trong hồ sơ học viên.`
+        ? `Tạm ngưng ${student.full_name}?\n\nTiền học phí đã thu được giữ nguyên, không hoàn. Tháng nghỉ chưa đóng sẽ không phát sinh học phí.\nHọc lại sẽ tính từ ngày quay lại.`
         : `Chuyển ${student.full_name} về trạng thái Đang học?\n\nThay đổi áp dụng cho toàn hệ thống. Học phí không tự điều chỉnh.`,
     );
     if (!accepted) return;
@@ -340,6 +402,7 @@ export default function ClassDetailPage() {
       setStudents((current) => current.map((item) =>
         item.id === student.id ? { ...item, status: nextStatus } : item,
       ));
+      await loadClass();
     } catch (updateError) {
       alert(
         "Không thể cập nhật trạng thái học viên.\n\n" +
@@ -477,22 +540,33 @@ export default function ClassDetailPage() {
             <p className="mt-6 text-sm text-slate-500">Không có học viên thuộc trạng thái này.</p>
           ) : (
             <div className="mt-5 w-full overflow-x-auto">
-              <div className="min-w-[490px]">
-                <div className="mb-2 grid grid-cols-[minmax(0,1fr)_108px_108px] items-center gap-2 px-3 text-xs font-black text-slate-500">
+              <div className="min-w-[630px]">
+                <div className="mb-2 grid grid-cols-[minmax(0,1fr)_108px_108px_116px] items-center gap-2 px-3 text-xs font-black text-slate-500">
                   <span>Học viên</span>
                   <span className="text-center text-green-700">Đang học</span>
                   <span className="text-center text-orange-700">Tạm ngưng</span>
+                  <span className="text-center text-blue-700">Học phí</span>
                 </div>
 
                 <div className="space-y-2">
                   {visibleStudents.map((student) => {
                     const active = isStudentStudying(student.status);
                     const updating = updatingStudentId === student.id;
+                    const tuitionSummary = tuitionByStudent.get(student.id);
+                    const amountPaid = tuitionSummary?.amountPaid ?? 0;
+                    const tuitionLabel = amountPaid > 0
+                      ? amountPaid >= (tuitionSummary?.amountDue ?? 0) ? "Đã đóng" : "Đã thu một phần"
+                      : !active || tuitionSummary?.waived ? "Không phát sinh" : "Chưa đóng";
+                    const tuitionStyle = amountPaid > 0
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : !active || tuitionSummary?.waived
+                        ? "bg-slate-100 text-slate-600 border-slate-200"
+                        : "bg-amber-50 text-amber-700 border-amber-200";
 
                     return (
                       <div
                         key={student.id}
-                        className="grid grid-cols-[minmax(0,1fr)_108px_108px] items-center gap-2 rounded-2xl bg-slate-50 p-2.5 text-slate-800 sm:p-3"
+                        className="grid grid-cols-[minmax(0,1fr)_108px_108px_116px] items-center gap-2 rounded-2xl bg-slate-50 p-2.5 text-slate-800 sm:p-3"
                       >
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -543,6 +617,13 @@ export default function ClassDetailPage() {
                         >
                           {updating ? "Đang lưu..." : "Ⅱ Tạm ngưng"}
                         </button>
+                        <Link
+                          href={`/tuition?studentId=${encodeURIComponent(student.id)}&month=${vietnamCurrentMonth()}`}
+                          title={`Mở học phí tháng này của ${student.full_name}`}
+                          className={`flex min-h-9 items-center justify-center rounded-xl border px-1.5 py-1 text-center text-[11px] font-black ${tuitionStyle}`}
+                        >
+                          {tuitionLabel}
+                        </Link>
                       </div>
                     );
                   })}
@@ -551,7 +632,7 @@ export default function ClassDetailPage() {
             </div>
           )}
           <p className="mt-3 text-xs font-medium text-slate-500">
-            Đổi trạng thái áp dụng cho hồ sơ học viên. Học phí và lịch sử thu không tự thay đổi.
+            Trạng thái được đồng bộ với Học phí. Tháng nghỉ chưa đóng không phát sinh; tiền đã thu giữ nguyên.
           </p>
         </section>
 
