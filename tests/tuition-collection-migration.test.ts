@@ -39,11 +39,12 @@ test("normal tuition UI no longer exposes bulk creation and collects through the
   assert.doesNotMatch(tuitionPage, /\+ Thu học phí/);
   assert.doesNotMatch(tuitionPage, /Tạo học phí|onClick=\{createMonthlyTuition\}/i);
   assert.match(tuitionPage, /onSubmit=\{addTuition\}/);
-  assert.match(tuitionPage, /rpc\("collect_tuition_payment_idempotent_atomic"/);
+  assert.match(tuitionPage, /rpc\("collect_tuition_payment_one_shot"/);
   assert.match(tuitionPage, /collectionRequestIdRef/);
   assert.match(tuitionPage, /collectionRequestIdRef\.current \?\?= crypto\.randomUUID\(\)/);
   assert.match(tuitionPage, /p_payment_date: null/);
-  assert.match(tuitionPage, /if \(amount > remainingAmount\)/);
+  assert.match(tuitionPage, /hasFinancialHistory && amount !== recommendedAmount/);
+  assert.match(tuitionPage, /requiresTuitionVarianceExplanation\(amount, recommendedAmount\)/);
   assert.match(tuitionPage, /p_payment_method: paymentMethod/);
   assert.match(tuitionPage, /PaymentMethodFields method=\{paymentMethod\}/);
   assert.match(paymentFields, /<option value="cash">Tiền mặt<\/option>[\s\S]*?<option value="transfer">Chuyển khoản<\/option>/);
