@@ -3,9 +3,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { activeStaffRole } from "@/lib/active-staff-role";
 import { compareStudentsNewestFirst } from "@/lib/student-list-order";
+import {
+  countClassStudentStatuses,
+  filterClassStudentsByStatus,
+  isStudentStudying,
+  type ClassStudentStatusFilter,
+} from "@/lib/class-student-status";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
 
 type ClassItem = {
@@ -28,6 +35,7 @@ type Student = {
   id: string;
   student_code: string;
   full_name: string;
+  status: "active" | "inactive" | "reserved";
   join_date: string | null;
   created_at: string | null;
   parent_phone: string | null;
@@ -80,6 +88,8 @@ export default function ClassDetailPage() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [availableTeachers, setAvailableTeachers] = useState<Teacher[]>([]);
   const [role, setRole] = useState<"admin" | "manager" | "">("");
+  const [statusFilter, setStatusFilter] = useState<ClassStudentStatusFilter>("all");
+  const [updatingStudentId, setUpdatingStudentId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -154,8 +164,7 @@ export default function ClassDetailPage() {
           .from("class_students")
           .select("student_id, students!inner(id,student_code,full_name,status,join_date,created_at,parent_phone)")
           .eq("class_id", classId)
-          .eq("status", "active")
-          .eq("students.status", "active"),
+          .eq("status", "active"),
 
         supabase
           .from("class_teachers")
@@ -215,7 +224,13 @@ export default function ClassDetailPage() {
     };
   }, [loadClass, supabase]);
 
-  useRealtimeRefresh(["classes"], loadClass);
+  useRealtimeRefresh(["classes", "students", "class_students"], loadClass);
+
+  const studentStatusCounts = useMemo(() => countClassStudentStatuses(students), [students]);
+  const visibleStudents = useMemo(
+    () => filterClassStudentsByStatus(students, statusFilter),
+    [students, statusFilter],
+  );
 
   async function addTeacher() {
     if (!selectedTeacherId) {
@@ -294,6 +309,46 @@ export default function ClassDetailPage() {
     );
 
     alert("✅ Đã gỡ giáo viên khỏi lớp.");
+  }
+
+  async function changeStudentStatus(student: Student, nextStatus: "active" | "inactive") {
+    if (!role || updatingStudentId || student.status === nextStatus) return;
+
+    const pausing = nextStatus === "inactive";
+    const accepted = window.confirm(
+      pausing
+        ? `Tạm ngưng học viên ${student.full_name}?\n\nThay đổi này áp dụng cho trạng thái học viên trên toàn hệ thống.\nHọc phí đã thu, công nợ và các khoản bảo lưu/hoàn tiền KHÔNG tự thay đổi.\n\nNếu cần xử lý học phí, hãy dùng chức năng trong hồ sơ học viên.`
+        : `Chuyển ${student.full_name} về trạng thái Đang học?\n\nThay đổi áp dụng cho toàn hệ thống. Học phí không tự điều chỉnh.`,
+    );
+    if (!accepted) return;
+
+    setUpdatingStudentId(student.id);
+
+    try {
+      // Guard against concurrent edits: do not overwrite a status changed on another device.
+      const { data, error: updateError } = await supabase
+        .from("students")
+        .update({ status: nextStatus })
+        .eq("id", student.id)
+        .eq("status", student.status)
+        .select("id,status")
+        .maybeSingle();
+
+      if (updateError) throw new Error(updateError.message);
+      if (!data) throw new Error("Trạng thái đã được cập nhật ở thiết bị khác hoặc bạn không có quyền sửa.");
+
+      setStudents((current) => current.map((item) =>
+        item.id === student.id ? { ...item, status: nextStatus } : item,
+      ));
+    } catch (updateError) {
+      alert(
+        "Không thể cập nhật trạng thái học viên.\n\n" +
+        (updateError instanceof Error ? updateError.message : "Vui lòng thử lại."),
+      );
+      await loadClass();
+    } finally {
+      setUpdatingStudentId(null);
+    }
   }
 
   if (loading) {
@@ -379,42 +434,125 @@ export default function ClassDetailPage() {
         )}
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-3xl bg-white p-6 shadow-[0_8px_30px_rgba(30,45,70,.06)]">
-          <div className="flex items-center justify-between">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+        <section className="min-w-0 rounded-3xl bg-white p-4 shadow-[0_8px_30px_rgba(30,45,70,.06)] sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-2xl font-black text-slate-900">
               🧑‍🎓 Học viên
             </h2>
-
-            <span className="rounded-full bg-slate-100 px-3 py-1 font-bold text-slate-500">
-              {students.length}
+            <span className="rounded-full bg-slate-100 px-3 py-1 font-bold text-slate-600">
+              Tổng: {studentStatusCounts.all}
             </span>
           </div>
 
+          <div className="mt-4 flex flex-wrap gap-2" aria-label="Lọc trạng thái học viên">
+            {([
+              { id: "all", label: "Tất cả", count: studentStatusCounts.all },
+              { id: "active", label: "Đang học", count: studentStatusCounts.active },
+              { id: "paused", label: "Tạm ngưng", count: studentStatusCounts.paused },
+            ] as const).map((filter) => (
+              <button
+                key={filter.id}
+                type="button"
+                aria-pressed={statusFilter === filter.id}
+                onClick={() => setStatusFilter(filter.id)}
+                className={`rounded-xl border px-3 py-2 text-xs font-black transition sm:text-sm ${
+                  statusFilter === filter.id
+                    ? filter.id === "active"
+                      ? "border-green-500 bg-green-100 text-green-800"
+                      : filter.id === "paused"
+                        ? "border-orange-400 bg-orange-100 text-orange-800"
+                        : "border-blue-500 bg-blue-100 text-blue-800"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {filter.label} ({filter.count})
+              </button>
+            ))}
+          </div>
+
           {students.length === 0 ? (
-            <p className="mt-6 text-slate-500">
-              Chưa có học viên.
-            </p>
+            <p className="mt-6 text-slate-500">Chưa có học viên.</p>
+          ) : visibleStudents.length === 0 ? (
+            <p className="mt-6 text-sm text-slate-500">Không có học viên thuộc trạng thái này.</p>
           ) : (
-            <div className="mt-5 space-y-3">
-              {students.map((student) => (
-                <div
-                  key={student.id}
-                  className="rounded-2xl bg-slate-50 px-4 py-3 font-bold text-slate-800"
-                >
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <span>{student.full_name}</span>
-                    {student.parent_phone?.trim() ? (
-                      <span className="whitespace-nowrap text-sm font-semibold text-slate-600">📞 {student.parent_phone}</span>
-                    ) : null}
-                    <span className="text-xs font-black text-blue-600">
-                      {student.student_code}
-                    </span>
-                  </div>
+            <div className="mt-5 w-full overflow-x-auto">
+              <div className="min-w-[490px]">
+                <div className="mb-2 grid grid-cols-[minmax(0,1fr)_108px_108px] items-center gap-2 px-3 text-xs font-black text-slate-500">
+                  <span>Học viên</span>
+                  <span className="text-center text-green-700">Đang học</span>
+                  <span className="text-center text-orange-700">Tạm ngưng</span>
                 </div>
-              ))}
+
+                <div className="space-y-2">
+                  {visibleStudents.map((student) => {
+                    const active = isStudentStudying(student.status);
+                    const updating = updatingStudentId === student.id;
+
+                    return (
+                      <div
+                        key={student.id}
+                        className="grid grid-cols-[minmax(0,1fr)_108px_108px] items-center gap-2 rounded-2xl bg-slate-50 p-2.5 text-slate-800 sm:p-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                            <Link
+                              href={`/students/${student.id}`}
+                              title="Mở hồ sơ học viên"
+                              className="break-words text-sm font-black hover:text-blue-700 hover:underline"
+                            >
+                              {student.full_name}
+                            </Link>
+                            {student.parent_phone?.trim() ? (
+                              <span className="whitespace-nowrap text-xs font-semibold text-slate-600">
+                                📞 {student.parent_phone}
+                              </span>
+                            ) : null}
+                            <span className="text-xs font-black text-blue-600">
+                              {student.student_code}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={updatingStudentId !== null || active}
+                          aria-pressed={active}
+                          title={active ? "Học viên đang học" : "Nhấn để chuyển sang đang học"}
+                          onClick={() => void changeStudentStatus(student, "active")}
+                          className={`min-h-9 rounded-xl border px-2 py-1.5 text-xs font-black transition disabled:cursor-default ${
+                            active
+                              ? "border-green-400 bg-green-100 text-green-800"
+                              : "border-slate-200 bg-white text-slate-500 hover:border-green-300 hover:bg-green-50"
+                          }`}
+                        >
+                          {updating ? "Đang lưu..." : "✓ Đang học"}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={updatingStudentId !== null || !active}
+                          aria-pressed={!active}
+                          title={!active ? "Học viên đang tạm ngưng" : "Nhấn để tạm ngưng"}
+                          onClick={() => void changeStudentStatus(student, "inactive")}
+                          className={`min-h-9 rounded-xl border px-2 py-1.5 text-xs font-black transition disabled:cursor-default ${
+                            !active
+                              ? "border-orange-400 bg-orange-100 text-orange-800"
+                              : "border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:bg-orange-50"
+                          }`}
+                        >
+                          {updating ? "Đang lưu..." : "Ⅱ Tạm ngưng"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
+          <p className="mt-3 text-xs font-medium text-slate-500">
+            Đổi trạng thái áp dụng cho hồ sơ học viên. Học phí và lịch sử thu không tự thay đổi.
+          </p>
         </section>
 
         <section className="rounded-3xl bg-white p-6 shadow-[0_8px_30px_rgba(30,45,70,.06)]">
