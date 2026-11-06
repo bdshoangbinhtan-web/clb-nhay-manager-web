@@ -224,7 +224,7 @@ export default function ClassDetailPage() {
     };
   }, [loadClass, supabase]);
 
-  useRealtimeRefresh(["classes", "students", "class_students"], loadClass);
+  useRealtimeRefresh(["classes", "students"], loadClass);
 
   const studentStatusCounts = useMemo(() => countClassStudentStatuses(students), [students]);
   const visibleStudents = useMemo(
