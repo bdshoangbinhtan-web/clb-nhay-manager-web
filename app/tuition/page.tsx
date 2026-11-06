@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { vietnamCurrentMonth } from "@/lib/vietnam-date";
+import { suggestedTuitionAmount, requiresTuitionVarianceExplanation } from "@/lib/tuition/fee-proposal";
 import { formatTuitionCollectionDate, getTuitionCollectionDates } from "@/lib/tuition/payment-dates";
 import { formatTuitionRecordedTimestamp, newestTuitionPayments } from "@/lib/tuition/recent-payment-history";
 import { useRealtimeRefresh } from "@/components/realtime/global-realtime-provider";
@@ -116,15 +117,6 @@ type VoicePayment = {
 
 const TUITION_PER_BATCH = 80;
 
-const DAY_MAP: Record<string, number> = {
-  "2": 1,
-  "3": 2,
-  "4": 3,
-  "5": 4,
-  "6": 5,
-  "7": 6,
-  "CN": 0,
-};
 
 function money(value: number) {
   return new Intl.NumberFormat("vi-VN").format(value) + " đ";
@@ -152,89 +144,6 @@ function CollectionDatesDisplay({ dates }: { dates: string[] }) {
   );
 }
 
-function lessonsInMonth(
-  joinDate: string | null,
-  billingMonth: string,
-  scheduleDays: string[] | null
-) {
-  if (!billingMonth || !scheduleDays?.length) return 0;
-
-  const [year, month] = billingMonth.split("-").map(Number);
-  const first = new Date(year, month - 1, 1);
-  const last = new Date(year, month, 0);
-
-  let start = first;
-
-  if (joinDate) {
-    const joined = new Date(joinDate + "T00:00:00");
-
-    if (
-      joined.getFullYear() > year ||
-      (joined.getFullYear() === year && joined.getMonth() > month - 1)
-    ) {
-      return 0;
-    }
-
-    if (joined > start) start = joined;
-  }
-
-  const wanted = scheduleDays
-    .map((d) => DAY_MAP[d])
-    .filter((d): d is number => d !== undefined);
-
-  let count = 0;
-
-  for (
-    const d = new Date(start);
-    d <= last;
-    d.setDate(d.getDate() + 1)
-  ) {
-    if (wanted.includes(d.getDay())) count++;
-  }
-
-  return count;
-}
-
-function suggestedTuitionAmount(
-  student: Student,
-  classItem: ClassItem,
-  billingMonth: string,
-  enrollmentStartDate: string | null = null
-) {
-  // A resumed student pays only for scheduled days remaining in the resume month.
-  const resumedThisPeriod = student.tuition_resumed_on?.slice(0, 7) === billingMonth
-    ? student.tuition_resumed_on
-    : null;
-  const effectiveJoinDate = [student.join_date, enrollmentStartDate, resumedThisPeriod]
-    .filter((value): value is string => !!value)
-    .sort()
-    .at(-1) ?? null;
-  const lessons = lessonsInMonth(
-    effectiveJoinDate,
-    billingMonth,
-    classItem.schedule_days
-  );
-  const startMinutes = classItem.schedule_start
-    ? Number(classItem.schedule_start.slice(0, 2)) * 60 +
-      Number(classItem.schedule_start.slice(3, 5))
-    : 0;
-  const endMinutes = classItem.schedule_end
-    ? Number(classItem.schedule_end.slice(0, 2)) * 60 +
-      Number(classItem.schedule_end.slice(3, 5))
-    : 0;
-  const durationMinutes = endMinutes > startMinutes ? endMinutes - startMinutes : 60;
-  const feePerLesson = (durationMinutes / 60) * 50000;
-
-  if (!effectiveJoinDate) return Number(classItem.monthly_fee);
-
-  const [year, month] = billingMonth.split("-").map(Number);
-  const joined = new Date(effectiveJoinDate + "T00:00:00");
-  if (joined.getFullYear() === year && joined.getMonth() === month - 1) {
-    return Math.round(Math.min(lessons * feePerLesson, Number(classItem.monthly_fee)));
-  }
-  if (joined < new Date(year, month - 1, 1)) return Number(classItem.monthly_fee);
-  return 0;
-}
 
 export default function TuitionPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -1187,7 +1096,7 @@ export default function TuitionPage() {
           0
         )
       : suggestedTuitionAmount(selectedStudent, classItem, collectionMonth, membership.start_date);
-    const differentAmount = Math.abs(amount - recommendedAmount) > 0.01;
+    const differentAmount = requiresTuitionVarianceExplanation(amount, recommendedAmount);
 
     if (differentAmount && note.trim().length < 5) {
       alert(
@@ -1565,7 +1474,7 @@ export default function TuitionPage() {
       : suggestedTuitionAmount(selectedStudent, selectedClass, collectionMonth, selectedCollectionMembership.start_date)
     : Number(amountDue) || 0;
   const collectionRequiresNote = Number(amountToCollect) > 0 &&
-    Math.abs(Number(amountToCollect) - suggestedCollectionAmount) > 0.01;
+    requiresTuitionVarianceExplanation(Number(amountToCollect), suggestedCollectionAmount);
 
 
   function focusCollectionForm() {
