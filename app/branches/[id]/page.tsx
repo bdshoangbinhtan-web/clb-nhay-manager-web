@@ -696,6 +696,7 @@ export default function ClassDetailPage() {
                   })}
                 </div>
               </div>
+              </div>
             </>
           )}
           <p className="mt-3 text-xs font-medium text-slate-500">
