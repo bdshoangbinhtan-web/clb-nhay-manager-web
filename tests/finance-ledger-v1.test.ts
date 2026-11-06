@@ -175,7 +175,7 @@ test("tuition, expense and other revenue inserts all post through transactional 
   assert.match(migration, /create unique index cash_ledger_source_account_key[\s\S]*\(source_type, source_id, account_id\)/i);
 });
 
-test("tuition refunds require a stable batch, payment method and a paired ledger entry", () => {
+test("historic refund ledger integrity remains, but pause UI no longer initiates refunds", () => {
   const studentPage = readFileSync(
     new URL("../app/students/[id]/page.tsx", import.meta.url),
     "utf8",
@@ -183,11 +183,9 @@ test("tuition refunds require a stable batch, payment method and a paired ledger
   assert.match(migration, /create trigger finance_post_tuition_refund_batch after insert on public\.tuition_adjustments/i);
   assert.match(migration, /source_type='tuition_refund'/i);
   assert.match(migration, /refund_payment_method not in \('cash','transfer'\)/i);
-  assert.match(migration, /source_type in \('tuition_payment','tuition_refund'/i);
-  assert.match(studentPage, /refund_batch_id: refundBatchId/);
-  assert.match(studentPage, /setRefundPaymentMethod/);
-  assert.match(studentPage, /priorLedger/);
   assert.match(migration, /refund_amount_mismatch/);
+  assert.doesNotMatch(studentPage, /refundBatchIdRef|setRefundPaymentMethod|processSuspension|suspendModal/);
+  assert.match(studentPage, /Tiền học phí đã thu được giữ nguyên, không hoàn lại/);
 });
 
 test("cash ledger and closing history reject update, delete and truncate", () => {
