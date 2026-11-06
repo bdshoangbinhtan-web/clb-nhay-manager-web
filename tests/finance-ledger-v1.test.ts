@@ -185,7 +185,7 @@ test("historic refund ledger integrity remains, but pause UI no longer initiates
   assert.match(migration, /refund_payment_method not in \('cash','transfer'\)/i);
   assert.match(migration, /refund_amount_mismatch/);
   assert.doesNotMatch(studentPage, /refundBatchIdRef|setRefundPaymentMethod|processSuspension|suspendModal/);
-  assert.match(studentPage, /Tiền học phí đã thu được giữ nguyên, không hoàn lại/);
+  assert.match(studentPage, /Khoản đã thu không hoàn lại/);
 });
 
 test("cash ledger and closing history reject update, delete and truncate", () => {
