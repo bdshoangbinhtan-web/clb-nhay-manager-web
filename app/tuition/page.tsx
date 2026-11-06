@@ -38,6 +38,7 @@ type Student = {
   full_name: string;
   branch_id: string | null;
   join_date: string | null;
+  tuition_resumed_on: string | null;
   status: string | null;
 };
 
@@ -200,7 +201,11 @@ function suggestedTuitionAmount(
   billingMonth: string,
   enrollmentStartDate: string | null = null
 ) {
-  const effectiveJoinDate = [student.join_date, enrollmentStartDate]
+  // A resumed student pays only for scheduled days remaining in the resume month.
+  const resumedThisPeriod = student.tuition_resumed_on?.slice(0, 7) === billingMonth
+    ? student.tuition_resumed_on
+    : null;
+  const effectiveJoinDate = [student.join_date, enrollmentStartDate, resumedThisPeriod]
     .filter((value): value is string => !!value)
     .sort()
     .at(-1) ?? null;
@@ -316,7 +321,7 @@ export default function TuitionPage() {
     ] = await Promise.all([
       supabase
         .from("students")
-        .select("id,student_code,full_name,branch_id,join_date,status")
+        .select("id,student_code,full_name,branch_id,join_date,tuition_resumed_on,status")
         .order("full_name"),
       supabase.from("branches").select("id,name").order("name"),
       supabase
@@ -693,15 +698,14 @@ export default function TuitionPage() {
     const effectiveExisting = existing
       ? tuitionForDueStatus.find((item) => item.id === existing.id)
       : undefined;
+    const previousPaid = Number(effectiveExisting?.effective_amount_paid ?? existing?.amount_paid ?? 0);
     const suggested = Number(
-      existing?.amount_due ?? suggestedTuitionAmount(selectedStudent, classItem, period, membership?.start_date ?? null)
+      previousPaid > 0 && existing
+        ? existing.amount_due
+        : suggestedTuitionAmount(selectedStudent, classItem, period, membership?.start_date ?? null)
     );
-    const remaining = existing
-      ? Math.max(
-          Number(effectiveExisting?.effective_amount_due ?? existing.amount_due) -
-            Number(effectiveExisting?.effective_amount_paid ?? existing.amount_paid),
-          0
-        )
+    const remaining = previousPaid > 0 && existing
+      ? Math.max(Number(effectiveExisting?.effective_amount_due ?? existing.amount_due) - previousPaid, 0)
       : suggested;
     setAmountDue(String(suggested));
     setAmountToCollect(String(remaining));
@@ -1138,11 +1142,9 @@ export default function TuitionPage() {
       return;
     }
 
-    const dueAmount = Number(amountDue);
     const amount = Number(amountToCollect);
-
-    if (!Number.isFinite(dueAmount) || dueAmount < 0 || !Number.isFinite(amount) || amount <= 0) {
-      alert("Số tiền học phí hoặc số tiền thực thu không hợp lệ.");
+    if (!Number.isFinite(amount) || amount <= 0) {
+      alert("Số tiền thực thu phải lớn hơn 0.");
       return;
     }
 
@@ -1150,7 +1152,6 @@ export default function TuitionPage() {
     const membership = activeMemberships.find(
       (item) => item.student_id === studentId && item.class_id === classId
     );
-
     if (!classItem || !membership || selectedStudent?.status !== "active") {
       alert("Học viên hiện không có lớp đang học.");
       return;
@@ -1171,28 +1172,42 @@ export default function TuitionPage() {
       alert("Tháng này học viên đã đóng ở lớp cũ trước khi chuyển lớp. Không thu trùng học phí.");
       return;
     }
-    const expectedAmount = existing
-      ? Number(existing.amount_due)
-      : suggestedTuitionAmount(selectedStudent, classItem, collectionMonth, membership.start_date);
+
     const effectiveExisting = existing
       ? tuitionForDueStatus.find((item) => item.id === existing.id)
       : undefined;
-    const remainingAmount = existing
+    const alreadyPaid = Number(effectiveExisting?.effective_amount_paid ?? existing?.amount_paid ?? 0);
+    const hasFinancialHistory = Boolean(existing && (
+      alreadyPaid > 0 || paymentsByTuition.has(existing.id) ||
+      tuitionAdjustments.some((adjustment) => adjustment.tuition_id === existing.id || adjustment.target_tuition_id === existing.id)
+    ));
+    const recommendedAmount = hasFinancialHistory && existing
       ? Math.max(
-          Number(effectiveExisting?.effective_amount_due ?? existing.amount_due) -
-            Number(effectiveExisting?.effective_amount_paid ?? existing.amount_paid),
+          Number(effectiveExisting?.effective_amount_due ?? existing.amount_due) - alreadyPaid,
           0
         )
-      : dueAmount;
-    const noteParts = [note.trim()];
-    if (manualPeriod) noteParts.push(`Kỳ được chọn thủ công: ${collectionMonth}`);
-    if (Math.abs(dueAmount - expectedAmount) > 0.01) {
-      noteParts.push(`Điều chỉnh số học phí thủ công: đề xuất ${expectedAmount}, áp dụng ${dueAmount}`);
-    }
+      : suggestedTuitionAmount(selectedStudent, classItem, collectionMonth, membership.start_date);
+    const differentAmount = Math.abs(amount - recommendedAmount) > 0.01;
 
-    if (amount > remainingAmount) {
-      alert("Số tiền thực thu không được lớn hơn số còn lại của kỳ.");
+    if (differentAmount && note.trim().length < 5) {
+      alert(
+        "Số tiền thực thu khác mức hệ thống đề xuất (" +
+        money(recommendedAmount) + ").\nVui lòng ghi rõ lý do trong phần Ghi chú (ít nhất 5 ký tự)."
+      );
       return;
+    }
+    if (hasFinancialHistory && amount !== recommendedAmount) {
+      alert("Kỳ này có lịch sử thu/điều chỉnh. Chỉ được thu hết số còn lại, không sửa khoản cũ.");
+      return;
+    }
+    // With no previous payment, the actual collected amount is the FINAL tuition,
+    // not an instalment. The server adjusts an unpaid invoice atomically.
+    const noteParts = [note.trim()];
+    if (manualPeriod) noteParts.push("Kỳ được chọn thủ công: " + collectionMonth);
+    if (differentAmount) {
+      noteParts.push(
+        "Thu khác đề xuất: " + recommendedAmount + " đ → " + amount + " đ"
+      );
     }
 
     const paymentLabel = paymentMethod === "transfer"
@@ -1204,6 +1219,8 @@ export default function TuitionPage() {
       `Lớp: ${classItem.name}\n` +
       `Kỳ: ${monthLabel(collectionMonth)}\n` +
       `Số tiền: ${money(amount)}\n` +
+      `Hệ thống đề xuất: ${money(recommendedAmount)}\n` +
+      (differentAmount ? `Giải trình: ${note.trim()}\n` : "") +
       `Thanh toán: ${paymentLabel}\n\n` +
       "Chỉ bấm OK khi đã nhận tiền thực tế."
     );
@@ -1212,12 +1229,12 @@ export default function TuitionPage() {
     setSaving(true);
     collectionRequestIdRef.current ??= crypto.randomUUID();
     const receiptWindow = window.open("", "_blank");
-    const { data, error } = await supabase.rpc("collect_tuition_payment_idempotent_atomic", {
+    const { data, error } = await supabase.rpc("collect_tuition_payment_one_shot", {
       p_student_id: studentId,
       p_class_id: classId,
       p_billing_month: periodDate(collectionMonth),
-      p_amount_due: dueAmount,
-      p_amount: amount,
+      p_actual_amount: amount,
+      p_suggested_amount: recommendedAmount,
       p_payment_method: paymentMethod,
       p_client_request_id: collectionRequestIdRef.current,
       p_payment_date: null,
@@ -1530,6 +1547,27 @@ export default function TuitionPage() {
     ? tuitionForDueStatus.find((item) => item.id === selectedCollectionRecord.id)
     : undefined;
 
+  const selectedCollectionHasHistory = Boolean(selectedCollectionRecord && (
+    Number(selectedCollectionEffective?.effective_amount_paid ?? selectedCollectionRecord.amount_paid ?? 0) > 0 ||
+    paymentsByTuition.has(selectedCollectionRecord.id) ||
+    tuitionAdjustments.some((row) =>
+      row.tuition_id === selectedCollectionRecord.id ||
+      row.target_tuition_id === selectedCollectionRecord.id
+    )
+  ));
+  const suggestedCollectionAmount = selectedStudent && selectedClass && selectedCollectionMembership
+    ? selectedCollectionHasHistory && selectedCollectionRecord
+      ? Math.max(
+          Number(selectedCollectionEffective?.effective_amount_due ?? selectedCollectionRecord.amount_due) -
+          Number(selectedCollectionEffective?.effective_amount_paid ?? selectedCollectionRecord.amount_paid),
+          0
+        )
+      : suggestedTuitionAmount(selectedStudent, selectedClass, collectionMonth, selectedCollectionMembership.start_date)
+    : Number(amountDue) || 0;
+  const collectionRequiresNote = Number(amountToCollect) > 0 &&
+    Math.abs(Number(amountToCollect) - suggestedCollectionAmount) > 0.01;
+
+
   function focusCollectionForm() {
     window.setTimeout(() => {
       document.getElementById("create-tuition-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1720,8 +1758,8 @@ export default function TuitionPage() {
             <label className="text-sm font-bold">Kỳ học phí
               <input type="month" value={collectionMonth} onChange={(event) => { setCollectionMonth(event.target.value); setManualPeriod(true); }} className="ui-input mt-1 w-full" required />
             </label>
-            <label className="text-sm font-bold">Số tiền học phí
-              <input type="number" min="0" step="1000" value={amountDue} onChange={(event) => setAmountDue(event.target.value)} className="ui-input mt-1 w-full" required />
+            <label className="text-sm font-bold">Hệ thống đề xuất
+              <input type="number" value={suggestedCollectionAmount} className="ui-input mt-1 w-full bg-slate-50" readOnly />
             </label>
             <label className="text-sm font-bold">Số tiền thực thu
               <input ref={amountToCollectInputRef} type="number" min="1000" step="1000" value={amountToCollect} onChange={(event) => setAmountToCollect(event.target.value)} className="ui-input mt-1 w-full" required />
@@ -1731,8 +1769,9 @@ export default function TuitionPage() {
                 <option value="">Chọn H / A / S / V</option>{(["H", "A", "S", "V"] as const).map((account) => <option key={account} value={account}>{account}</option>)}
               </select>
             </label>
-            <label className="text-sm font-bold sm:col-span-2">Ghi chú
-              <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="ui-input mt-1 w-full" />
+            <label className="text-sm font-bold sm:col-span-2">
+              Ghi chú {collectionRequiresNote ? <span className="text-red-600">(bắt buộc vì thu khác đề xuất)</span> : "(không bắt buộc)"}
+              <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="ui-input mt-1 w-full" required={collectionRequiresNote} />
             </label>
             <div className="flex justify-end gap-2 sm:col-span-2">
               <button type="button" className="ui-btn" onClick={() => { setShowForm(false); setTransferAccount(""); }}>Hủy</button>
@@ -1967,8 +2006,8 @@ export default function TuitionPage() {
             </div>
 
             <label className="block">
-              <div className="mb-2 text-sm font-bold">Số tiền đề xuất</div>
-              <input type="number" min="0" step="1000" value={amountDue} onChange={(e) => setAmountDue(e.target.value)} className="ui-input" />
+              <div className="mb-2 text-sm font-bold">Hệ thống đề xuất (theo ngày học)</div>
+              <input type="number" value={suggestedCollectionAmount} className="ui-input bg-slate-50" readOnly />
             </label>
 
             <label className="block">
@@ -1987,7 +2026,8 @@ export default function TuitionPage() {
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 rows={3}
-                placeholder="Ví dụ: tháng đầu vào học giữa tháng..."
+                placeholder={collectionRequiresNote ? "Bắt buộc giải trình lý do thu khác mức hệ thống" : "Ghi chú thêm (không bắt buộc)" }
+                required={collectionRequiresNote}
                 className="ui-input"
               />
             </label>
