@@ -447,7 +447,7 @@ export default function ClassDetailPage() {
   );
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6 lg:p-8">
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-3 sm:p-6 lg:p-8">
       <div className="mb-8">
         <button
           onClick={() => router.push("/branches")}
@@ -498,17 +498,17 @@ export default function ClassDetailPage() {
       </section>
 
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-        <section className="min-w-0 rounded-3xl bg-white p-4 shadow-[0_8px_30px_rgba(30,45,70,.06)] sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-2xl font-black text-slate-900">
+        <section className="min-w-0 rounded-3xl bg-white p-3 shadow-[0_8px_30px_rgba(30,45,70,.06)] sm:p-6">
+          <div className="flex items-center justify-between gap-2 sm:gap-3">
+            <h2 className="text-xl font-black text-slate-900 sm:text-2xl">
               🧑‍🎓 Học viên
             </h2>
-            <span className="rounded-full bg-slate-100 px-3 py-1 font-bold text-slate-600">
+            <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 sm:text-sm">
               Tổng: {studentStatusCounts.all}
             </span>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2" aria-label="Lọc trạng thái học viên">
+          <div className="mt-4 grid grid-cols-3 gap-1 sm:flex sm:flex-wrap sm:gap-2" aria-label="Lọc trạng thái học viên">
             {([
               { id: "all", label: "Tất cả", count: studentStatusCounts.all },
               { id: "active", label: "Đang học", count: studentStatusCounts.active },
@@ -519,7 +519,7 @@ export default function ClassDetailPage() {
                 type="button"
                 aria-pressed={statusFilter === filter.id}
                 onClick={() => setStatusFilter(filter.id)}
-                className={`rounded-xl border px-3 py-2 text-xs font-black transition sm:text-sm ${
+                className={`min-w-0 whitespace-nowrap rounded-xl border px-1 py-2 text-[10px] font-black transition min-[360px]:text-xs sm:px-3 sm:text-sm ${
                   statusFilter === filter.id
                     ? filter.id === "active"
                       ? "border-green-500 bg-green-100 text-green-800"
@@ -539,8 +539,75 @@ export default function ClassDetailPage() {
           ) : visibleStudents.length === 0 ? (
             <p className="mt-6 text-sm text-slate-500">Không có học viên thuộc trạng thái này.</p>
           ) : (
-            <div className="mt-5 w-full overflow-x-auto">
-              <div className="min-w-[630px]">
+
+            <>
+              {/* Mobile: show student identity and the two essential actions without horizontal scrolling. */}
+              <div className="mt-4 space-y-2 xl:hidden" data-testid="class-students-mobile">
+                {visibleStudents.map((student) => {
+                  const active = isStudentStudying(student.status);
+                  const updating = updatingStudentId === student.id;
+                  const tuitionSummary = tuitionByStudent.get(student.id);
+                  const amountPaid = tuitionSummary?.amountPaid ?? 0;
+                  const tuitionLabel = amountPaid > 0
+                    ? amountPaid >= (tuitionSummary?.amountDue ?? 0) ? "Đã đóng" : "Đã thu một phần"
+                    : !active || tuitionSummary?.waived ? "Không phát sinh" : "Chưa đóng";
+                  const tuitionStyle = amountPaid > 0
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : !active || tuitionSummary?.waived
+                      ? "border-slate-200 bg-white text-slate-600"
+                      : "border-amber-200 bg-amber-50 text-amber-700";
+
+                  return (
+                    <article key={student.id} className="min-w-0 rounded-xl border border-slate-100 bg-slate-50 p-3 text-slate-800">
+                      <Link
+                        href={`/students/${student.id}`}
+                        title="Mở hồ sơ học viên"
+                        className="block break-words text-sm font-black leading-snug text-slate-900 hover:text-blue-700 hover:underline"
+                      >
+                        {student.full_name}
+                      </Link>
+                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        {student.parent_phone?.trim() ? (
+                          <span className="text-[11px] font-semibold text-slate-500">
+                            📞 {student.parent_phone}
+                          </span>
+                        ) : null}
+                        <span className="text-[11px] font-bold text-blue-600">
+                          {student.student_code}
+                        </span>
+                      </div>
+                      <div className="mt-2.5 grid min-w-0 grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          disabled={updatingStudentId !== null}
+                          aria-label={`${student.full_name}: ${active ? "Đang học, nhấn để tạm ngưng" : "Tạm ngưng, nhấn để học lại"}`}
+                          aria-pressed={active}
+                          title={active ? "Nhấn để tạm ngưng" : "Nhấn để chuyển sang đang học"}
+                          onClick={() => void changeStudentStatus(student, active ? "inactive" : "active")}
+                          className={`flex min-h-10 min-w-0 items-center justify-center rounded-lg border px-2 py-2 text-center text-xs font-black transition disabled:opacity-60 ${
+                            active
+                              ? "border-green-200 bg-green-50 text-green-800 hover:bg-green-100"
+                              : "border-orange-200 bg-orange-50 text-orange-800 hover:bg-orange-100"
+                          }`}
+                        >
+                          {updating ? "Đang lưu..." : active ? "✓ Đang học" : "Ⅱ Tạm ngưng"}
+                        </button>
+                        <Link
+                          href={`/tuition?studentId=${encodeURIComponent(student.id)}&month=${vietnamCurrentMonth()}`}
+                          title={`Xem học phí tháng này của ${student.full_name}`}
+                          className={`flex min-h-10 min-w-0 items-center justify-center rounded-lg border px-1.5 py-2 text-center text-xs font-black ${tuitionStyle}`}
+                        >
+                          {tuitionLabel}
+                        </Link>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              {/* Desktop keeps the existing four-column layout. */}
+              <div className="mt-5 hidden w-full overflow-x-auto xl:block" data-testid="class-students-desktop">
+                <div className="min-w-[630px]">
                 <div className="mb-2 grid grid-cols-[minmax(0,1fr)_108px_108px_116px] items-center gap-2 px-3 text-xs font-black text-slate-500">
                   <span>Học viên</span>
                   <span className="text-center text-green-700">Đang học</span>
@@ -629,7 +696,7 @@ export default function ClassDetailPage() {
                   })}
                 </div>
               </div>
-            </div>
+            </>
           )}
           <p className="mt-3 text-xs font-medium text-slate-500">
             Trạng thái được đồng bộ với Học phí. Tháng nghỉ chưa đóng không phát sinh; tiền đã thu giữ nguyên.
