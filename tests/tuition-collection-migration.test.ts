@@ -52,7 +52,7 @@ test("normal tuition UI no longer exposes bulk creation and collects through the
   assert.ok(tuitionPage.indexOf("placeholder=\"🔎 Tìm tên hoặc mã học viên...\"") < tuitionPage.indexOf("ĐÃ THU THÁNG NÀY"));
   assert.ok(tuitionPage.indexOf("ĐÃ THU THÁNG NÀY") < tuitionPage.indexOf("HỌC VIÊN CẦN THU"));
   assert.ok(tuitionPage.indexOf("HỌC VIÊN CẦN THU") < tuitionPage.indexOf("Danh sách cần xử lý"));
-  assert.ok(tuitionPage.indexOf("Danh sách cần xử lý") < tuitionPage.indexOf("QUẢN LÝ HỌC PHÍ THEO LỚP"));
+  assert.ok(tuitionPage.indexOf("QUẢN LÝ HỌC PHÍ THEO LỚP") < tuitionPage.indexOf("Danh sách cần xử lý"), "Quản lý học phí theo lớp đặt trước danh sách cần xử lý");
   assert.match(tuitionPage, /function openCollectionForDueRow/);
   assert.doesNotMatch(tuitionPage, /amountToCollectInputRef\.current\?\.focus/);
   assert.doesNotMatch(tuitionPage, /ref=\{amountToCollectInputRef\}/);
