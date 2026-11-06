@@ -150,7 +150,6 @@ export default function TuitionPage() {
   const { privacyView } = usePrivacyView();
   const loadRequestRef = useRef(0);
   const collectionRequestIdRef = useRef<string | null>(null);
-  const amountToCollectInputRef = useRef<HTMLInputElement | null>(null);
   const newStudentPrefillRef = useRef(false);
   const urlContextAppliedRef = useRef(false);
 
@@ -1671,7 +1670,7 @@ export default function TuitionPage() {
               <input type="number" value={suggestedCollectionAmount} className="ui-input mt-1 w-full bg-slate-50" readOnly />
             </label>
             <label className="text-sm font-bold">Số tiền thực thu
-              <input ref={amountToCollectInputRef} type="number" min="1000" step="1000" value={amountToCollect} onChange={(event) => setAmountToCollect(event.target.value)} className="ui-input mt-1 w-full" required />
+              <input type="number" min="1000" step="1000" value={amountToCollect} onChange={(event) => setAmountToCollect(event.target.value)} className="ui-input mt-1 w-full" required />
             </label>
             <label className="text-sm font-bold">Tài khoản chuyển khoản
               <select value={transferAccount} onChange={(event) => setTransferAccount(event.target.value as TransferAccount | "")} className="ui-input mt-1 w-full" required>
@@ -1921,7 +1920,7 @@ export default function TuitionPage() {
 
             <label className="block">
               <div className="mb-2 text-sm font-bold">Số tiền thực thu</div>
-              <input ref={amountToCollectInputRef} type="number" min="1000" step="1000" value={amountToCollect} onChange={(e) => setAmountToCollect(e.target.value)} className="ui-input" />
+              <input type="number" min="1000" step="1000" value={amountToCollect} onChange={(e) => setAmountToCollect(e.target.value)} className="ui-input" />
             </label>
 
             <div className="md:col-span-2">
