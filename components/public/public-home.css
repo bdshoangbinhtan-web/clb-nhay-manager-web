@@ -16,6 +16,8 @@
 
 .abk-public *, .abk-public *::before, .abk-public *::after { box-sizing: border-box; }
 .abk-public h1, .abk-public h2, .abk-public h3, .abk-public p { margin: 0; }
+.abk-hero h1.abk-kicker { font-family: inherit; line-height: 1.4; }
+.abk-branch-list small a { color: var(--orange); text-decoration: underline; }
 .abk-public button, .abk-public input, .abk-public select, .abk-public textarea { font: inherit; }
 .abk-public button { cursor: pointer; }
 .abk-public img { object-fit: cover; }
@@ -70,10 +72,10 @@
 .abk-hero { background: var(--black); display: grid; grid-template-columns: 42% 58%; min-height: min(880px, 100vh); padding-top: 92px; }
 .abk-hero-copy { align-self: center; color: var(--white); min-width: 0; padding: clamp(60px, 8vw, 132px) clamp(28px, 4.8vw, 78px); position: relative; transform: translateY(-75px); z-index: 2; }
 .abk-kicker { color: var(--orange); font-size: 10px; font-weight: 800; letter-spacing: .18em; margin-bottom: 22px !important; text-transform: uppercase; }
-.abk-hero h1, .abk-public h2 { font-family: "Archivo Black", Impact, sans-serif; font-weight: 400; letter-spacing: -.055em; text-transform: uppercase; }
-.abk-hero h1 { font-size: clamp(56px, 6.25vw, 112px); line-height: .86; }
-.abk-hero h1 span { display: block; }
-.abk-hero h1 span:nth-child(2) { color: var(--orange); }
+.abk-hero-title, .abk-public h2 { font-family: "Archivo Black", Impact, sans-serif; font-weight: 400; letter-spacing: -.055em; text-transform: uppercase; }
+.abk-hero-title { font-size: clamp(56px, 6.25vw, 112px); line-height: .86; }
+.abk-hero-title span { display: block; }
+.abk-hero-title span:nth-child(2) { color: var(--orange); }
 .abk-hero-slogan { border-left: 3px solid var(--orange); font-size: clamp(17px, 1.45vw, 24px); line-height: 1.45; margin-top: 42px !important; padding-left: 18px; }
 .abk-hero-actions { align-items: center; display: flex; gap: 30px; margin-top: 42px; }
 .abk-text-link { color: var(--white); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
@@ -219,7 +221,7 @@
   .abk-nav .abk-button { margin-top: 16px; width: 100%; }
   .abk-hero { display: flex; flex-direction: column; min-height: 0; padding-top: 68px; }
   .abk-hero-copy { align-self: stretch; margin-bottom: -60px; padding: 58px 24px 47px; transform: translateY(-60px); width: 100%; }
-  .abk-hero h1 { font-size: clamp(50px, 16vw, 70px); }
+  .abk-hero-title { font-size: clamp(50px, 16vw, 70px); }
   .abk-hero-slogan { font-size: 16px; margin-top: 31px !important; }
   .abk-hero-actions { align-items: flex-start; flex-direction: column; gap: 22px; margin-top: 32px; }
   .abk-hero-image { border-radius: 28px 28px 0 0; margin-top: -18px; min-height: 480px; order: 2; }
@@ -273,7 +275,7 @@
 }
 
 @media (max-width: 430px) {
-  .abk-hero h1 { font-size: 50px; }
+  .abk-hero-title { font-size: 50px; }
   .abk-hero-image { min-height: 430px; }
   .abk-program-card, .abk-program-card:nth-child(3), .abk-program-card:nth-child(4) { grid-template-columns: 48% 52%; }
   .abk-program-copy { padding: 15px; }

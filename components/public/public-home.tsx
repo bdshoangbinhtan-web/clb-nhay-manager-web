@@ -64,9 +64,11 @@ const teachers = [
 ] as const;
 
 const branches = [
-  { name: "Cơ sở 1", address: "1033 Tỉnh Lộ 10", detail: "9 lớp đang hoạt động" },
-  { name: "Cơ sở 2", address: "299A Tân Hòa Đông", detail: "13 lớp đang hoạt động" },
+  { name: "Cơ sở 1", address: "1033 Tỉnh Lộ 10, TP.HCM", detail: "9 lớp đang hoạt động" },
+  { name: "Cơ sở 2", address: "299A Tân Hòa Đông, TP.HCM", detail: "13 lớp đang hoạt động" },
 ] as const;
+
+const mapsUrl = (address: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`ANGEL BK ${address}`)}`;
 
 function isValidAge(value: string) {
   const clean = value.trim();
@@ -172,8 +174,8 @@ export default function PublicHome() {
       <main>
         <section className="abk-hero">
           <div className="abk-hero-copy">
-            <p className="abk-kicker">CLB NHẢY DÀNH CHO TRẺ EM · TP.HCM</p>
-            <h1><span>DANCE.</span><span>HIPHOP.</span><span>PERFORM.</span></h1>
+            <h1 className="abk-kicker">Lớp nhảy hiphop cho bé · Bình Tân – Quận 6, TP.HCM</h1>
+            <p className="abk-hero-title"><span>DANCE.</span><span>HIPHOP.</span><span>PERFORM.</span></p>
             <p className="abk-hero-slogan">Mỗi bước nhảy —<br />một bước trưởng thành.</p>
             <div className="abk-hero-actions">
               <button className="abk-button" type="button" onClick={() => scrollToSignup()}>Đăng ký học thử <b>↗</b></button>
@@ -222,7 +224,7 @@ export default function PublicHome() {
               {branches.map((branch, index) => (
                 <article key={branch.name}>
                   <span>0{index + 1}</span>
-                  <div><h3>{branch.name}</h3><p>{branch.address}</p><small>{branch.detail}</small></div>
+                  <div><h3>{branch.name}</h3><p>{branch.address}</p><small>{branch.detail} · <a href={mapsUrl(branch.address)} target="_blank" rel="noopener noreferrer">Chỉ đường ↗</a></small></div>
                 </article>
               ))}
             </div>
@@ -301,7 +303,7 @@ export default function PublicHome() {
 
       <footer className="abk-footer">
         <div className="abk-footer-brand"><Image src="/images/angelbk/brand/angel-bk-logo.webp" alt="ANGEL BK" width={160} height={80} /><p>Mỗi bước nhảy — một bước trưởng thành.</p></div>
-        <div><h3>Địa chỉ</h3>{branches.map((branch) => <p key={branch.name}><b>{branch.name}</b> · {branch.address}</p>)}</div>
+        <div><h3>Địa chỉ</h3>{branches.map((branch) => <p key={branch.name}><b>{branch.name}</b> · <a href={mapsUrl(branch.address)} target="_blank" rel="noopener noreferrer">{branch.address}</a></p>)}</div>
         <div><h3>Liên hệ</h3><a href="tel:0933309336">0933 309 336</a><a href="https://video.angelbk.vn">Video của bé ↗</a></div>
         <button className="abk-button abk-button-light" type="button" onClick={() => scrollToSignup()}>Đăng ký học thử</button>
         <p className="abk-copyright">© {new Date().getFullYear()} ANGEL BK. All moves reserved.</p>

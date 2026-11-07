@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { entryRedirect } from "../lib/middleware-entry.ts";
+import { entryRedirect, isPublicSeoFile } from "../lib/middleware-entry.ts";
+
+test("SEO files are public so crawlers are not sent to login", () => {
+  assert.equal(isPublicSeoFile("/robots.txt"), true);
+  assert.equal(isPublicSeoFile("/sitemap.xml"), true);
+  assert.equal(isPublicSeoFile("/googleed497b2fe46cb459.html"), true);
+  assert.equal(isPublicSeoFile("/dashboard"), false);
+  assert.equal(isPublicSeoFile("/google-evil/x.html"), false);
+  assert.equal(isPublicSeoFile("/googleXYZ.html"), false);
+});
 
 test("authenticated admin and teacher stay on the public homepage", () => {
   assert.equal(entryRedirect("/", "admin"), null);
