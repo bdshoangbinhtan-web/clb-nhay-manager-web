@@ -8,6 +8,7 @@ import MobileBottomNav from "./mobile-bottom-nav";
 import { GlobalRealtimeProvider } from "@/components/realtime/global-realtime-provider";
 import { PrivacyViewProvider, usePrivacyView } from "./privacy-view-context";
 import PrivacyWorkspace from "./privacy-workspace";
+import { isPublicPage } from "@/lib/middleware-entry";
 
 function allowsPrivacyPath(pathname: string) {
   return ["/dashboard", "/branches", "/students", "/tuition", "/finance"].includes(pathname) ||
@@ -47,7 +48,8 @@ export default function AppShell({
 }) {
   const pathname = usePathname();
 
-  if (pathname === "/login" || pathname === "/" || (pathname === "/privacy" || pathname === "/abk-family/privacy") || pathname === "/delete-account") {
+  // Trang công khai (/, chính sách, /lop-hoc/*) không dùng khung quản lý.
+  if (pathname === "/login" || pathname === "/" || isPublicPage(pathname)) {
     return children;
   }
 

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { FormEvent, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { answeredFaqs, branchAddress, branches, isKnown, openingHoursLines, programPath, programs, teachers } from "@/lib/public-content";
 import "./public-home.css";
 
 type FormState = {
@@ -25,48 +26,7 @@ const initialForm: FormState = {
   note: "",
 };
 
-const programs = [
-  {
-    title: "Kids cơ bản",
-    label: "Nền tảng đầu tiên",
-    description: "Làm quen nhịp điệu, kiểm soát cơ thể và xây dựng sự tự tin từ những chuyển động đầu tiên.",
-    image: "/images/angelbk/programs/kids-dance-energy.webp",
-    crop: "center 30%",
-  },
-  {
-    title: "Kids nâng cao",
-    label: "Nâng cấp kỹ năng",
-    description: "Phát triển kỹ thuật, cá tính biểu diễn và khả năng làm việc cùng đội nhóm.",
-    image: "/images/angelbk/programs/street-crew.webp",
-    crop: "center 40%",
-  },
-  {
-    title: "Crew & biểu diễn",
-    label: "Cùng nhau tỏa sáng",
-    description: "Rèn luyện trong đội hình, chinh phục sân khấu và lưu lại những trải nghiệm đáng nhớ.",
-    image: "/images/angelbk/programs/studio-community.webp",
-    crop: "center 44%",
-  },
-  {
-    title: "Lớp cuối tuần",
-    label: "Nhịp vui cuối tuần",
-    description: "Một khoảng thời gian giàu năng lượng để con vận động, kết nối và thể hiện chính mình.",
-    image: "/images/angelbk/programs/stage-solo.webp",
-    crop: "center 34%",
-  },
-] as const;
-
-const teachers = [
-  { name: "Cô Nhung", image: "/images/angelbk/teachers/co-nhung.webp", crop: "center 22%" },
-  { name: "Cô Nga", image: "/images/angelbk/teachers/co-nga.webp", crop: "center 18%" },
-  { name: "Cô Thủy", image: "/images/angelbk/teachers/co-thuy.webp", crop: "center 16%" },
-  { name: "Thầy Huy", image: "/images/angelbk/teachers/thay-huy.webp", crop: "center 18%" },
-] as const;
-
-const branches = [
-  { name: "Cơ sở 1", address: "1033 Tỉnh Lộ 10, TP.HCM", detail: "9 lớp đang hoạt động" },
-  { name: "Cơ sở 2", address: "299A Tân Hòa Đông, TP.HCM", detail: "13 lớp đang hoạt động" },
-] as const;
+const faqItems = answeredFaqs();
 
 const mapsUrl = (address: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`ANGEL BK ${address}`)}`;
 
@@ -166,6 +126,7 @@ export default function PublicHome() {
           <a href="#giao-vien" onClick={() => setMenuOpen(false)}>Giáo viên</a>
           <a href="#co-so" onClick={() => setMenuOpen(false)}>Cơ sở</a>
           <a href="#hoat-dong" onClick={() => setMenuOpen(false)}>Hoạt động</a>
+          {faqItems.length > 0 && <a href="#hoi-dap" onClick={() => setMenuOpen(false)}>Hỏi đáp</a>}
           <a className="abk-nav-video" href="https://video.angelbk.vn">Video của bé ↗</a>
           <button className="abk-button abk-button-small" type="button" onClick={() => scrollToSignup()}>Đăng ký học thử</button>
         </nav>
@@ -202,9 +163,12 @@ export default function PublicHome() {
                 </div>
                 <div className="abk-program-copy">
                   <p>{program.label}</p>
-                  <h3>{program.title}</h3>
+                  <h3><a href={programPath(program)}>{program.title}</a></h3>
                   <span>{program.description}</span>
-                  <button type="button" onClick={() => scrollToSignup(program.title)}>Chọn chương trình <b>→</b></button>
+                  <div className="abk-program-actions">
+                    <a href={programPath(program)} aria-label={`Xem chi tiết lớp ${program.title}`}>Xem chi tiết <b>→</b></a>
+                    <button type="button" onClick={() => scrollToSignup(program.title)}>Chọn chương trình <b>→</b></button>
+                  </div>
                 </div>
               </article>
             ))}
@@ -224,7 +188,12 @@ export default function PublicHome() {
               {branches.map((branch, index) => (
                 <article key={branch.name}>
                   <span>0{index + 1}</span>
-                  <div><h3>{branch.name}</h3><p>{branch.address}</p><small>{branch.detail} · <a href={mapsUrl(branch.address)} target="_blank" rel="noopener noreferrer">Chỉ đường ↗</a></small></div>
+                  <div>
+                    <h3>{branch.name}</h3>
+                    <p>{branchAddress(branch)}</p>
+                    {openingHoursLines(branch).map((line) => <small key={line}>Giờ mở cửa · {line}</small>)}
+                    <small>{branch.detail} · <a href={mapsUrl(branchAddress(branch))} target="_blank" rel="noopener noreferrer">Chỉ đường ↗</a></small>
+                  </div>
                 </article>
               ))}
             </div>
@@ -255,6 +224,7 @@ export default function PublicHome() {
                 <div><Image src={teacher.image} alt={teacher.name} fill sizes="(max-width: 800px) 50vw, 25vw" style={{ objectPosition: teacher.crop }} /></div>
                 <p><span>0{index + 1}</span> GIÁO VIÊN</p>
                 <h3>{teacher.name}</h3>
+                {isKnown(teacher.bio) && <span className="abk-teacher-bio">{teacher.bio}</span>}
               </article>
             ))}
           </div>
@@ -273,6 +243,20 @@ export default function PublicHome() {
           <a className="abk-round-link" href="https://video.angelbk.vn" aria-label="Mở trang Video của bé">PLAY<br />↗</a>
           <p>Truy cập kho video riêng của ANGEL BK để tìm và xem lại những màn trình diễn đáng nhớ.</p>
         </section>
+
+        {faqItems.length > 0 && (
+          <section className="abk-section abk-faq" id="hoi-dap">
+            <SectionIntro eyebrow="PHỤ HUYNH HAY HỎI" title={<>Câu hỏi<br /><em>thường gặp.</em></>} text="Chưa thấy câu trả lời bạn cần? Gọi 0933 309 336 để được tư vấn trực tiếp." />
+            <div className="abk-faq-list">
+              {faqItems.map((faq) => (
+                <details key={faq.question}>
+                  <summary><h3>{faq.question}</h3><b aria-hidden="true">+</b></summary>
+                  <p>{faq.answer}</p>
+                </details>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="abk-signup" id="dang-ky">
           <div className="abk-signup-visual">
@@ -303,7 +287,7 @@ export default function PublicHome() {
 
       <footer className="abk-footer">
         <div className="abk-footer-brand"><Image src="/images/angelbk/brand/angel-bk-logo.webp" alt="ANGEL BK" width={160} height={80} /><p>Mỗi bước nhảy — một bước trưởng thành.</p></div>
-        <div><h3>Địa chỉ</h3>{branches.map((branch) => <p key={branch.name}><b>{branch.name}</b> · <a href={mapsUrl(branch.address)} target="_blank" rel="noopener noreferrer">{branch.address}</a></p>)}</div>
+        <div><h3>Địa chỉ</h3>{branches.map((branch) => <p key={branch.name}><b>{branch.name}</b> · <a href={mapsUrl(branchAddress(branch))} target="_blank" rel="noopener noreferrer">{branchAddress(branch)}</a></p>)}</div>
         <div><h3>Liên hệ</h3><a href="tel:0933309336">0933 309 336</a><a href="https://video.angelbk.vn">Video của bé ↗</a></div>
         <button className="abk-button abk-button-light" type="button" onClick={() => scrollToSignup()}>Đăng ký học thử</button>
         <p className="abk-copyright">© {new Date().getFullYear()} ANGEL BK. All moves reserved.</p>

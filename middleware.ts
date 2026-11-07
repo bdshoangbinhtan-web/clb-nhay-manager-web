@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { managerPayrollRouteBlocked } from "@/lib/teacher-payroll-access";
-import { entryRedirect, isPublicSeoFile } from "@/lib/middleware-entry";
+import { entryRedirect, isPublicPage, isPublicSeoFile } from "@/lib/middleware-entry";
 
 const ADMIN_MANAGER_ROUTES = [
   "/dashboard",
@@ -73,7 +73,8 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // Các trang công khai cho mọi người, kể cả khi đã đăng nhập.
-  if (pathname === "/" || (pathname === "/privacy" || pathname === "/abk-family/privacy") || pathname === "/delete-account") return response;
+  // (trang chủ, chính sách, /lop-hoc/*) — danh sách nằm trong isPublicPage().
+  if (isPublicPage(pathname)) return response;
 
   // Chưa đăng nhập
   if (!user) {
