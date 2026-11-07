@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import PublicHome from "@/components/public/public-home";
+import { branches, branchJsonLd, faqPageJsonLd, jsonLdString, SITE_URL } from "@/lib/public-content";
 
-const SITE_URL = "https://angelbk.vn";
 const TITLE = "Lớp nhảy trẻ em Bình Tân, Quận 6 | ANGEL BK";
 const DESCRIPTION =
   "CLB nhảy hiphop & biểu diễn cho bé tại Bình Tân, Quận 6 TP.HCM. 2 cơ sở: 1033 Tỉnh Lộ 10 và 299A Tân Hòa Đông. Đăng ký học thử: 0933 309 336.";
@@ -26,25 +26,9 @@ export const metadata: Metadata = {
   },
 };
 
-// Only facts already published on the site. Ward, opening hours, geo and
-// prices are intentionally omitted until the owner confirms them.
-const branch = (id: string, name: string, street: string) => ({
-  "@type": "DanceSchool",
-  "@id": `${SITE_URL}/#${id}`,
-  name,
-  url: SITE_URL,
-  telephone: "+84933309336",
-  image: `${SITE_URL}/images/angelbk/hero/angel-bk-dance-crew.webp`,
-  address: {
-    "@type": "PostalAddress",
-    streetAddress: street,
-    addressLocality: "TP. Hồ Chí Minh",
-    addressCountry: "VN",
-  },
-  areaServed: ["Bình Tân", "Quận 6", "TP. Hồ Chí Minh"],
-  parentOrganization: { "@id": `${SITE_URL}/#organization` },
-  sameAs: SAME_AS,
-});
+// JSON-LD chỉ chứa dữ liệu thật: phường, giờ mở cửa, FAQ... lấy từ
+// lib/public-content.ts và tự bỏ qua mọi ô còn là TODO_OWNER.
+const faqPage = faqPageJsonLd();
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -60,8 +44,7 @@ const jsonLd = {
       slogan: "Mỗi bước nhảy – một bước trưởng thành.",
       sameAs: SAME_AS,
     },
-    branch("co-so-1", "ANGEL BK – Cơ sở 1 (Tỉnh Lộ 10)", "1033 Tỉnh Lộ 10"),
-    branch("co-so-2", "ANGEL BK – Cơ sở 2 (Tân Hòa Đông)", "299A Tân Hòa Đông"),
+    ...branches.map((branch) => branchJsonLd(branch, SAME_AS)),
     {
       "@type": "WebSite",
       "@id": `${SITE_URL}/#website`,
@@ -70,6 +53,7 @@ const jsonLd = {
       inLanguage: "vi-VN",
       publisher: { "@id": `${SITE_URL}/#organization` },
     },
+    ...(faqPage ? [faqPage] : []),
   ],
 };
 
@@ -78,7 +62,7 @@ export default function Home() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
+        dangerouslySetInnerHTML={{ __html: jsonLdString(jsonLd) }}
       />
       <PublicHome />
     </>
