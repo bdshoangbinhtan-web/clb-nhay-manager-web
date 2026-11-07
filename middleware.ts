@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { managerPayrollRouteBlocked } from "@/lib/teacher-payroll-access";
-import { entryRedirect } from "@/lib/middleware-entry";
+import { entryRedirect, isPublicSeoFile } from "@/lib/middleware-entry";
 
 const ADMIN_MANAGER_ROUTES = [
   "/dashboard",
@@ -38,6 +38,9 @@ function matchesRoute(pathname: string, routes: string[]) {
 }
 
 export async function middleware(request: NextRequest) {
+  // robots.txt, sitemap.xml và file xác minh Google phải mở công khai cho bot.
+  if (isPublicSeoFile(request.nextUrl.pathname)) return NextResponse.next();
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -146,5 +149,7 @@ export async function middleware(request: NextRequest) {
 export const config = {
   // Public marketing assets must bypass authentication so Next/Image can load
   // them for the public homepage without being redirected to /login.
+  // robots.txt, sitemap.xml and google<hex>.html are let through at the top of
+  // middleware() (isPublicSeoFile) so crawlers are never redirected to /login.
   matcher: ["/((?!_next/static|_next/image|images/|favicon.ico).*)"],
 };

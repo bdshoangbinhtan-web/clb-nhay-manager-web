@@ -3,6 +3,7 @@ import "./globals.css";
 import AppShell from "@/components/layout/app-shell";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://angelbk.vn"),
   title: {
     default: "ANGEL BK | Mỗi bước nhảy – một bước trưởng thành.",
     template: "%s | ANGEL BK",
