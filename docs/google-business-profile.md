@@ -19,7 +19,7 @@ Tài liệu để chủ web copy/dán khi tạo **2 hồ sơ Google Business Pro
 | Ghim bản đồ | Kéo ghim đúng cửa ra vào – TODO_OWNER kiểm tra | TODO_OWNER kiểm tra |
 | Số điện thoại chính | 0933 309 336 | 0933 309 336 |
 | Website | https://angelbk.vn/ | https://angelbk.vn/ |
-| Giờ mở cửa | TODO_OWNER (từng ngày, giờ mở – giờ đóng) | TODO_OWNER |
+| Giờ mở cửa | TODO_OWNER – chủ web ghi "cả ngày"; Google cần giờ mở – giờ đóng cụ thể từng ngày (hoặc chọn "Mở cửa 24 giờ" nếu đúng là 24/24) | TODO_OWNER (như cơ sở 1) |
 | Ngày thành lập (tùy chọn) | TODO_OWNER | TODO_OWNER |
 | Khu vực phục vụ (tùy chọn) | Bình Tân, Quận 6, TP. Hồ Chí Minh | Bình Tân, Quận 6, TP. Hồ Chí Minh |
 
@@ -59,7 +59,7 @@ Tạo 4 dịch vụ. Mô tả lấy nguyên từ website. Giá: chỉ điền kh
 
 | Tên dịch vụ | Mô tả (≤ 300 ký tự) | Giá |
 |---|---|---|
-| Lớp Kids cơ bản | Làm quen nhịp điệu, kiểm soát cơ thể và xây dựng sự tự tin từ những chuyển động đầu tiên. Chi tiết: angelbk.vn/lop-hoc/kids-co-ban | TODO_OWNER |
+| Lớp Kids cơ bản | Dành cho bé 4–7 tuổi, 60 phút/buổi, 15 bé/lớp, học từ 17h30 tại cả 2 cơ sở. Làm quen nhịp điệu, kiểm soát cơ thể và xây dựng sự tự tin từ những chuyển động đầu tiên. Chi tiết: angelbk.vn/lop-hoc/kids-co-ban | 600.000đ/tháng |
 | Lớp Kids nâng cao | Phát triển kỹ thuật, cá tính biểu diễn và khả năng làm việc cùng đội nhóm. Chi tiết: angelbk.vn/lop-hoc/kids-nang-cao | TODO_OWNER |
 | Crew & biểu diễn | Rèn luyện trong đội hình, chinh phục sân khấu và lưu lại những trải nghiệm đáng nhớ. Chi tiết: angelbk.vn/lop-hoc/crew-bieu-dien | TODO_OWNER |
 | Lớp cuối tuần | Một khoảng thời gian giàu năng lượng để con vận động, kết nối và thể hiện chính mình. Chi tiết: angelbk.vn/lop-hoc/lop-cuoi-tuan | TODO_OWNER |
@@ -80,11 +80,11 @@ Nếu một cơ sở không mở chương trình nào đó → bỏ dịch vụ 
 2. **Đăng ký cho bé học thử bằng cách nào?**
    Phụ huynh điền thông tin ở mục "Đăng ký học thử" trên angelbk.vn hoặc gọi 0933 309 336. ANGEL BK sẽ liên hệ và tư vấn lớp phù hợp cho bé.
 3. **Bé mấy tuổi thì học được?**
-   TODO_OWNER
+   Lớp Kids cơ bản dành cho bé 4–7 tuổi. Độ tuổi các lớp khác, phụ huynh vui lòng gọi 0933 309 336 để được tư vấn. *(Cập nhật khi có độ tuổi các lớp còn lại.)*
 4. **Học thử có mất phí không? Một buổi học thử diễn ra thế nào?**
    TODO_OWNER
 5. **Học phí lớp nhảy bao nhiêu?**
-   TODO_OWNER
+   Học phí lớp Kids cơ bản là 600.000đ/tháng. Học phí các lớp khác, phụ huynh vui lòng gọi 0933 309 336 để được tư vấn. *(Cập nhật khi có học phí các lớp còn lại.)*
 
 ---
 

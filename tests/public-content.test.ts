@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  ageFaqAnswer,
   answeredFaqs,
   branchAddress,
   branches,
@@ -16,6 +17,7 @@ import {
   programs,
   programTitleTag,
   TODO_OWNER,
+  tuitionFaqAnswer,
   type Branch,
   type Program,
 } from "../lib/public-content.ts";
@@ -57,7 +59,8 @@ test("nothing rendered or put in JSON-LD contains TODO with the current data", (
 test("FAQ only contains questions with real answers", () => {
   const answered = answeredFaqs();
   const unanswered = faqs.filter((faq) => faq.answer === TODO_OWNER);
-  assert.ok(unanswered.length >= 7, "các câu phụ huynh hay hỏi đã được soạn sẵn");
+  assert.ok(faqs.length >= 10, "các câu phụ huynh hay hỏi đã được soạn sẵn");
+  assert.ok(unanswered.length >= 1);
   assert.equal(answered.length + unanswered.length, faqs.length);
   assert.equal(answeredFaqs([{ question: "Q", answer: TODO_OWNER }]).length, 0);
   assert.equal(faqPageJsonLd([{ question: "Q", answer: TODO_OWNER }]), null);
@@ -66,7 +69,7 @@ test("FAQ only contains questions with real answers", () => {
 });
 
 test("unknown program facts are omitted; known ones appear in page and Course JSON-LD", () => {
-  const base = programs[0];
+  const base: Program = { ...programs[0], ageRange: TODO_OWNER, minAge: TODO_OWNER, maxAge: TODO_OWNER, schedule: TODO_OWNER, duration: TODO_OWNER, classSize: TODO_OWNER, tuitionVnd: TODO_OWNER, tuitionUnit: TODO_OWNER, branchIds: TODO_OWNER };
   assert.deepEqual(programFacts(base), []);
   const course = courseJsonLd(base);
   for (const key of ["typicalAgeRange", "offers", "hasCourseInstance"]) assert.equal(key in course, false, key);
@@ -114,4 +117,34 @@ test("public components only read TODO-able fields through isKnown/helpers", () 
       if (raw) assert.match(line, new RegExp(`isKnown\\(${raw[1]}\\.${raw[2]}\\)`), `${file}: ${line.trim()}`);
     }
   }
+});
+
+test("owner-confirmed Kids cơ bản data shows on page, JSON-LD and FAQ", () => {
+  const kids = programs.find((program) => program.slug === "kids-co-ban")!;
+  assert.deepEqual(programFacts(kids), [
+    { label: "Độ tuổi", value: "4–7 tuổi" },
+    { label: "Lịch học", value: "Từ 17h30" },
+    { label: "Thời lượng", value: "60 phút/buổi" },
+    { label: "Sĩ số", value: "15 bé/lớp" },
+    { label: "Học phí", value: "600.000đ/tháng" },
+  ]);
+  const course = courseJsonLd(kids) as Json;
+  assert.equal(course.typicalAgeRange, "4-7");
+  assert.equal(course.offers.price, 600000);
+  assert.equal(course.hasCourseInstance.length, 2);
+  // Các lớp chưa có số thật không được "mượn" số của Kids cơ bản.
+  for (const program of programs.filter((item) => item.slug !== "kids-co-ban")) assert.deepEqual(programFacts(program), [], program.slug);
+});
+
+test("age and tuition FAQ answers list only programs with real data", () => {
+  const empty = programs.map((program) => ({ ...program, ageRange: TODO_OWNER, tuitionVnd: TODO_OWNER }));
+  assert.equal(ageFaqAnswer(empty), TODO_OWNER);
+  assert.equal(tuitionFaqAnswer(empty), TODO_OWNER);
+  const age = ageFaqAnswer();
+  assert.match(String(age), /Kids cơ bản dành cho bé 4–7 tuổi/);
+  assert.match(String(age), /0933 309 336/);
+  assert.doesNotMatch(String(age), /Kids nâng cao/);
+  assert.match(String(tuitionFaqAnswer()), /Kids cơ bản là 600\.000đ\/tháng/);
+  const full = programs.map((program) => ({ ...program, ageRange: "4–7 tuổi" }));
+  assert.doesNotMatch(String(ageFaqAnswer(full)), /lớp khác/);
 });

@@ -72,17 +72,18 @@ export const programs: readonly Program[] = [
     description: "Làm quen nhịp điệu, kiểm soát cơ thể và xây dựng sự tự tin từ những chuyển động đầu tiên.",
     image: "/images/angelbk/programs/kids-dance-energy.webp",
     crop: "center 30%",
-    ageRange: TODO_OWNER,
-    minAge: TODO_OWNER,
-    maxAge: TODO_OWNER,
-    schedule: TODO_OWNER,
-    duration: TODO_OWNER,
-    classSize: TODO_OWNER,
-    tuitionVnd: TODO_OWNER,
-    tuitionUnit: TODO_OWNER,
+    // Chủ web xác nhận 07/11/2026.
+    ageRange: "4–7 tuổi",
+    minAge: 4,
+    maxAge: 7,
+    schedule: "Từ 17h30",
+    duration: "60 phút/buổi",
+    classSize: "15 bé/lớp",
+    tuitionVnd: 600000,
+    tuitionUnit: "/tháng",
     longDescription: TODO_OWNER,
     highlights: TODO_OWNER,
-    branchIds: TODO_OWNER,
+    branchIds: ["co-so-1", "co-so-2"],
   },
   {
     slug: "kids-nang-cao",
@@ -155,6 +156,13 @@ export function formatVnd(amount: number): string {
   return `${new Intl.NumberFormat("vi-VN").format(amount)}đ`;
 }
 
+/** "600.000đ/tháng" — null nếu chưa có học phí thật. */
+export function tuitionText(program: Program): string | null {
+  if (!isKnown(program.tuitionVnd)) return null;
+  const unit = isKnown(program.tuitionUnit) ? program.tuitionUnit.trim() : "";
+  return `${formatVnd(program.tuitionVnd)}${unit && !unit.startsWith("/") ? " " : ""}${unit}`;
+}
+
 /** Các dòng thông tin nhanh của chương trình — CHỈ những ô đã có thật. */
 export function programFacts(program: Program): { label: string; value: string }[] {
   const facts: { label: string; value: string }[] = [];
@@ -162,10 +170,8 @@ export function programFacts(program: Program): { label: string; value: string }
   if (isKnown(program.schedule)) facts.push({ label: "Lịch học", value: program.schedule });
   if (isKnown(program.duration)) facts.push({ label: "Thời lượng", value: program.duration });
   if (isKnown(program.classSize)) facts.push({ label: "Sĩ số", value: program.classSize });
-  if (isKnown(program.tuitionVnd)) {
-    const unit = isKnown(program.tuitionUnit) ? ` ${program.tuitionUnit}` : "";
-    facts.push({ label: "Học phí", value: `${formatVnd(program.tuitionVnd)}${unit}` });
-  }
+  const tuition = tuitionText(program);
+  if (tuition) facts.push({ label: "Học phí", value: tuition });
   return facts;
 }
 
@@ -271,6 +277,26 @@ export function branchSchemaId(branch: Branch): string {
 
 export type Faq = { question: string; answer: Owned<string> };
 
+const CALL_FOR_OTHERS = `Thông tin các lớp khác, phụ huynh vui lòng gọi ${PHONE_DISPLAY} để được tư vấn.`;
+
+/** "Lớp A dành cho bé 4–7 tuổi; lớp B …" — chỉ lớp đã có độ tuổi thật. */
+export function ageFaqAnswer(list: readonly Program[] = programs): Owned<string> {
+  const known = list.filter((program) => isKnown(program.ageRange));
+  if (!known.length) return TODO_OWNER;
+  const parts = known.map((program) => `lớp ${program.title} dành cho bé ${program.ageRange}`);
+  const text = `Tại ANGEL BK, ${parts.join("; ")}.`;
+  return known.length < list.length ? `${text} ${CALL_FOR_OTHERS}` : text;
+}
+
+/** "Học phí lớp A là 600.000đ /tháng; …" — chỉ lớp đã có học phí thật. */
+export function tuitionFaqAnswer(list: readonly Program[] = programs): Owned<string> {
+  const known = list.filter((program) => isKnown(program.tuitionVnd));
+  if (!known.length) return TODO_OWNER;
+  const parts = known.map((program) => `lớp ${program.title} là ${tuitionText(program)}`);
+  const text = `Học phí ${parts.join("; ")}.`;
+  return known.length < list.length ? `${text} ${CALL_FOR_OTHERS}` : text;
+}
+
 export const faqs: readonly Faq[] = [
   // Câu trả lời lấy nguyên từ thông tin đã công bố trên web.
   {
@@ -286,13 +312,14 @@ export const faqs: readonly Faq[] = [
     answer: "Phụ huynh xem lại các màn trình diễn của bé tại kho video riêng của ANGEL BK: video.angelbk.vn.",
   },
   // Câu phụ huynh hay hỏi — CẦN CHỦ WEB TRẢ LỜI. Còn TODO_OWNER thì tự ẩn.
-  { question: "Bé mấy tuổi thì học được?", answer: TODO_OWNER },
+  // Hai câu dưới tự soạn từ dữ liệu lớp ở trên (chỉ các lớp đã có số thật).
+  { question: "Bé mấy tuổi thì học được?", answer: ageFaqAnswer() },
   { question: "Học thử diễn ra như thế nào? Có mất phí không?", answer: TODO_OWNER },
   { question: "Bé nên mặc gì khi đi học nhảy?", answer: TODO_OWNER },
   { question: "Phụ huynh có được xem bé học không?", answer: TODO_OWNER },
   { question: "Bé nhút nhát có theo được lớp không?", answer: TODO_OWNER },
   { question: "Bé có được tham gia biểu diễn không?", answer: TODO_OWNER },
-  { question: "Học phí lớp nhảy bao nhiêu?", answer: TODO_OWNER },
+  { question: "Học phí lớp nhảy bao nhiêu?", answer: tuitionFaqAnswer() },
 ];
 
 /** Chỉ các câu đã có câu trả lời thật. */
@@ -384,7 +411,7 @@ export function courseJsonLd(program: Program): Json {
       price: program.tuitionVnd,
       priceCurrency: "VND",
       url,
-      ...(isKnown(program.tuitionUnit) ? { description: `Học phí ${program.tuitionUnit}` } : {}),
+      description: `Học phí ${tuitionText(program)}`,
     };
   }
   if (isKnown(program.branchIds)) {
